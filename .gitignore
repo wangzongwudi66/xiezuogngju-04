@@ -9,3 +9,4 @@ coverage/
 *.tsbuildinfo
 npm-debug.log*
 .next-dev*.log
+.local-data/

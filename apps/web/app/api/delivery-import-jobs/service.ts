@@ -2,6 +2,7 @@ import { parseWordDelivery, parseWordDeliveryText } from "@aigc/domain";
 import type { DeliveryPackageDraftInput, WordDeliveryIssue } from "@aigc/domain";
 import { buildDeliveryPackageDraftFromParsed } from "../../ui/delivery-text-parser";
 import type { DeliveryImportJob } from "../../ui/workspace-persistence";
+import { readDeliveryImportJobResult, readDeliveryImportJobs, saveDeliveryImportJobResult } from "./persistence";
 
 export type DeliveryImportSource = "docx" | "text";
 
@@ -29,23 +30,18 @@ export type DeliveryImportJobResponse =
       job: DeliveryImportJob;
     };
 
-const deliveryImportJobResults = new Map<string, DeliveryImportJobResponse>();
-
 export async function createDeliveryImportJob(input: DeliveryImportJobRequest) {
   const result = await runDeliveryImportJob(input);
-  deliveryImportJobResults.set(result.job.id, result);
+  await saveDeliveryImportJobResult(result);
   return result;
 }
 
-export function getDeliveryImportJobResult(jobId: string) {
-  return deliveryImportJobResults.get(jobId) ?? null;
+export async function getDeliveryImportJobResult(jobId: string) {
+  return readDeliveryImportJobResult(jobId);
 }
 
-export function listDeliveryImportJobs(projectId?: string) {
-  return Array.from(deliveryImportJobResults.values())
-    .map((result) => result.job)
-    .filter((job) => !projectId || job.projectId === projectId)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+export async function listDeliveryImportJobs(projectId?: string) {
+  return readDeliveryImportJobs(projectId);
 }
 
 export async function runDeliveryImportJob(input: DeliveryImportJobRequest): Promise<DeliveryImportJobResponse> {

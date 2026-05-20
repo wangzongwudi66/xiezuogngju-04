@@ -1,7 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDeliveryImportJob, getDeliveryImportJobResult, listDeliveryImportJobs, runDeliveryImportJob } from "./service";
 
 describe("delivery import job service", () => {
+  let storeDir: string;
+
+  beforeEach(async () => {
+    storeDir = join(tmpdir(), `aigc-delivery-import-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(storeDir, { recursive: true });
+    process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
+  });
+
+  afterEach(async () => {
+    delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
+    await rm(storeDir, { recursive: true, force: true });
+  });
+
   it("returns a draft and successful job for pasted text", async () => {
     const result = await runDeliveryImportJob({
       source: "text",
@@ -61,7 +77,7 @@ describe("delivery import job service", () => {
       rawText: "第 1 集 开场\n正文"
     });
 
-    expect(getDeliveryImportJobResult(result.job.id)).toEqual(result);
-    expect(listDeliveryImportJobs("project-polling")).toContainEqual(result.job);
+    await expect(getDeliveryImportJobResult(result.job.id)).resolves.toEqual(result);
+    await expect(listDeliveryImportJobs("project-polling")).resolves.toContainEqual(result.job);
   });
 });

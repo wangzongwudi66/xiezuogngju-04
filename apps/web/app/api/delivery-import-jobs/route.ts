@@ -2,17 +2,17 @@ import { NextResponse } from "next/server";
 import { createDeliveryImportJob, getDeliveryImportJobResult, listDeliveryImportJobs } from "./service";
 import type { DeliveryImportSource } from "./service";
 
-export function GET(request: Request) {
+export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const jobId = searchParams.get("id");
 
   if (jobId) {
-    const result = getDeliveryImportJobResult(jobId);
+    const result = await getDeliveryImportJobResult(jobId);
     return result ? NextResponse.json(result) : NextResponse.json({ error: "delivery_import_job_not_found" }, { status: 404 });
   }
 
   return NextResponse.json({
-    jobs: listDeliveryImportJobs(searchParams.get("projectId") ?? undefined)
+    jobs: await listDeliveryImportJobs(searchParams.get("projectId") ?? undefined)
   });
 }
 
