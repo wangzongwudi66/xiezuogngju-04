@@ -45,7 +45,6 @@ import {
   loginAsUser,
   logout,
   markNotificationRead,
-  parseWordDelivery,
   publishDeliveryPackage,
   registerUser,
   rejectDeliveryPackage,
@@ -76,7 +75,7 @@ import type {
   WorkspaceState
 } from "@aigc/domain";
 import { buildTodayTasks } from "./dashboard-tasks";
-import { buildDeliveryPackageDraftFromParsed, buildTextDeliveryPackageDraft } from "./delivery-text-parser";
+import { submitDocxDeliveryImport, submitTextDeliveryImport } from "./delivery-import-api";
 import { clearM2WorkspacePersistence, readM2WorkspacePersistence, writeM2WorkspacePersistence } from "./workspace-persistence";
 import type { DeliveryImportJob } from "./workspace-persistence";
 
@@ -467,6 +466,10 @@ export function M1Dashboard() {
     );
   }
 
+  function replaceDeliveryImportJob(jobId: string, nextJob: DeliveryImportJob) {
+    setDeliveryImportJobs((items) => items.map((item) => (item.id === jobId ? nextJob : item)));
+  }
+
   function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     runMutation((current) => {
@@ -552,7 +555,7 @@ export function M1Dashboard() {
     setActiveModule("交稿中心");
   }
 
-  function handleCreateTextDelivery() {
+  async function handleCreateTextDelivery() {
     if (!canSubmitDelivery) {
       setActionMessage({ tone: "error", text: "当前身份不能创建交稿包。请让主编剧或统筹处理。" });
       return;
@@ -564,63 +567,61 @@ export function M1Dashboard() {
       fileName: "pasted-word-text.txt",
       declaredRangeText: wordDeclaredRangeDraft
     });
-    const parsed = buildTextDeliveryPackageDraft({
-      projectId: selectedProject.id,
-      uploadedByUserId: currentUserId,
-      rawText: wordTextDraft,
-      declaredRangeText: wordDeclaredRangeDraft
-    });
-
-    if (!parsed.ok) {
-      setWordParseFeedback({
-        tone: "error",
-        title: "解析失败，可手动粘贴单集补救",
-        issues: parsed.issues,
-        remedies: parsed.remedies
-      });
-      updateDeliveryImportJob(jobId, {
-        status: "failed",
-        issueCount: parsed.issues.length,
-        errorText: parsed.issues[0]?.message ?? "未识别到集边界"
-      });
-      setActionMessage({ tone: "error", text: "没有识别到集边界。可改用手动粘贴单集补救，不阻塞后续确认流程。" });
-      return;
-    }
 
     try {
-      const next = createDeliveryPackageDraft(state, parsed.draft);
+      const result = await submitTextDeliveryImport({
+        projectId: selectedProject.id,
+        uploadedByUserId: currentUserId,
+        rawText: wordTextDraft,
+        declaredRangeText: wordDeclaredRangeDraft
+      });
+
+      if (!result.ok) {
+        replaceDeliveryImportJob(jobId, result.job);
+        setWordParseFeedback({
+          tone: "error",
+          title: "解析失败，可手动粘贴单集补救",
+          issues: result.issues,
+          remedies: result.remedies
+        });
+        setActionMessage({ tone: "error", text: "没有识别到集边界。可改用手动粘贴单集补救，不阻塞后续确认流程。" });
+        return;
+      }
+
+      const next = createDeliveryPackageDraft(state, result.draft);
       const created = next.deliveryPackages.at(-1);
       if (created) {
         setSelectedDeliveryPackageId(created.id);
         setDeliveryParseIssuesByPackageId((items) => ({
           ...items,
-          [created.id]: parsed.issues
+          [created.id]: result.issues
         }));
-        updateDeliveryImportJob(jobId, {
-          status: "success",
-          deliveryPackageId: created.id,
-          issueCount: parsed.issues.length
+        replaceDeliveryImportJob(jobId, {
+          ...result.job,
+          deliveryPackageId: created.id
         });
+      } else {
+        replaceDeliveryImportJob(jobId, result.job);
       }
       setState(next);
       setActionMessage({ tone: "success", text: "文本解析已生成交稿包草稿：请在确认页检查 warnings 并勾选实际变更集。" });
       setWordParseFeedback({
-        tone: parsed.issues.length > 0 ? "warning" : "success",
-        title: parsed.issues.length > 0 ? "解析完成，存在 warnings" : "解析完成，已进入确认页",
-        issues: parsed.issues
+        tone: result.issues.length > 0 ? "warning" : "success",
+        title: result.issues.length > 0 ? "解析完成，存在 warnings" : "解析完成，已进入确认页",
+        issues: result.issues
       });
       setActiveModule("交稿中心");
     } catch (error) {
-      setWordParseFeedback({
-        tone: "error",
-        title: "解析已完成，但交稿包草稿未创建",
-        issues: parsed.issues,
-        remedies: [formatActionError(error), "可手动粘贴单集补救，或调整声明范围后重新解析。"]
-      });
       updateDeliveryImportJob(jobId, {
         status: "failed",
-        issueCount: parsed.issues.length,
+        issueCount: 1,
         errorText: formatActionError(error)
+      });
+      setWordParseFeedback({
+        tone: "error",
+        title: "解析请求失败",
+        issues: [],
+        remedies: [formatActionError(error), "可稍后重试，或先创建演示交稿包继续确认流程。"]
       });
       setActionMessage({ tone: "error", text: formatActionError(error) });
     }
@@ -638,54 +639,46 @@ export function M1Dashboard() {
       fileName: file.name,
       declaredRangeText
     });
-    const parsed = await parseWordDelivery(file, {
-      declaredRange: declaredRangeText.trim() || undefined,
-      fileName: file.name
-    });
-
-    if (!parsed.ok) {
-      setWordParseFeedback({
-        tone: "error",
-        title: "Word 解析失败，可手动粘贴单集补救",
-        issues: [...parsed.warnings, ...parsed.errors],
-        remedies: parsed.remedies
-      });
-      updateDeliveryImportJob(jobId, {
-        status: "failed",
-        issueCount: parsed.warnings.length + parsed.errors.length,
-        errorText: parsed.errors[0]?.message ?? "Word 解析失败"
-      });
-      setActionMessage({ tone: "error", text: "Word 没有解析出可靠的单集内容。可以改用手动粘贴单集补救。" });
-      return "failed";
-    }
-
-    const built = buildDeliveryPackageDraftFromParsed({
-      projectId: selectedProject.id,
-      uploadedByUserId: currentUserId,
-      sourceFileName: file.name,
-      parsed
-    });
-
     try {
-      const next = createDeliveryPackageDraft(state, built.draft);
+      const result = await submitDocxDeliveryImport({
+        projectId: selectedProject.id,
+        uploadedByUserId: currentUserId,
+        declaredRangeText,
+        file
+      });
+
+      if (!result.ok) {
+        replaceDeliveryImportJob(jobId, result.job);
+        setWordParseFeedback({
+          tone: "error",
+          title: "Word 解析失败，可手动粘贴单集补救",
+          issues: result.issues,
+          remedies: result.remedies
+        });
+        setActionMessage({ tone: "error", text: "Word 没有解析出可靠的单集内容。可以改用手动粘贴单集补救。" });
+        return "failed";
+      }
+
+      const next = createDeliveryPackageDraft(state, result.draft);
       const created = next.deliveryPackages.at(-1);
       if (created) {
         setSelectedDeliveryPackageId(created.id);
         setDeliveryParseIssuesByPackageId((items) => ({
           ...items,
-          [created.id]: built.issues
+          [created.id]: result.issues
         }));
-        updateDeliveryImportJob(jobId, {
-          status: "success",
+        replaceDeliveryImportJob(jobId, {
+          ...result.job,
           deliveryPackageId: created.id,
-          issueCount: built.issues.length
         });
+      } else {
+        replaceDeliveryImportJob(jobId, result.job);
       }
       setState(next);
       setWordParseFeedback({
-        tone: built.issues.length > 0 ? "warning" : "success",
-        title: built.issues.length > 0 ? "Word 解析完成，存在 warnings" : "Word 解析完成，已进入确认页",
-        issues: built.issues
+        tone: result.issues.length > 0 ? "warning" : "success",
+        title: result.issues.length > 0 ? "Word 解析完成，存在 warnings" : "Word 解析完成，已进入确认页",
+        issues: result.issues
       });
       setActionMessage({ tone: "success", text: "Word 已解析成交稿包草稿：请在确认页检查 warnings 并勾选实际变更集。" });
       setActiveModule("交稿中心");
@@ -693,13 +686,13 @@ export function M1Dashboard() {
     } catch (error) {
       setWordParseFeedback({
         tone: "error",
-        title: "Word 已解析，但交稿包草稿未创建",
-        issues: built.issues,
-        remedies: [formatActionError(error), "可改用手动粘贴单集补救，或调整声明范围后重新解析。"]
+        title: "Word 解析请求失败",
+        issues: [],
+        remedies: [formatActionError(error), "可改用手动粘贴单集补救，或稍后重新解析。"]
       });
       updateDeliveryImportJob(jobId, {
         status: "failed",
-        issueCount: built.issues.length,
+        issueCount: 1,
         errorText: formatActionError(error)
       });
       setActionMessage({ tone: "error", text: formatActionError(error) });
