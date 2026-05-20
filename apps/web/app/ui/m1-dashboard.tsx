@@ -13,8 +13,10 @@ import {
   Clapperboard,
   ClipboardList,
   Command,
+  Download,
   FileText,
   FolderKanban,
+  GitCompareArrows,
   Home,
   Image,
   Inbox,
@@ -25,34 +27,52 @@ import {
   Pencil,
   Save,
   Search,
+  Send,
   Settings,
   ShieldCheck,
   Sparkles,
   UserPlus,
   Users
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import {
   archiveProject,
   assignEpisodes,
+  createDeliveryPackageDraft,
   createProject,
   loginAsUser,
   logout,
   markNotificationRead,
+  publishDeliveryPackage,
   registerUser,
+  rejectDeliveryPackage,
   saveProjectMemberRoles,
   seedWorkspace,
   selectCurrentUser,
+  selectDeliveryPackageDetail,
+  selectEpisodeScriptTimeline,
   selectMyEpisodes,
   selectPermissions,
   selectPrimaryRole,
   selectProjectMembers,
   selectProjectOverview,
   selectUnreadNotifications,
+  submitDeliveryPackageForReview,
+  updateDeliveryPackageConfirmation,
   updateProject,
   updateProjectMemberPermissions
 } from "@aigc/domain";
-import type { EpisodeAssignment, EpisodeProductionStatus, PermissionKey, ProjectRole, WorkspaceState } from "@aigc/domain";
+import type {
+  DeliveryPackageDraftInput,
+  DeliveryPackageStatus,
+  EpisodeAssignment,
+  EpisodeProductionStatus,
+  PermissionKey,
+  ProjectRole,
+  WorkspaceState
+} from "@aigc/domain";
+import { buildTodayTasks } from "./dashboard-tasks";
 
 const roleLabels: Record<ProjectRole, string> = {
   owner: "项目所有者",
@@ -97,17 +117,176 @@ const statusLabels: Record<EpisodeProductionStatus, string> = {
   done: "已完成"
 };
 
-const shortcutItems = [
+const deliveryStatusLabels: Record<DeliveryPackageStatus, string> = {
+  draft: "草稿",
+  pending_review: "待发布",
+  published: "已发布",
+  rejected: "已驳回"
+};
+
+type NavigationItem = {
+  icon: LucideIcon;
+  label: string;
+};
+
+const baseShortcutItems: NavigationItem[] = [
   { label: "集数分配", icon: ClipboardList },
   { label: "素材库", icon: Image },
   { label: "模型与模板", icon: BookOpen },
-  { label: "文档中心", icon: FileText },
+  { label: "交稿中心", icon: FileText },
   { label: "团队成员", icon: Users },
   { label: "数据报表", icon: BarChart3 }
 ];
 
+type MockDeliveryKey = "range-1-10" | "range-1-20" | "single-replace-5";
+
+const mockDeliveryTemplates: Array<{
+  key: MockDeliveryKey;
+  label: string;
+  description: string;
+  build: (projectId: string, uploadedByUserId: string) => DeliveryPackageDraftInput;
+}> = [
+  {
+    key: "range-1-10",
+    label: "range 1-10 初版交稿",
+    description: "预置第 1-10 集文本，默认确认 1、2、5 集有实际变更。",
+    build: (projectId, uploadedByUserId) => ({
+      projectId,
+      uploadedByUserId,
+      type: "range",
+      declaredEpisodeFrom: 1,
+      declaredEpisodeTo: 10,
+      sourceFileName: "mock-jc-1-10.docx",
+      title: "M2 mock：1-10 初版交稿",
+      episodes: Array.from({ length: 10 }, (_, index) => {
+        const episodeNo = index + 1;
+        return {
+          episodeNo,
+          title: `第 ${episodeNo} 集`,
+          content: `第 ${episodeNo} 集\n矿山入口版本 A。镜头强调角色目标与本集制作重点。`
+        };
+      }),
+      confirmedEpisodeNos: [1, 2, 5]
+    })
+  },
+  {
+    key: "range-1-20",
+    label: "range 1-20 retroactive",
+    description: "模拟后续交稿，确认第 2 集回改、第 11-12 集新增。",
+    build: (projectId, uploadedByUserId) => ({
+      projectId,
+      uploadedByUserId,
+      type: "range",
+      declaredEpisodeFrom: 1,
+      declaredEpisodeTo: 20,
+      sourceFileName: "mock-jc-1-20-retro.docx",
+      title: "M2 mock：1-20 后续交稿",
+      episodes: Array.from({ length: 20 }, (_, index) => {
+        const episodeNo = index + 1;
+        return {
+          episodeNo,
+          title: `第 ${episodeNo} 集`,
+          content:
+            episodeNo === 2
+              ? "第 2 集\nretroactive 版本：线索提前露出，制作侧需要更新分镜重点。"
+              : `第 ${episodeNo} 集\n二次交稿版本 B。保留项目主线，并补充本集制作提示。`
+        };
+      }),
+      confirmedEpisodeNos: [2, 11, 12]
+    })
+  },
+  {
+    key: "single-replace-5",
+    label: "single_replace 第 5 集",
+    description: "整集替换第 5 集，只确认这一集变化。",
+    build: (projectId, uploadedByUserId) => ({
+      projectId,
+      uploadedByUserId,
+      type: "single_replace",
+      declaredEpisodeFrom: 5,
+      declaredEpisodeTo: 5,
+      sourceFileName: "mock-jc-ep5-replace.docx",
+      title: "M2 mock：第 5 集整集替换",
+      episodes: [
+        {
+          episodeNo: 5,
+          title: "第 5 集",
+          content: "第 5 集\nsingle_replace 版本：整集重写为矿道坍塌救援线，旧分段全部失效。"
+        }
+      ],
+      confirmedEpisodeNos: [5]
+    })
+  }
+];
+
+function buildRangeDeliveryDraftInput(
+  projectId: string,
+  uploadedByUserId: string,
+  from: number,
+  to: number,
+  confirmedEpisodeNos: number[],
+  title: string,
+  sourceFileName: string
+): DeliveryPackageDraftInput {
+  return {
+    projectId,
+    uploadedByUserId,
+    type: "range",
+    declaredEpisodeFrom: from,
+    declaredEpisodeTo: to,
+    sourceFileName,
+    title,
+    episodes: Array.from({ length: to - from + 1 }, (_, index) => {
+      const episodeNo = from + index;
+      return {
+        episodeNo,
+        title: `第 ${episodeNo} 集`,
+        content: `第 ${episodeNo} 集\nM2 原型交稿版本。开场目标、转场节奏与制作提示已整理，供发布后作为当前生效剧本。`
+      };
+    }),
+    confirmedEpisodeNos
+  };
+}
+
+function buildM2PrototypeWorkspace(): WorkspaceState {
+  const projectId = "project-jincheng";
+  const headWriterId = "user-head-writer";
+  const reviewerId = "user-owner";
+  let next = seedWorkspace;
+
+  next = createDeliveryPackageDraft(
+    next,
+    buildRangeDeliveryDraftInput(projectId, headWriterId, 3, 4, [3, 4], "M2 原型：已发布交稿包", "m2-published-ep3-4.docx")
+  );
+  const publishedId = next.deliveryPackages.at(-1)?.id ?? "";
+  next = submitDeliveryPackageForReview(next, publishedId, headWriterId);
+  next = publishDeliveryPackage(next, publishedId, reviewerId);
+
+  next = createDeliveryPackageDraft(
+    next,
+    buildRangeDeliveryDraftInput(projectId, headWriterId, 12, 13, [12], "M2 原型：待发布交稿包", "m2-pending-ep12-13.docx")
+  );
+  const pendingId = next.deliveryPackages.at(-1)?.id ?? "";
+  next = submitDeliveryPackageForReview(next, pendingId, headWriterId);
+
+  next = createDeliveryPackageDraft(
+    next,
+    buildRangeDeliveryDraftInput(projectId, headWriterId, 27, 28, [27], "M2 原型：已驳回交稿包", "m2-rejected-ep27-28.docx")
+  );
+  const rejectedId = next.deliveryPackages.at(-1)?.id ?? "";
+  next = submitDeliveryPackageForReview(next, rejectedId, headWriterId);
+  next = rejectDeliveryPackage(next, rejectedId, reviewerId, "声明范围与实际变更集不一致，需主编剧重新确认。");
+
+  next = createDeliveryPackageDraft(
+    next,
+    buildRangeDeliveryDraftInput(projectId, headWriterId, 31, 34, [31, 34], "M2 原型：草稿交稿包", "m2-draft-ep31-34.docx")
+  );
+
+  return next;
+}
+
 export function M1Dashboard() {
-  const [state, setState] = useState<WorkspaceState>(seedWorkspace);
+  const [state, setState] = useState<WorkspaceState>(() => buildM2PrototypeWorkspace());
   const [selectedProjectId, setSelectedProjectId] = useState(seedWorkspace.projects[0].id);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [projectDraft, setProjectDraft] = useState({ name: "裂隙边境", code: "LX", episodeCount: 60 });
@@ -127,9 +306,13 @@ export function M1Dashboard() {
   });
   const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>("episode-jc-3");
   const [activeModule, setActiveModule] = useState("项目总览");
+  const [selectedMockDeliveryKey, setSelectedMockDeliveryKey] = useState<MockDeliveryKey>("range-1-10");
+  const [selectedDeliveryPackageId, setSelectedDeliveryPackageId] = useState<string | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("范围声明需要再确认");
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [actionMessage, setActionMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
 
   const currentUser = selectCurrentUser(state);
   const activeProjects = state.projects.filter((project) => project.status === "active");
@@ -139,30 +322,60 @@ export function M1Dashboard() {
     return <AuthGate state={state} setState={setState} />;
   }
 
+  const currentUserId = currentUser.id;
   const permissions = selectPermissions(state, currentUser.id, selectedProject.id);
   const primaryRole = selectPrimaryRole(state, currentUser.id, selectedProject.id);
+  const canReviewDelivery = primaryRole === "owner" || primaryRole === "coordinator";
+  const canSubmitDelivery = primaryRole === "head_writer" || canReviewDelivery;
   const overview = selectProjectOverview(state, selectedProject.id);
   const projectMembers = selectProjectMembers(state, selectedProject.id);
   const myEpisodes = selectMyEpisodes(state, currentUser.id);
   const unreadNotifications = selectUnreadNotifications(state, currentUser.id);
   const inProgressCount = overview.episodes.filter((episode) => episode.productionStatus === "in_progress").length;
-  const pendingCount = overview.episodes.filter((episode) => episode.productionStatus === "key_update").length;
-  const todayTasks = buildTodayTasks(myEpisodes, selectedProject.name);
-  const recentUpdates = buildRecentUpdates(overview.episodes, selectedProject.name);
-  const selectedEpisode = overview.episodes.find((episode) => episode.id === selectedEpisodeId) ?? overview.episodes[0];
-  const assignmentSummary = buildAssignmentSummary(overview.episodes);
-  const searchResults = buildSearchResults(searchQuery, activeProjects, projectMembers, overview.episodes);
+  const canViewFullProject = permissions.canViewAllEpisodes;
+  const visibleEpisodes = canViewFullProject
+    ? overview.episodes
+    : overview.episodes.filter((episode) => episode.assignments.some((assignment) => assignment.userId === currentUser.id));
+  const todayTasks = buildTodayTasks(myEpisodes);
+  const recentUpdates = buildRecentUpdates(visibleEpisodes, selectedProject.name);
+  const selectedEpisode = visibleEpisodes.find((episode) => episode.id === selectedEpisodeId) ?? visibleEpisodes[0] ?? null;
+  const assignmentSummary = buildAssignmentSummary(visibleEpisodes);
+  const shortcutItems = buildShortcutItems(permissions, primaryRole);
+  const navigationItems = buildNavigationItems(permissions, primaryRole);
+  const allowedModules = new Set([...shortcutItems.map((item) => item.label), ...navigationItems.map((item) => item.label), "集工作台"]);
+  const effectiveActiveModule = allowedModules.has(activeModule) ? activeModule : "项目总览";
+  const searchableMembers = permissions.canManageMembers || permissions.canViewAllEpisodes ? projectMembers : [];
+  const searchResults = buildSearchResults(searchQuery, activeProjects, searchableMembers, visibleEpisodes);
+  const currentProjectParticipation = canViewFullProject ? myEpisodes.length : visibleEpisodes.length;
+  const projectDeliveryPackages = state.deliveryPackages.filter((deliveryPackage) => deliveryPackage.projectId === selectedProject.id);
+  const activeDeliveryPackageId =
+    selectedDeliveryPackageId && projectDeliveryPackages.some((deliveryPackage) => deliveryPackage.id === selectedDeliveryPackageId)
+      ? selectedDeliveryPackageId
+      : projectDeliveryPackages.at(-1)?.id ?? null;
+  const activeDeliveryPackage = activeDeliveryPackageId ? selectDeliveryPackageDetail(state, activeDeliveryPackageId) : null;
+  const deliveryPackageDetails = projectDeliveryPackages
+    .map((deliveryPackage) => selectDeliveryPackageDetail(state, deliveryPackage.id))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  function runMutation(mutator: (current: WorkspaceState) => WorkspaceState, successText: string) {
+    try {
+      setState((current) => mutator(current));
+      setActionMessage({ tone: "success", text: successText });
+    } catch (error) {
+      setActionMessage({ tone: "error", text: formatActionError(error) });
+    }
+  }
 
   function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setState((current) => {
+    runMutation((current) => {
       const next = createProject(current, projectDraft);
       const created = next.projects.at(-1);
       if (created) {
         setSelectedProjectId(created.id);
       }
       return next;
-    });
+    }, "项目已创建");
   }
 
   function handleStartNewProject() {
@@ -176,12 +389,12 @@ export function M1Dashboard() {
       return;
     }
 
-    setState((current) => updateProject(current, editingProjectId, projectDraft));
+    runMutation((current) => updateProject(current, editingProjectId, projectDraft), "项目已保存");
     setEditingProjectId(null);
   }
 
   function handleArchiveProject(projectId: string) {
-    setState((current) => archiveProject(current, projectId));
+    runMutation((current) => archiveProject(current, projectId), "项目已归档");
     const nextProject = activeProjects.find((project) => project.id !== projectId);
     if (nextProject) {
       setSelectedProjectId(nextProject.id);
@@ -190,42 +403,117 @@ export function M1Dashboard() {
 
   function handleUpsertMember(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setState((current) =>
+    runMutation((current) =>
       saveProjectMemberRoles(current, {
         projectId: selectedProject.id,
         ...memberDraft
-      })
+      }),
+      "成员身份已保存"
     );
   }
 
   function handleUpdateMemberPermissions(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setState((current) =>
+    runMutation((current) =>
       updateProjectMemberPermissions(current, {
         projectId: selectedProject.id,
         ...permissionDraft
-      })
+      }),
+      "成员权限已保存"
     );
   }
 
   function handleAssignEpisodes(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setState((current) =>
+    runMutation((current) =>
       assignEpisodes(current, {
         projectId: selectedProject.id,
         userId: assignmentDraft.userId,
         episodeFrom: assignmentDraft.episodeFrom,
         episodeTo: assignmentDraft.episodeTo,
         responsibility: assignmentDraft.responsibility
-      })
+      }),
+      "集数分配已保存"
+    );
+  }
+
+  function handleCreateMockDelivery() {
+    const template = mockDeliveryTemplates.find((item) => item.key === selectedMockDeliveryKey) ?? mockDeliveryTemplates[0];
+
+    runMutation((current) => {
+      const next = createDeliveryPackageDraft(current, template.build(selectedProject.id, currentUserId));
+      const created = next.deliveryPackages.at(-1);
+      if (created) {
+        setSelectedDeliveryPackageId(created.id);
+      }
+      return next;
+    }, "已创建模拟交稿包：先确认哪些集真的改过，再提交给统筹发布。");
+    setActiveModule("交稿中心");
+  }
+
+  function handleUpdateConfirmedEpisode(deliveryPackageId: string, episodeNo: number, checked: boolean) {
+    const detail = selectDeliveryPackageDetail(state, deliveryPackageId);
+    const confirmedEpisodeNos = checked
+      ? [...detail.confirmedEpisodeNos, episodeNo]
+      : detail.confirmedEpisodeNos.filter((item) => item !== episodeNo);
+
+    runMutation(
+      (current) =>
+        updateDeliveryPackageConfirmation(current, {
+          deliveryPackageId,
+          confirmedEpisodeNos
+        }),
+      "实际变更集已更新"
+    );
+  }
+
+  function handleSubmitDeliveryForReview(deliveryPackageId: string) {
+    const detail = selectDeliveryPackageDetail(state, deliveryPackageId);
+    if (detail.confirmedEpisodeNos.length === 0) {
+      setActionMessage({
+        tone: "error",
+        text: "还没有勾选实际变更集。请先确认哪些集真的改过；没有改动的集不会进入本次发布。"
+      });
+      return;
+    }
+
+    runMutation(
+      (current) => submitDeliveryPackageForReview(current, deliveryPackageId, currentUserId),
+      "已送到统筹待发布：统筹会检查范围和实际变更集，确认后再发布。"
+    );
+  }
+
+  function handlePublishDelivery(deliveryPackageId: string) {
+    if (!canReviewDelivery) {
+      setActionMessage({ tone: "error", text: "你当前不是统筹，不能发布交稿包。请让统筹账号处理发布或驳回。" });
+      return;
+    }
+
+    const detail = selectDeliveryPackageDetail(state, deliveryPackageId);
+    runMutation(
+      (current) => publishDeliveryPackage(current, deliveryPackageId, currentUserId),
+      `发布成功：第 ${detail.confirmedEpisodeNos.join("、")} 集已成为当前生效剧本，负责这些集的创作者会收到关键变更提醒。`
+    );
+  }
+
+  function handleRejectDelivery(deliveryPackageId: string) {
+    if (!canReviewDelivery) {
+      setActionMessage({ tone: "error", text: "你当前不是统筹，不能驳回交稿包。请让统筹账号处理发布或驳回。" });
+      return;
+    }
+
+    runMutation(
+      (current) => rejectDeliveryPackage(current, deliveryPackageId, currentUserId, rejectionReason),
+      "已驳回：这次没有生成新剧本版本。交稿人按原因补齐后，可以重新提交。"
     );
   }
 
   return (
     <main className="replica-shell">
       <IconRail
-        activeModule={activeModule}
+        activeModule={effectiveActiveModule}
         currentUser={currentUser}
+        items={navigationItems}
         onLogout={() => setState((current) => logout(current))}
         onSelectModule={setActiveModule}
       />
@@ -234,12 +522,13 @@ export function M1Dashboard() {
         <header className="replica-topbar">
           <div className="topbar-project">
             <strong>AIGC 协作台</strong>
-            <span>{selectedProject.name} / M1 工作台</span>
+            <span>{selectedProject.name} / M2 交稿协作</span>
           </div>
           <div className="topbar-actions">
-            <label className="search-box">
+            <div className="search-box">
               <Search size={15} />
               <input
+                aria-label="搜索"
                 onChange={(event) => setSearchQuery(event.target.value)}
                 placeholder="搜索（Ctrl+K）"
                 value={searchQuery}
@@ -251,6 +540,9 @@ export function M1Dashboard() {
                       key={`${item.type}-${item.id}`}
                       onClick={() => {
                         setActiveModule(item.module);
+                        if (item.type === "project") {
+                          setSelectedProjectId(item.id);
+                        }
                         if (item.episodeId) {
                           setSelectedEpisodeId(item.episodeId);
                         }
@@ -264,7 +556,7 @@ export function M1Dashboard() {
                   ))}
                 </div>
               ) : null}
-            </label>
+            </div>
             <button
               className="top-icon-button has-badge"
               onClick={() => {
@@ -322,6 +614,9 @@ export function M1Dashboard() {
             <section className="panel today-card">
               <PanelTitle title="今日任务" eyebrow={`${todayTasks.length} 项`} />
               <div className="task-list">
+                {todayTasks.length === 0 ? (
+                  <p className="empty-text">还没有分配给你的负责集。请等待统筹分配，分配后这里才会出现任务。</p>
+                ) : null}
                 {todayTasks.map((task) => (
                   <article className={`task-item ${task.status}`} key={task.title}>
                     <span />
@@ -333,21 +628,36 @@ export function M1Dashboard() {
                   </article>
                 ))}
               </div>
-              <button className="text-link" onClick={() => setActiveModule("任务中心")} type="button">查看全部任务（{Math.max(todayTasks.length, 6)}）</button>
+              <button className="text-link" onClick={() => setActiveModule("任务中心")} type="button">
+                查看全部任务（{todayTasks.length}）
+              </button>
             </section>
+
+            {actionMessage ? (
+              <div className={`action-message ${actionMessage.tone}`} role="status">
+                {actionMessage.text}
+              </div>
+            ) : null}
 
             <section className="panel mine-card">
               <PanelTitle title={`我的集（${myEpisodes.length}）`} eyebrow="进度" />
               <div className="mine-list">
-                {myEpisodes.slice(0, 3).map((episode) => (
-                  <article key={`${episode.projectCode}-${episode.episodeNo}`}>
-                    <div>
-                      <strong>第 {episode.episodeNo} 集 · {episode.projectName}</strong>
-                      <small>{assignmentLabels[episode.responsibility]}</small>
-                    </div>
-                    <ProgressBar value={episode.productionStatus === "in_progress" ? 60 : episode.productionStatus === "key_update" ? 35 : 15} />
-                  </article>
-                ))}
+                {myEpisodes.length === 0 ? (
+                  <p className="empty-state">你还没有负责集。先不用处理任务，等统筹分配具体集数后，这里会自动出现你的单集工作入口。</p>
+                ) : (
+                  myEpisodes.slice(0, 3).map((episode) => (
+                    <article key={`${episode.projectCode}-${episode.episodeNo}`}>
+                      <div>
+                        <strong>第 {episode.episodeNo} 集 · {episode.projectName}</strong>
+                        <small>
+                          {assignmentLabels[episode.responsibility]}
+                          {episode.hasUnreadKeyChange ? " · 关键变更待查看" : ""}
+                        </small>
+                      </div>
+                      <ProgressBar value={episode.productionStatus === "in_progress" ? 60 : episode.productionStatus === "key_update" ? 35 : 15} />
+                    </article>
+                  ))
+                )}
               </div>
             </section>
           </aside>
@@ -362,7 +672,7 @@ export function M1Dashboard() {
             </div>
             <div className="banner-stats">
               <Metric label="总集数" value={selectedProject.episodeCount.toString()} />
-              <Metric label="我的参与" value={myEpisodes.length.toString()} />
+              <Metric label="我的参与" value={currentProjectParticipation.toString()} />
               <Metric label="进行中" value={inProgressCount.toString()} />
             </div>
             <button className="banner-button" onClick={() => setActiveModule("项目总览")} type="button">进入项目</button>
@@ -388,37 +698,59 @@ export function M1Dashboard() {
           </section>
 
           <section className="panel status-panel">
-            <PanelTitle title="项目状态灯" eyebrow={`${overview.memberCount} 位成员 · ${overview.episodes.length} 集`} />
-            <div className="episode-grid" role="list" aria-label="集状态灯">
-              {overview.episodes.slice(0, 36).map((episode) => (
-                <button
-                  className={`episode-cell ${episode.productionStatus} ${selectedEpisode.id === episode.id ? "selected" : ""}`}
-                  key={episode.id}
-                  onClick={() => {
-                    setSelectedEpisodeId(episode.id);
-                    setActiveModule("集工作台");
-                  }}
-                  type="button"
-                >
-                  <span className="status-dot" />
-                  <strong>{episode.episodeNo}</strong>
-                  <span>{statusLabels[episode.productionStatus]}</span>
-                  <small>
-                    {episode.assignments.length > 0
-                      ? episode.assignments.map((assignment) => assignment.userName).join("、")
-                      : "未分配"}
-                  </small>
-                </button>
-              ))}
-            </div>
+            <PanelTitle
+              title={canViewFullProject ? "项目状态灯" : "我的负责集状态"}
+              eyebrow={canViewFullProject ? `${overview.memberCount} 位成员 · ${overview.episodes.length} 集` : `${visibleEpisodes.length} 集`}
+            />
+            {visibleEpisodes.length === 0 ? (
+              <p className="empty-state">当前项目还没有分配给你的集。请等待统筹分配，这里不会生成临时任务或伪进度。</p>
+            ) : (
+              <div className="episode-grid" role="list" aria-label="集状态灯">
+                {visibleEpisodes.slice(0, 36).map((episode) => (
+                  <button
+                    className={`episode-cell ${episode.productionStatus} ${selectedEpisode?.id === episode.id ? "selected" : ""}`}
+                    key={episode.id}
+                    onClick={() => {
+                      setSelectedEpisodeId(episode.id);
+                      setActiveModule("集工作台");
+                    }}
+                    type="button"
+                  >
+                    <span className="status-dot" />
+                    <strong>{episode.episodeNo}</strong>
+                    <span>{statusLabels[episode.productionStatus]}</span>
+                    <small>
+                      {episode.assignments.length > 0
+                        ? episode.assignments.map((assignment) => assignment.userName).join("、")
+                        : "未分配"}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
 
           <ModuleWorkbench
-            activeModule={activeModule}
+            activeModule={effectiveActiveModule}
+            activeDeliveryPackage={activeDeliveryPackage}
             assignmentSummary={assignmentSummary}
+            canReviewDelivery={canReviewDelivery}
+            canSubmitDelivery={canSubmitDelivery}
+            deliveryPackageDetails={deliveryPackageDetails}
             episode={selectedEpisode}
+            handleCreateMockDelivery={handleCreateMockDelivery}
+            handlePublishDelivery={handlePublishDelivery}
+            handleRejectDelivery={handleRejectDelivery}
+            handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
+            handleUpdateConfirmedEpisode={handleUpdateConfirmedEpisode}
             projectName={selectedProject.name}
             recentUpdates={recentUpdates}
+            rejectionReason={rejectionReason}
+            selectedMockDeliveryKey={selectedMockDeliveryKey}
+            setRejectionReason={setRejectionReason}
+            setSelectedDeliveryPackageId={setSelectedDeliveryPackageId}
+            setSelectedMockDeliveryKey={setSelectedMockDeliveryKey}
+            state={state}
             tasks={todayTasks}
           />
 
@@ -588,30 +920,21 @@ function AuthGate({
 function IconRail({
   activeModule,
   currentUser,
+  items,
   onLogout,
   onSelectModule
 }: {
   activeModule: string;
   currentUser: NonNullable<ReturnType<typeof selectCurrentUser>>;
+  items: NavigationItem[];
   onLogout: () => void;
   onSelectModule: (module: string) => void;
 }) {
-  const icons = [
-    { icon: Home, label: "项目总览" },
-    { icon: Inbox, label: "通知中心" },
-    { icon: CalendarDays, label: "任务中心" },
-    { icon: Package, label: "素材库" },
-    { icon: FileText, label: "文档中心" },
-    { icon: Users, label: "团队成员" },
-    { icon: BarChart3, label: "数据报表" },
-    { icon: Settings, label: "系统设置" }
-  ];
-
   return (
     <aside className="icon-rail" aria-label="主导航">
       <span className={`avatar mini ${currentUser.avatarTone}`}>{currentUser.name.slice(0, 1)}</span>
       <nav>
-        {icons.map((item) => (
+        {items.map((item) => (
           <button
             className={activeModule === item.label ? "active" : ""}
             key={item.label}
@@ -649,7 +972,7 @@ function NotificationsPanel({
               <span />
               <div>
                 <strong>{notification.title}</strong>
-                <small>{notification.body}</small>
+                <small>{formatNotificationBody(notification)}</small>
               </div>
               <button onClick={() => onRead(notification.id)} title="标记已读" type="button">
                 <Check size={14} />
@@ -680,7 +1003,7 @@ function CompactNotificationList({
         <article key={notification.id}>
           <div>
             <strong>{notification.title}</strong>
-            <span>{notification.body}</span>
+            <span>{formatNotificationBody(notification)}</span>
           </div>
           <button onClick={() => onRead(notification.id)} type="button">
             已读
@@ -704,54 +1027,162 @@ function UpdatesPanel({ updates }: { updates: ReturnType<typeof buildRecentUpdat
   return (
     <section className="panel updates-card">
       <PanelTitle title="最近更新" />
-      <div className="update-list">
-        {updates.map((item) => (
-          <article key={item.title}>
-            <span className={`avatar mini ${item.tone}`}>{item.name.slice(0, 1)}</span>
-            <div>
-              <strong>{item.title}</strong>
-              <small>{item.meta}</small>
-            </div>
-            <em>{item.status}</em>
-          </article>
-        ))}
-      </div>
-      <button className="text-link" type="button">查看全部更新</button>
+      {updates.length === 0 ? (
+        <p className="empty-state">当前还没有与你相关的更新。</p>
+      ) : (
+        <>
+          <div className="update-list">
+            {updates.map((item) => (
+              <article key={item.title}>
+                <span className={`avatar mini ${item.tone}`}>{item.name.slice(0, 1)}</span>
+                <div>
+                  <strong>{item.title}</strong>
+                  <small>{item.meta}</small>
+                </div>
+                <em>{item.status}</em>
+              </article>
+            ))}
+          </div>
+          <button className="text-link" type="button">查看全部更新</button>
+        </>
+      )}
     </section>
   );
 }
 
 function ModuleWorkbench({
   activeModule,
+  activeDeliveryPackage,
   assignmentSummary,
+  canReviewDelivery,
+  canSubmitDelivery,
+  deliveryPackageDetails,
   episode,
+  handleCreateMockDelivery,
+  handlePublishDelivery,
+  handleRejectDelivery,
+  handleSubmitDeliveryForReview,
+  handleUpdateConfirmedEpisode,
   projectName,
   recentUpdates,
+  rejectionReason,
+  selectedMockDeliveryKey,
+  setRejectionReason,
+  setSelectedDeliveryPackageId,
+  setSelectedMockDeliveryKey,
+  state,
   tasks
 }: {
   activeModule: string;
+  activeDeliveryPackage: ReturnType<typeof selectDeliveryPackageDetail> | null;
   assignmentSummary: AssignmentSummaryItem[];
-  episode: ReturnType<typeof selectProjectOverview>["episodes"][number];
+  canReviewDelivery: boolean;
+  canSubmitDelivery: boolean;
+  deliveryPackageDetails: Array<ReturnType<typeof selectDeliveryPackageDetail>>;
+  episode: ReturnType<typeof selectProjectOverview>["episodes"][number] | null;
+  handleCreateMockDelivery: () => void;
+  handlePublishDelivery: (deliveryPackageId: string) => void;
+  handleRejectDelivery: (deliveryPackageId: string) => void;
+  handleSubmitDeliveryForReview: (deliveryPackageId: string) => void;
+  handleUpdateConfirmedEpisode: (deliveryPackageId: string, episodeNo: number, checked: boolean) => void;
   projectName: string;
   recentUpdates: ReturnType<typeof buildRecentUpdates>;
+  rejectionReason: string;
+  selectedMockDeliveryKey: MockDeliveryKey;
+  setRejectionReason: React.Dispatch<React.SetStateAction<string>>;
+  setSelectedDeliveryPackageId: React.Dispatch<React.SetStateAction<string | null>>;
+  setSelectedMockDeliveryKey: React.Dispatch<React.SetStateAction<MockDeliveryKey>>;
+  state: WorkspaceState;
   tasks: ReturnType<typeof buildTodayTasks>;
 }) {
   if (activeModule === "集工作台") {
+    if (!episode) {
+      return (
+        <section className="panel module-panel">
+          <PanelTitle title="集工作台" eyebrow={projectName} />
+          <p className="empty-state">当前项目还没有分配给你的集。请等待统筹分配，分配后这里会显示真实的单集工作台。</p>
+        </section>
+      );
+    }
+
+    const timeline = selectEpisodeScriptTimeline(state, episode.id);
+
     return (
       <section className="panel module-panel">
         <PanelTitle title={`第 ${episode.episodeNo} 集工作台`} eyebrow={projectName} />
         <div className="episode-workbench">
           <div>
             <span className={`status-pill ${episode.productionStatus}`}>{statusLabels[episode.productionStatus]}</span>
-            <p>这里是 M1 的集工作台入口空壳。M2 会接入当前生效剧本、diff、创作重点和问题反馈；M3 会接入资产位。</p>
+            <p>
+              {timeline.currentRevision
+                ? `当前生效剧本来自 ${timeline.revisions[0]?.deliveryPackageTitle ?? "已发布交稿包"}，修订号 v${timeline.currentRevision.revisionNo}。`
+                : "当前还没有已发布剧本。主编剧提交交稿包并由统筹发布后，这里会显示 EpisodeCurrent 对应的最新修订。"}
+            </p>
           </div>
           <div className="detail-grid">
             <DetailItem label="负责人" value={episode.assignments.map((item) => `${item.userName} · ${assignmentLabels[item.responsibility]}`).join("、") || "未分配"} />
-            <DetailItem label="资产待办" value={`${episode.assetTodoCount} 项`} />
+            <DetailItem label="关键变更" value={episode.hasUnreadKeyChange ? "有新改动" : "暂无"} />
             <DetailItem label="问题反馈" value={`${episode.openIssueCount} 条`} />
           </div>
+          <div className="script-preview">
+            <div className="script-card-head">
+              <div>
+                <span>当前生效剧本</span>
+                <strong>{timeline.currentRevision?.title ?? "未发布当前剧本"}</strong>
+              </div>
+              <div className="script-tools">
+                <button disabled={timeline.revisions.length === 0} type="button">
+                  <FileText size={15} />
+                  历史修订
+                </button>
+                <button disabled={!timeline.currentRevision} type="button">
+                  <GitCompareArrows size={15} />
+                  diff 摘要
+                </button>
+                <button disabled={!timeline.currentRevision} type="button">
+                  <Download size={15} />
+                  导出 docx
+                </button>
+              </div>
+            </div>
+            {timeline.currentRevision ? (
+              <p className="script-diff-summary">{timeline.currentRevision.changeSummary}</p>
+            ) : null}
+            <pre>{timeline.currentRevision?.content ?? "暂无当前生效剧本内容。"}</pre>
+          </div>
+          {timeline.revisions.length > 0 ? (
+            <div className="revision-list">
+              {timeline.revisions.slice(0, 4).map((revision) => (
+                <article key={revision.id}>
+                  <strong>v{revision.revisionNo} · {revision.deliveryPackageTitle}</strong>
+                  <span>{revision.changeSummary}</span>
+                </article>
+              ))}
+            </div>
+          ) : null}
         </div>
       </section>
+    );
+  }
+
+  if (activeModule === "交稿中心") {
+    return (
+      <M2DeliveryCenter
+        activeDeliveryPackage={activeDeliveryPackage}
+        canReviewDelivery={canReviewDelivery}
+        canSubmitDelivery={canSubmitDelivery}
+        deliveryPackageDetails={deliveryPackageDetails}
+        handleCreateMockDelivery={handleCreateMockDelivery}
+        handlePublishDelivery={handlePublishDelivery}
+        handleRejectDelivery={handleRejectDelivery}
+        handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
+        handleUpdateConfirmedEpisode={handleUpdateConfirmedEpisode}
+        rejectionReason={rejectionReason}
+        selectedMockDeliveryKey={selectedMockDeliveryKey}
+        setRejectionReason={setRejectionReason}
+        setSelectedDeliveryPackageId={setSelectedDeliveryPackageId}
+        setSelectedMockDeliveryKey={setSelectedMockDeliveryKey}
+      />
     );
   }
 
@@ -759,14 +1190,18 @@ function ModuleWorkbench({
     return (
       <section className="panel module-panel">
         <PanelTitle title="任务中心" eyebrow={`${tasks.length} tasks`} />
-        <div className="module-list">
-          {tasks.map((task) => (
-            <article key={task.title}>
-              <strong>{task.title}</strong>
-              <span>{task.meta} · {task.badge}</span>
-            </article>
-          ))}
-        </div>
+        {tasks.length === 0 ? (
+          <p className="empty-state">当前没有分配给你的剧集任务。请等待统筹分配负责集，系统不会先生成占位任务。</p>
+        ) : (
+          <div className="module-list">
+            {tasks.map((task) => (
+              <article key={task.title}>
+                <strong>{task.title}</strong>
+                <span>{task.meta} · {task.badge}</span>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
     );
   }
@@ -793,14 +1228,18 @@ function ModuleWorkbench({
     return (
       <section className="panel module-panel">
         <PanelTitle title="项目总览说明" eyebrow="M1" />
-        <div className="module-list">
-          {recentUpdates.slice(0, 3).map((item) => (
-            <article key={item.title}>
-              <strong>{item.title}</strong>
-              <span>{item.meta} · {item.status}</span>
-            </article>
-          ))}
-        </div>
+        {recentUpdates.length === 0 ? (
+          <p className="empty-state">当前视图下还没有与你相关的状态更新。</p>
+        ) : (
+          <div className="module-list">
+            {recentUpdates.slice(0, 3).map((item) => (
+              <article key={item.title}>
+                <strong>{item.title}</strong>
+                <span>{item.meta} · {item.status}</span>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
     );
   }
@@ -808,7 +1247,190 @@ function ModuleWorkbench({
   return (
     <section className="panel module-panel">
       <PanelTitle title={activeModule} eyebrow="暂未开放" />
-      <p className="empty-state">这个入口已经在 M1 中有明确反馈，但完整业务能力属于后续模块：素材库对应 M3，文档中心对应 M2/M1 Bible，数据报表和系统设置会在持久化后实现。</p>
+      <p className="empty-state">这个入口已经有明确反馈，但完整业务能力属于后续模块：素材库对应 M3，交稿中心对应 M2，数据报表和系统设置会在持久化后实现。</p>
+    </section>
+  );
+}
+
+function M2DeliveryCenter({
+  activeDeliveryPackage,
+  canReviewDelivery,
+  canSubmitDelivery,
+  deliveryPackageDetails,
+  handleCreateMockDelivery,
+  handlePublishDelivery,
+  handleRejectDelivery,
+  handleSubmitDeliveryForReview,
+  handleUpdateConfirmedEpisode,
+  rejectionReason,
+  selectedMockDeliveryKey,
+  setRejectionReason,
+  setSelectedDeliveryPackageId,
+  setSelectedMockDeliveryKey
+}: {
+  activeDeliveryPackage: ReturnType<typeof selectDeliveryPackageDetail> | null;
+  canReviewDelivery: boolean;
+  canSubmitDelivery: boolean;
+  deliveryPackageDetails: Array<ReturnType<typeof selectDeliveryPackageDetail>>;
+  handleCreateMockDelivery: () => void;
+  handlePublishDelivery: (deliveryPackageId: string) => void;
+  handleRejectDelivery: (deliveryPackageId: string) => void;
+  handleSubmitDeliveryForReview: (deliveryPackageId: string) => void;
+  handleUpdateConfirmedEpisode: (deliveryPackageId: string, episodeNo: number, checked: boolean) => void;
+  rejectionReason: string;
+  selectedMockDeliveryKey: MockDeliveryKey;
+  setRejectionReason: React.Dispatch<React.SetStateAction<string>>;
+  setSelectedDeliveryPackageId: React.Dispatch<React.SetStateAction<string | null>>;
+  setSelectedMockDeliveryKey: React.Dispatch<React.SetStateAction<MockDeliveryKey>>;
+}) {
+  const selectedTemplate = mockDeliveryTemplates.find((item) => item.key === selectedMockDeliveryKey) ?? mockDeliveryTemplates[0];
+  const confirmedCount = activeDeliveryPackage?.confirmedEpisodeNos.length ?? 0;
+
+  return (
+    <section className="panel module-panel delivery-center">
+      <PanelTitle title="交稿中心" eyebrow="M2" />
+
+      <div className="delivery-grid">
+        <div className="delivery-column">
+          {deliveryPackageDetails.length === 0 ? (
+            <div className="empty-card">
+              <Inbox size={22} />
+              <strong>还没有交稿包</strong>
+              <p>主编剧或统筹创建交稿包后，这里会显示切出的单集、实际变更集确认和发布状态。</p>
+              <p>如果 Word 切段失败，不要卡住流程：可以先手动粘贴单集内容补救，确认这一集后再提交。</p>
+            </div>
+          ) : (
+            <div className="delivery-list">
+              {deliveryPackageDetails.map((deliveryPackage) => (
+                <button
+                  className={activeDeliveryPackage?.id === deliveryPackage.id ? "active" : ""}
+                  key={deliveryPackage.id}
+                  onClick={() => setSelectedDeliveryPackageId(deliveryPackage.id)}
+                  type="button"
+                >
+                  <strong>{deliveryPackage.title}</strong>
+                  <span>
+                    {deliveryPackage.status} / {deliveryStatusLabels[deliveryPackage.status]} · 第 {deliveryPackage.declaredEpisodeFrom}-{deliveryPackage.declaredEpisodeTo} 集
+                  </span>
+                  <small>{deliveryPackage.confirmedEpisodeNos.length} 集已勾选为实际变更</small>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="delivery-create">
+            <strong>创建演示交稿包</strong>
+            <p>当前 M2 只演示交稿包确认流，不做真正 Word 文件解析。切段失败时，可改用“手动粘贴单集补救”。</p>
+            <label>
+              选择交稿包场景
+              <select value={selectedMockDeliveryKey} onChange={(event) => setSelectedMockDeliveryKey(event.target.value as MockDeliveryKey)}>
+                {mockDeliveryTemplates.map((template) => (
+                  <option key={template.key} value={template.key}>
+                    {template.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <small>{selectedTemplate.description}</small>
+            {canSubmitDelivery ? (
+              <button className="primary-button" onClick={handleCreateMockDelivery} type="button">
+                <CirclePlus size={16} />
+                创建交稿包
+              </button>
+            ) : (
+              <p className="permission-note">当前身份不能创建或提交交稿包。等待主编剧或统筹创建后，你可以查看与你相关的集。</p>
+            )}
+          </div>
+        </div>
+
+        <div className="delivery-column detail">
+          {!activeDeliveryPackage ? (
+            <div className="empty-card soft">
+              <FileText size={22} />
+              <strong>请选择或创建一个交稿包</strong>
+              <p>交稿包出现后，先勾选“这次真的改过”的集，再提交统筹发布。没勾选的集不会生成新版本。</p>
+            </div>
+          ) : (
+            <>
+              <div className="delivery-detail-header">
+                <div>
+                  <strong>{activeDeliveryPackage.title}</strong>
+                  <span>{activeDeliveryPackage.status} / {deliveryStatusLabels[activeDeliveryPackage.status]}</span>
+                </div>
+                <small>
+                  声明范围：第 {activeDeliveryPackage.declaredEpisodeFrom}-{activeDeliveryPackage.declaredEpisodeTo} 集
+                </small>
+              </div>
+
+              {activeDeliveryPackage.status === "rejected" && activeDeliveryPackage.rejectionReason ? (
+                <p className="inline-warning">已驳回：{activeDeliveryPackage.rejectionReason}</p>
+              ) : null}
+
+              {activeDeliveryPackage.status === "draft" ? (
+                <>
+                  <p className={confirmedCount === 0 ? "inline-warning" : "inline-help"}>
+                    {confirmedCount === 0
+                      ? "还没勾选实际变更集。请勾选这次真的改过的集，没改的不要提交发布。"
+                      : `已勾选 ${confirmedCount} 集实际变更。提交后会进入统筹待发布，不会立刻覆盖当前生效剧本。`}
+                  </p>
+                  <div className="delivery-episode-list">
+                    {activeDeliveryPackage.episodes.map((episode) => (
+                      <label className="check-row" key={episode.id}>
+                        <input
+                          checked={episode.isConfirmedChange}
+                          onChange={(event) => handleUpdateConfirmedEpisode(activeDeliveryPackage.id, episode.episodeNo, event.target.checked)}
+                          type="checkbox"
+                        />
+                        <span>
+                          <strong>第 {episode.episodeNo} 集</strong>
+                          <small>{episode.isConfirmedChange ? "会生成新修订" : "本次不发布这一集"}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {canSubmitDelivery ? (
+                    <button className="primary-button" onClick={() => handleSubmitDeliveryForReview(activeDeliveryPackage.id)} type="button">
+                      <Send size={16} />
+                      {confirmedCount === 0 ? "先勾选实际变更集" : "提交给统筹发布"}
+                    </button>
+                  ) : (
+                    <p className="permission-note">当前身份不能提交交稿包。请让主编剧或统筹确认后提交。</p>
+                  )}
+                </>
+              ) : null}
+
+              {activeDeliveryPackage.status === "pending_review" ? (
+                <div className="review-box">
+                  <p className="inline-help">这个交稿包正在等统筹处理。发布后，勾选的集会成为当前生效剧本，并通知对应负责人查看关键变更。</p>
+                  {canReviewDelivery ? (
+                    <>
+                      <label>
+                        驳回原因
+                        <input value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} />
+                      </label>
+                      <div className="row-actions">
+                        <button className="primary-button" onClick={() => handlePublishDelivery(activeDeliveryPackage.id)} type="button">
+                          <Check size={16} />
+                          发布为当前生效剧本
+                        </button>
+                        <button className="secondary-button" onClick={() => handleRejectDelivery(activeDeliveryPackage.id)} type="button">
+                          驳回并说明原因
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="permission-note">发布和驳回只给统筹显示。你当前没有这个权限，请等待统筹处理。</p>
+                  )}
+                </div>
+              ) : null}
+
+              {activeDeliveryPackage.status === "published" ? (
+                <p className="inline-help">发布完成。勾选过的集已经更新为当前生效剧本，相关创作者会看到“剧本已更新”的关键变更提醒。</p>
+              ) : null}
+            </>
+          )}
+        </div>
+      </div>
     </section>
   );
 }
@@ -1189,24 +1811,6 @@ function PanelTitle({ title, eyebrow }: { title: string; eyebrow?: string }) {
   );
 }
 
-function buildTodayTasks(episodes: ReturnType<typeof selectMyEpisodes>, fallbackProjectName: string) {
-  const source = episodes.length > 0 ? episodes : [];
-  const tasks = source.slice(0, 3).map((episode) => ({
-    title: `第 ${episode.episodeNo} 集 · ${episode.projectName}`,
-    meta: episode.openIssueCount ? `问题 ${episode.openIssueCount}` : episode.assetTodoCount ? `资产 ${episode.assetTodoCount}` : "优先级 · 中",
-    badge: statusLabels[episode.productionStatus],
-    status: episode.productionStatus
-  }));
-
-  return tasks.length > 0
-    ? tasks
-    : [
-        { title: `第 27 集 · ${fallbackProjectName}`, meta: "优先级 · 高", badge: "待处理", status: "key_update" as const },
-        { title: `第 28 集 · ${fallbackProjectName}`, meta: "截止 5/21", badge: "进行中", status: "in_progress" as const },
-        { title: `第 31 集 · ${fallbackProjectName}`, meta: "协作补充", badge: "待处理", status: "key_update" as const }
-      ];
-}
-
 function buildRecentUpdates(episodes: ReturnType<typeof selectProjectOverview>["episodes"], projectName: string) {
   return episodes
     .filter((episode) => episode.productionStatus !== "not_started" || episode.openIssueCount || episode.assetTodoCount)
@@ -1218,6 +1822,84 @@ function buildRecentUpdates(episodes: ReturnType<typeof selectProjectOverview>["
       meta: episode.openIssueCount ? "问题待处理" : episode.assetTodoCount ? "资产准备中" : "状态已更新",
       status: statusLabels[episode.productionStatus]
     }));
+}
+
+function buildNavigationItems(permissions: ReturnType<typeof selectPermissions>, primaryRole: ProjectRole): NavigationItem[] {
+  const items: NavigationItem[] = [
+    { icon: Home, label: "项目总览" },
+    { icon: Inbox, label: "通知中心" },
+    { icon: CalendarDays, label: "任务中心" },
+    { icon: Package, label: "素材库" }
+  ];
+  const canUseDeliveryCenter = primaryRole === "owner" || primaryRole === "coordinator" || primaryRole === "head_writer";
+
+  if (canUseDeliveryCenter) {
+    items.push({ icon: FileText, label: "交稿中心" });
+  }
+
+  if (permissions.canManageMembers || permissions.canViewAllEpisodes) {
+    items.push({ icon: Users, label: "团队成员" });
+  }
+
+  if (permissions.canManageProjects) {
+    items.push({ icon: BarChart3, label: "数据报表" }, { icon: Settings, label: "系统设置" });
+  }
+
+  return items;
+}
+
+function buildShortcutItems(permissions: ReturnType<typeof selectPermissions>, primaryRole: ProjectRole): NavigationItem[] {
+  const canUseDeliveryCenter = primaryRole === "owner" || primaryRole === "coordinator" || primaryRole === "head_writer";
+
+  return baseShortcutItems.filter((item) => {
+    if (item.label === "集数分配") {
+      return permissions.canAssignEpisodes;
+    }
+
+    if (item.label === "团队成员") {
+      return permissions.canManageMembers || permissions.canViewAllEpisodes;
+    }
+
+    if (item.label === "数据报表") {
+      return permissions.canManageProjects;
+    }
+
+    if (item.label === "交稿中心") {
+      return canUseDeliveryCenter;
+    }
+
+    return true;
+  });
+}
+
+function formatActionError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (message.includes("请至少确认一集实际变更")) {
+    return "还没有勾选实际变更集。请先确认哪些集真的改过；没改的集不会进入本次发布。";
+  }
+
+  if (message.includes("发布交稿包权限不足") || message.includes("驳回交稿包权限不足")) {
+    return "你当前不是统筹，不能发布或驳回交稿包。请让统筹账号处理。";
+  }
+
+  if (message.includes("创建交稿包权限不足") || message.includes("提交交稿包权限不足")) {
+    return "当前身份不能提交交稿包。请让主编剧或统筹处理这一步。";
+  }
+
+  if (message.includes("交稿包至少需要包含一集剧本")) {
+    return "交稿包里没有识别到单集内容。Word 切段失败时，可以手动粘贴单集补救。";
+  }
+
+  return message || "操作失败，请检查输入。";
+}
+
+function formatNotificationBody(notification: WorkspaceState["notifications"][number]) {
+  if (notification.type !== "key_change") {
+    return notification.body;
+  }
+
+  return `新剧本已生效，请进入这一集查看最新版本和关键改动。来源：${notification.body}`;
 }
 
 type AssignmentSummaryItem = {
@@ -1290,6 +1972,10 @@ function compactEpisodeRanges(episodeNos: number[]) {
 
   ranges.push(start === previous ? `第 ${start} 集` : `第 ${start}-${previous} 集`);
   return ranges;
+}
+
+function deliveryStatusLabel(status: keyof typeof deliveryStatusLabels) {
+  return deliveryStatusLabels[status];
 }
 
 function buildSearchResults(

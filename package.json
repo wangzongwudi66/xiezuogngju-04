@@ -11,7 +11,7 @@
     "dev": "npm run dev -w apps/web --",
     "build": "npm run build -w apps/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test -w packages/domain",
+    "test": "npm run test --workspaces --if-present",
     "verify": "npm run typecheck && npm run test && npm run build"
   },
   "engines": {

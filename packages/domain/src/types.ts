@@ -1,5 +1,9 @@
 export type ProjectStatus = "active" | "archived";
 
+export type DeliveryPackageStatus = "draft" | "pending_review" | "published" | "rejected";
+
+export type DeliveryPackageType = "range" | "single_replace";
+
 export type ProjectRole =
   | "owner"
   | "coordinator"
@@ -81,6 +85,56 @@ export interface EpisodeAssignment {
   createdAt: string;
 }
 
+export interface DeliveryPackage {
+  id: string;
+  projectId: string;
+  type: DeliveryPackageType;
+  title: string;
+  sourceFileName?: string;
+  declaredEpisodeFrom: number;
+  declaredEpisodeTo: number;
+  status: DeliveryPackageStatus;
+  uploadedByUserId: string;
+  submittedByUserId?: string;
+  reviewedByUserId?: string;
+  rejectionReason?: string;
+  createdAt: string;
+  submittedAt?: string;
+  publishedAt?: string;
+  rejectedAt?: string;
+}
+
+export interface DeliveryPackageEpisode {
+  id: string;
+  deliveryPackageId: string;
+  episodeNo: number;
+  title: string;
+  content: string;
+  isConfirmedChange: boolean;
+}
+
+export interface EpisodeRevision {
+  id: string;
+  projectId: string;
+  episodeId: string;
+  episodeNo: number;
+  deliveryPackageId: string;
+  revisionNo: number;
+  title: string;
+  content: string;
+  previousRevisionId?: string;
+  changeSummary: string;
+  createdAt: string;
+}
+
+export interface EpisodeCurrent {
+  id: string;
+  projectId: string;
+  episodeId: string;
+  currentRevisionId: string;
+  updatedAt: string;
+}
+
 export interface Notification {
   id: string;
   projectId: string;
@@ -101,6 +155,10 @@ export interface WorkspaceState {
   memberPermissions: ProjectMemberPermission[];
   episodes: Episode[];
   assignments: EpisodeAssignment[];
+  deliveryPackages: DeliveryPackage[];
+  deliveryPackageEpisodes: DeliveryPackageEpisode[];
+  episodeRevisions: EpisodeRevision[];
+  episodeCurrents: EpisodeCurrent[];
   notifications: Notification[];
 }
 
@@ -139,6 +197,29 @@ export interface AssignmentInput {
 export interface RegisterInput {
   name: string;
   role: ProjectRole;
+}
+
+export interface DeliveryPackageEpisodeInput {
+  episodeNo: number;
+  title?: string;
+  content: string;
+}
+
+export interface DeliveryPackageDraftInput {
+  projectId: string;
+  uploadedByUserId: string;
+  type: DeliveryPackageType;
+  declaredEpisodeFrom: number;
+  declaredEpisodeTo: number;
+  sourceFileName?: string;
+  title?: string;
+  episodes: DeliveryPackageEpisodeInput[];
+  confirmedEpisodeNos?: number[];
+}
+
+export interface DeliveryPackageConfirmationInput {
+  deliveryPackageId: string;
+  confirmedEpisodeNos: number[];
 }
 
 export interface WorkspacePermissions {

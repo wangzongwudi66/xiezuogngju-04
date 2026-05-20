@@ -38,6 +38,10 @@ export const seedWorkspace: WorkspaceState = {
     { id: "member-creator-a-tx", projectId: "project-tide", userId: "user-creator-a", role: "creator", createdAt: now }
   ],
   memberPermissions: [],
+  deliveryPackages: [],
+  deliveryPackageEpisodes: [],
+  episodeRevisions: [],
+  episodeCurrents: [],
   episodes: [
     ...Array.from({ length: 60 }, (_, index) => {
       const episodeNo = index + 1;

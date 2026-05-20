@@ -1,7 +1,13 @@
 import type {
   AssignmentInput,
+  DeliveryPackage,
+  DeliveryPackageConfirmationInput,
+  DeliveryPackageDraftInput,
+  DeliveryPackageEpisode,
   Episode,
   EpisodeAssignment,
+  EpisodeCurrent,
+  EpisodeRevision,
   MemberInput,
   MemberPermissionsInput,
   MemberRolesInput,
@@ -14,6 +20,7 @@ import type {
   WorkspacePermissions,
   WorkspaceState
 } from "./types";
+import { diffEpisodeScript } from "./script-diff";
 
 const timestamp = () => new Date().toISOString();
 
@@ -290,6 +297,240 @@ export function assignEpisodes(state: WorkspaceState, input: AssignmentInput): W
   };
 }
 
+export function createDeliveryPackageDraft(state: WorkspaceState, input: DeliveryPackageDraftInput): WorkspaceState {
+  const project = requireProject(state, input.projectId);
+  assertProjectRole(state, input.projectId, input.uploadedByUserId, ["owner", "coordinator", "head_writer"], "创建交稿包");
+  validateEpisodeRange(input.declaredEpisodeFrom, input.declaredEpisodeTo);
+
+  if (input.type === "single_replace" && input.declaredEpisodeFrom !== input.declaredEpisodeTo) {
+    throw new Error("单集替换只能声明一个集号");
+  }
+
+  const parsedEpisodes = normalizePackageEpisodes(input.episodes);
+
+  if (parsedEpisodes.length === 0) {
+    throw new Error("交稿包至少需要包含一集剧本");
+  }
+
+  const confirmedEpisodeNos = normalizeConfirmedEpisodeNos(
+    input.confirmedEpisodeNos ?? parsedEpisodes.map((episode) => episode.episodeNo)
+  );
+  const parsedEpisodeNos = new Set(parsedEpisodes.map((episode) => episode.episodeNo));
+  const declaredEpisodeNos = new Set(
+    Array.from({ length: input.declaredEpisodeTo - input.declaredEpisodeFrom + 1 }, (_, index) => input.declaredEpisodeFrom + index)
+  );
+
+  for (const episodeNo of confirmedEpisodeNos) {
+    if (!parsedEpisodeNos.has(episodeNo)) {
+      throw new Error("确认变更集不在交稿包内容中");
+    }
+  }
+
+  for (const episode of parsedEpisodes) {
+    if (!declaredEpisodeNos.has(episode.episodeNo)) {
+      throw new Error("交稿包内容超出声明范围");
+    }
+
+    requireEpisodeByNo(state, input.projectId, episode.episodeNo);
+  }
+
+  if (input.type === "single_replace" && confirmedEpisodeNos.length !== 1) {
+    throw new Error("单集替换必须只确认一集变更");
+  }
+
+  const packageId = createId("delivery", `${project.code}-${input.declaredEpisodeFrom}-${input.declaredEpisodeTo}`);
+  const createdAt = timestamp();
+  const deliveryPackage: DeliveryPackage = {
+    id: packageId,
+    projectId: input.projectId,
+    type: input.type,
+    title:
+      input.title?.trim() ||
+      `${project.name} 第 ${input.declaredEpisodeFrom}-${input.declaredEpisodeTo} 集交稿`,
+    sourceFileName: input.sourceFileName,
+    declaredEpisodeFrom: input.declaredEpisodeFrom,
+    declaredEpisodeTo: input.declaredEpisodeTo,
+    status: "draft",
+    uploadedByUserId: input.uploadedByUserId,
+    createdAt
+  };
+
+  const packageEpisodes: DeliveryPackageEpisode[] = parsedEpisodes.map((episode) => ({
+    id: createId("delivery-episode", `${packageId}-${episode.episodeNo}`),
+    deliveryPackageId: packageId,
+    episodeNo: episode.episodeNo,
+    title: episode.title || `第 ${episode.episodeNo} 集`,
+    content: episode.content,
+    isConfirmedChange: confirmedEpisodeNos.includes(episode.episodeNo)
+  }));
+
+  return {
+    ...state,
+    deliveryPackages: [...state.deliveryPackages, deliveryPackage],
+    deliveryPackageEpisodes: [...state.deliveryPackageEpisodes, ...packageEpisodes]
+  };
+}
+
+export function updateDeliveryPackageConfirmation(
+  state: WorkspaceState,
+  input: DeliveryPackageConfirmationInput
+): WorkspaceState {
+  const deliveryPackage = requireDeliveryPackage(state, input.deliveryPackageId);
+  assertDeliveryStatus(deliveryPackage, "draft");
+
+  const confirmedEpisodeNos = normalizeConfirmedEpisodeNos(input.confirmedEpisodeNos);
+  const packageEpisodes = state.deliveryPackageEpisodes.filter(
+    (episode) => episode.deliveryPackageId === input.deliveryPackageId
+  );
+  const packageEpisodeNos = new Set(packageEpisodes.map((episode) => episode.episodeNo));
+
+  for (const episodeNo of confirmedEpisodeNos) {
+    if (!packageEpisodeNos.has(episodeNo)) {
+      throw new Error("确认变更集不在交稿包内容中");
+    }
+  }
+
+  return {
+    ...state,
+    deliveryPackageEpisodes: state.deliveryPackageEpisodes.map((episode) =>
+      episode.deliveryPackageId === input.deliveryPackageId
+        ? { ...episode, isConfirmedChange: confirmedEpisodeNos.includes(episode.episodeNo) }
+        : episode
+    )
+  };
+}
+
+export function submitDeliveryPackageForReview(
+  state: WorkspaceState,
+  deliveryPackageId: string,
+  submittedByUserId: string
+): WorkspaceState {
+  const deliveryPackage = requireDeliveryPackage(state, deliveryPackageId);
+  assertDeliveryStatus(deliveryPackage, "draft");
+  assertProjectRole(state, deliveryPackage.projectId, submittedByUserId, ["owner", "coordinator", "head_writer"], "提交交稿包");
+
+  const confirmedCount = state.deliveryPackageEpisodes.filter(
+    (episode) => episode.deliveryPackageId === deliveryPackageId && episode.isConfirmedChange
+  ).length;
+
+  if (confirmedCount === 0) {
+    throw new Error("请至少确认一集实际变更后再提交");
+  }
+
+  return {
+    ...state,
+    deliveryPackages: state.deliveryPackages.map((item) =>
+      item.id === deliveryPackageId
+        ? {
+            ...item,
+            status: "pending_review",
+            submittedByUserId,
+            submittedAt: timestamp()
+          }
+        : item
+    )
+  };
+}
+
+export function rejectDeliveryPackage(
+  state: WorkspaceState,
+  deliveryPackageId: string,
+  reviewedByUserId: string,
+  reason: string
+): WorkspaceState {
+  const deliveryPackage = requireDeliveryPackage(state, deliveryPackageId);
+  assertDeliveryStatus(deliveryPackage, "pending_review");
+  assertProjectRole(state, deliveryPackage.projectId, reviewedByUserId, ["owner", "coordinator"], "驳回交稿包");
+
+  if (!reason.trim()) {
+    throw new Error("驳回原因不能为空");
+  }
+
+  return {
+    ...state,
+    deliveryPackages: state.deliveryPackages.map((item) =>
+      item.id === deliveryPackageId
+        ? {
+            ...item,
+            status: "rejected",
+            reviewedByUserId,
+            rejectionReason: reason.trim(),
+            rejectedAt: timestamp()
+          }
+        : item
+    )
+  };
+}
+
+export function publishDeliveryPackage(
+  state: WorkspaceState,
+  deliveryPackageId: string,
+  reviewedByUserId: string
+): WorkspaceState {
+  const deliveryPackage = requireDeliveryPackage(state, deliveryPackageId);
+  assertDeliveryStatus(deliveryPackage, "pending_review");
+  assertProjectRole(state, deliveryPackage.projectId, reviewedByUserId, ["owner", "coordinator"], "发布交稿包");
+
+  const confirmedEpisodes = state.deliveryPackageEpisodes.filter(
+    (episode) => episode.deliveryPackageId === deliveryPackageId && episode.isConfirmedChange
+  );
+
+  if (confirmedEpisodes.length === 0) {
+    throw new Error("没有可发布的确认变更集");
+  }
+
+  const createdAt = timestamp();
+  const nextRevisions: EpisodeRevision[] = confirmedEpisodes.map((packageEpisode) => {
+    const episode = requireEpisodeByNo(state, deliveryPackage.projectId, packageEpisode.episodeNo);
+    const previousCurrent = state.episodeCurrents.find((current) => current.episodeId === episode.id);
+    const previousRevision = previousCurrent
+      ? state.episodeRevisions.find((revision) => revision.id === previousCurrent.currentRevisionId)
+      : undefined;
+    const revisionNo = nextRevisionNo(state, episode.id);
+    const diff = diffEpisodeScript(previousRevision?.content ?? "", packageEpisode.content);
+
+    return {
+      id: createId("revision", `${episode.id}-${revisionNo}`),
+      projectId: deliveryPackage.projectId,
+      episodeId: episode.id,
+      episodeNo: packageEpisode.episodeNo,
+      deliveryPackageId,
+      revisionNo,
+      title: packageEpisode.title,
+      content: packageEpisode.content,
+      previousRevisionId: previousRevision?.id,
+      changeSummary: previousRevision ? diff.summary.headline : "本集首次发布当前生效剧本。",
+      createdAt
+    };
+  });
+
+  const nextCurrents = upsertEpisodeCurrents(state.episodeCurrents, nextRevisions, createdAt);
+  const changedEpisodeIds = new Set(nextRevisions.map((revision) => revision.episodeId));
+  const nextNotifications = buildPublishNotifications(state, nextRevisions, deliveryPackage, createdAt);
+
+  return {
+    ...state,
+    deliveryPackages: state.deliveryPackages.map((item) =>
+      item.id === deliveryPackageId
+        ? {
+            ...item,
+            status: "published",
+            reviewedByUserId,
+            publishedAt: createdAt
+          }
+        : item
+    ),
+    episodeRevisions: [...state.episodeRevisions, ...nextRevisions],
+    episodeCurrents: nextCurrents,
+    episodes: state.episodes.map((episode) =>
+      changedEpisodeIds.has(episode.id)
+        ? { ...episode, hasUnreadKeyChange: true, productionStatus: "key_update" }
+        : episode
+    ),
+    notifications: [...state.notifications, ...nextNotifications]
+  };
+}
+
 export function markNotificationRead(state: WorkspaceState, notificationId: string): WorkspaceState {
   const readAt = timestamp();
 
@@ -467,6 +708,49 @@ export function selectUnreadNotifications(state: WorkspaceState, userId = state.
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+export function selectDeliveryPackageDetail(state: WorkspaceState, deliveryPackageId: string) {
+  const deliveryPackage = requireDeliveryPackage(state, deliveryPackageId);
+  const episodes = state.deliveryPackageEpisodes
+    .filter((episode) => episode.deliveryPackageId === deliveryPackageId)
+    .sort((a, b) => a.episodeNo - b.episodeNo);
+
+  return {
+    ...deliveryPackage,
+    episodes,
+    confirmedEpisodeNos: episodes.filter((episode) => episode.isConfirmedChange).map((episode) => episode.episodeNo)
+  };
+}
+
+export function selectEpisodeScriptTimeline(state: WorkspaceState, episodeId: string) {
+  const episode = state.episodes.find((item) => item.id === episodeId);
+
+  if (!episode) {
+    throw new Error("集不存在");
+  }
+
+  const current = state.episodeCurrents.find((item) => item.episodeId === episodeId);
+  const currentRevision = current
+    ? state.episodeRevisions.find((revision) => revision.id === current.currentRevisionId)
+    : undefined;
+  const revisions = state.episodeRevisions
+    .filter((revision) => revision.episodeId === episodeId)
+    .sort((a, b) => b.revisionNo - a.revisionNo)
+    .map((revision) => {
+      const deliveryPackage = state.deliveryPackages.find((item) => item.id === revision.deliveryPackageId);
+      return {
+        ...revision,
+        deliveryPackageTitle: deliveryPackage?.title ?? "未知交稿包",
+        deliveryPackageStatus: deliveryPackage?.status ?? "draft"
+      };
+    });
+
+  return {
+    episode,
+    currentRevision,
+    revisions
+  };
+}
+
 function selectProjectRoles(state: WorkspaceState, userId: string, projectId?: string): ProjectRole[] {
   const user = state.users.find((item) => item.id === userId);
 
@@ -479,6 +763,145 @@ function selectProjectRoles(state: WorkspaceState, userId: string, projectId?: s
     .map((member) => member.role);
 
   return roles.length > 0 ? roles : [user.defaultRole];
+}
+
+function requireProject(state: WorkspaceState, projectId: string) {
+  const project = state.projects.find((item) => item.id === projectId);
+
+  if (!project) {
+    throw new Error("项目不存在");
+  }
+
+  return project;
+}
+
+function requireEpisodeByNo(state: WorkspaceState, projectId: string, episodeNo: number) {
+  const episode = state.episodes.find((item) => item.projectId === projectId && item.episodeNo === episodeNo);
+
+  if (!episode) {
+    throw new Error("集不存在");
+  }
+
+  return episode;
+}
+
+function requireDeliveryPackage(state: WorkspaceState, deliveryPackageId: string) {
+  const deliveryPackage = state.deliveryPackages.find((item) => item.id === deliveryPackageId);
+
+  if (!deliveryPackage) {
+    throw new Error("交稿包不存在");
+  }
+
+  return deliveryPackage;
+}
+
+function assertDeliveryStatus(deliveryPackage: DeliveryPackage, status: DeliveryPackage["status"]) {
+  if (deliveryPackage.status !== status) {
+    throw new Error(`交稿包状态必须是 ${status}`);
+  }
+}
+
+function assertProjectRole(
+  state: WorkspaceState,
+  projectId: string,
+  userId: string,
+  allowedRoles: ProjectRole[],
+  actionName: string
+) {
+  const user = state.users.find((item) => item.id === userId);
+
+  if (!user) {
+    throw new Error("用户不存在");
+  }
+
+  const roles = state.members
+    .filter((member) => member.projectId === projectId && member.userId === userId)
+    .map((member) => member.role);
+
+  if (roles.length === 0) {
+    throw new Error(`${actionName}需要先成为项目成员`);
+  }
+
+  if (!roles.some((role) => allowedRoles.includes(role))) {
+    throw new Error(`${actionName}权限不足`);
+  }
+}
+
+function normalizePackageEpisodes(episodes: DeliveryPackageDraftInput["episodes"]) {
+  const seen = new Set<number>();
+
+  return episodes.map((episode) => {
+    if (!Number.isInteger(episode.episodeNo) || episode.episodeNo < 1) {
+      throw new Error("集号不合法");
+    }
+
+    if (seen.has(episode.episodeNo)) {
+      throw new Error("交稿包内存在重复集号");
+    }
+
+    seen.add(episode.episodeNo);
+
+    const content = episode.content.trim();
+    if (!content) {
+      throw new Error("单集剧本内容不能为空");
+    }
+
+    return {
+      episodeNo: episode.episodeNo,
+      title: episode.title?.trim() || `第 ${episode.episodeNo} 集`,
+      content
+    };
+  });
+}
+
+function normalizeConfirmedEpisodeNos(episodeNos: number[]) {
+  return Array.from(new Set(episodeNos)).sort((a, b) => a - b);
+}
+
+function nextRevisionNo(state: WorkspaceState, episodeId: string) {
+  const latest = state.episodeRevisions
+    .filter((revision) => revision.episodeId === episodeId)
+    .reduce((max, revision) => Math.max(max, revision.revisionNo), 0);
+
+  return latest + 1;
+}
+
+function upsertEpisodeCurrents(currents: EpisodeCurrent[], revisions: EpisodeRevision[], updatedAt: string) {
+  const revisionByEpisodeId = new Map(revisions.map((revision) => [revision.episodeId, revision]));
+  const touchedEpisodeIds = new Set(revisionByEpisodeId.keys());
+  const preserved = currents.filter((current) => !touchedEpisodeIds.has(current.episodeId));
+  const next = revisions.map((revision) => ({
+    id: createId("current", revision.episodeId),
+    projectId: revision.projectId,
+    episodeId: revision.episodeId,
+    currentRevisionId: revision.id,
+    updatedAt
+  }));
+
+  return [...preserved, ...next];
+}
+
+function buildPublishNotifications(
+  state: WorkspaceState,
+  revisions: EpisodeRevision[],
+  deliveryPackage: DeliveryPackage,
+  createdAt: string
+) {
+  return revisions.flatMap((revision) => {
+    const assignments = state.assignments.filter((assignment) => assignment.episodeId === revision.episodeId);
+    const recipientIds = Array.from(new Set(assignments.map((assignment) => assignment.userId)));
+
+    return recipientIds.map((recipientId) => ({
+      id: createId("notification", `${revision.id}-${recipientId}`),
+      projectId: revision.projectId,
+      episodeId: revision.episodeId,
+      recipientId,
+      type: "key_change" as const,
+      title: `第 ${revision.episodeNo} 集剧本已更新`,
+      body: `${deliveryPackage.title} 已发布：${revision.changeSummary}`,
+      createdAt
+    }));
+  });
 }
 
 function defaultPermissionsForRole(role: ProjectRole): PermissionKey[] {
