@@ -1,5 +1,5 @@
 import { AlignmentType, Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
-import { Buffer } from "node:buffer";
+import type { Buffer } from "node:buffer";
 
 export const EPISODE_SCRIPT_DOCX_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";

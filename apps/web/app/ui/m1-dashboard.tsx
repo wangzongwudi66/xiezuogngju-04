@@ -35,15 +35,17 @@ import {
   Users
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   archiveProject,
   assignEpisodes,
+  createEpisodeScriptDocxBlob,
   createDeliveryPackageDraft,
   createProject,
   loginAsUser,
   logout,
   markNotificationRead,
+  parseWordDelivery,
   publishDeliveryPackage,
   registerUser,
   rejectDeliveryPackage,
@@ -70,9 +72,13 @@ import type {
   EpisodeProductionStatus,
   PermissionKey,
   ProjectRole,
+  WordDeliveryIssue,
   WorkspaceState
 } from "@aigc/domain";
 import { buildTodayTasks } from "./dashboard-tasks";
+import { buildDeliveryPackageDraftFromParsed, buildTextDeliveryPackageDraft } from "./delivery-text-parser";
+import { clearM2WorkspacePersistence, readM2WorkspacePersistence, writeM2WorkspacePersistence } from "./workspace-persistence";
+import type { DeliveryImportJob } from "./workspace-persistence";
 
 const roleLabels: Record<ProjectRole, string> = {
   owner: "项目所有者",
@@ -139,6 +145,48 @@ const baseShortcutItems: NavigationItem[] = [
 ];
 
 type MockDeliveryKey = "range-1-10" | "range-1-20" | "single-replace-5";
+type WordUploadType = "range" | "single_replace";
+type WordUploadStatus = "empty" | "selected" | "parsing" | "success" | "failed";
+type TextParseFeedback = {
+  tone: "success" | "warning" | "error";
+  title: string;
+  issues: WordDeliveryIssue[];
+  remedies?: string[];
+};
+
+const deliveryImportJobStatusLabels: Record<DeliveryImportJob["status"], string> = {
+  processing: "处理中",
+  success: "已生成草稿",
+  failed: "解析失败"
+};
+
+const wordUploadStatusCopy: Record<WordUploadStatus, { title: string; body: string }> = {
+  empty: {
+    title: "待选择文件",
+    body: "先选择或拖入 .docx 文件。上传后只会切成单集草稿，不会立刻发布。"
+  },
+  selected: {
+    title: "已选择文件",
+    body: "文件已就绪。下一步会解析 docx 正文并创建草稿，解析完成后仍需要在确认页勾选实际变更集。"
+  },
+  parsing: {
+    title: "正在解析",
+    body: "正在读取 Word 正文并按集切段。解析完成后会进入交稿确认。"
+  },
+  success: {
+    title: "解析成功，等待确认",
+    body: "已生成可确认的单集草稿。必须在确认页勾选实际变更集，提交后也不会立刻发布。"
+  },
+  failed: {
+    title: "解析失败，可手动粘贴单集补救",
+    body: "没有识别出可靠的单集内容。不要反复上传同一份文件；可以改用“手动粘贴单集文本”的补救流程，再确认这一集是否真的变更。"
+  }
+};
+
+const wordUploadTypeLabels: Record<WordUploadType, string> = {
+  range: "范围交稿",
+  single_replace: "单集替换"
+};
 
 const mockDeliveryTemplates: Array<{
   key: MockDeliveryKey;
@@ -286,7 +334,8 @@ function buildM2PrototypeWorkspace(): WorkspaceState {
 }
 
 export function M1Dashboard() {
-  const [state, setState] = useState<WorkspaceState>(() => buildM2PrototypeWorkspace());
+  const [persistedWorkspace] = useState(() => readM2WorkspacePersistence());
+  const [state, setState] = useState<WorkspaceState>(() => persistedWorkspace?.state ?? buildM2PrototypeWorkspace());
   const [selectedProjectId, setSelectedProjectId] = useState(seedWorkspace.projects[0].id);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [projectDraft, setProjectDraft] = useState({ name: "裂隙边境", code: "LX", episodeCount: 60 });
@@ -308,11 +357,22 @@ export function M1Dashboard() {
   const [activeModule, setActiveModule] = useState("项目总览");
   const [selectedMockDeliveryKey, setSelectedMockDeliveryKey] = useState<MockDeliveryKey>("range-1-10");
   const [selectedDeliveryPackageId, setSelectedDeliveryPackageId] = useState<string | null>(null);
+  const [wordTextDraft, setWordTextDraft] = useState("");
+  const [wordDeclaredRangeDraft, setWordDeclaredRangeDraft] = useState("1-2");
+  const [wordParseFeedback, setWordParseFeedback] = useState<TextParseFeedback | null>(null);
+  const [deliveryParseIssuesByPackageId, setDeliveryParseIssuesByPackageId] = useState<Record<string, WordDeliveryIssue[]>>(
+    () => persistedWorkspace?.deliveryParseIssuesByPackageId ?? {}
+  );
+  const [deliveryImportJobs, setDeliveryImportJobs] = useState<DeliveryImportJob[]>(() => persistedWorkspace?.deliveryImportJobs ?? []);
   const [rejectionReason, setRejectionReason] = useState("范围声明需要再确认");
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [actionMessage, setActionMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
+
+  useEffect(() => {
+    writeM2WorkspacePersistence({ state, deliveryImportJobs, deliveryParseIssuesByPackageId });
+  }, [deliveryImportJobs, deliveryParseIssuesByPackageId, state]);
 
   const currentUser = selectCurrentUser(state);
   const activeProjects = state.projects.filter((project) => project.status === "active");
@@ -348,11 +408,13 @@ export function M1Dashboard() {
   const searchResults = buildSearchResults(searchQuery, activeProjects, searchableMembers, visibleEpisodes);
   const currentProjectParticipation = canViewFullProject ? myEpisodes.length : visibleEpisodes.length;
   const projectDeliveryPackages = state.deliveryPackages.filter((deliveryPackage) => deliveryPackage.projectId === selectedProject.id);
+  const projectDeliveryImportJobs = deliveryImportJobs.filter((job) => job.projectId === selectedProject.id).slice(0, 8);
   const activeDeliveryPackageId =
     selectedDeliveryPackageId && projectDeliveryPackages.some((deliveryPackage) => deliveryPackage.id === selectedDeliveryPackageId)
       ? selectedDeliveryPackageId
       : projectDeliveryPackages.at(-1)?.id ?? null;
   const activeDeliveryPackage = activeDeliveryPackageId ? selectDeliveryPackageDetail(state, activeDeliveryPackageId) : null;
+  const activeDeliveryParseIssues = activeDeliveryPackageId ? deliveryParseIssuesByPackageId[activeDeliveryPackageId] ?? [] : [];
   const deliveryPackageDetails = projectDeliveryPackages
     .map((deliveryPackage) => selectDeliveryPackageDetail(state, deliveryPackage.id))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -364,6 +426,45 @@ export function M1Dashboard() {
     } catch (error) {
       setActionMessage({ tone: "error", text: formatActionError(error) });
     }
+  }
+
+  function handleResetPrototypeState() {
+    const next = buildM2PrototypeWorkspace();
+    clearM2WorkspacePersistence();
+    setState(next);
+    setSelectedProjectId(next.projects[0]?.id ?? seedWorkspace.projects[0].id);
+    setSelectedDeliveryPackageId(null);
+    setDeliveryImportJobs([]);
+    setDeliveryParseIssuesByPackageId({});
+    setWordParseFeedback(null);
+    setActionMessage({ tone: "success", text: "原型数据已重置为默认演示状态。" });
+    setUserMenuOpen(false);
+  }
+
+  function createDeliveryImportJob(input: Pick<DeliveryImportJob, "declaredRangeText" | "fileName" | "projectId" | "source">) {
+    const job: DeliveryImportJob = {
+      ...input,
+      id: `import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      status: "processing",
+      createdAt: new Date().toISOString()
+    };
+
+    setDeliveryImportJobs((items) => [job, ...items].slice(0, 20));
+    return job.id;
+  }
+
+  function updateDeliveryImportJob(jobId: string, patch: Partial<DeliveryImportJob>) {
+    setDeliveryImportJobs((items) =>
+      items.map((item) =>
+        item.id === jobId
+          ? {
+              ...item,
+              ...patch,
+              completedAt: patch.status === "success" || patch.status === "failed" ? new Date().toISOString() : item.completedAt
+            }
+          : item
+      )
+    );
   }
 
   function handleCreateProject(event: FormEvent<HTMLFormElement>) {
@@ -451,6 +552,161 @@ export function M1Dashboard() {
     setActiveModule("交稿中心");
   }
 
+  function handleCreateTextDelivery() {
+    if (!canSubmitDelivery) {
+      setActionMessage({ tone: "error", text: "当前身份不能创建交稿包。请让主编剧或统筹处理。" });
+      return;
+    }
+
+    const jobId = createDeliveryImportJob({
+      projectId: selectedProject.id,
+      source: "text",
+      fileName: "pasted-word-text.txt",
+      declaredRangeText: wordDeclaredRangeDraft
+    });
+    const parsed = buildTextDeliveryPackageDraft({
+      projectId: selectedProject.id,
+      uploadedByUserId: currentUserId,
+      rawText: wordTextDraft,
+      declaredRangeText: wordDeclaredRangeDraft
+    });
+
+    if (!parsed.ok) {
+      setWordParseFeedback({
+        tone: "error",
+        title: "解析失败，可手动粘贴单集补救",
+        issues: parsed.issues,
+        remedies: parsed.remedies
+      });
+      updateDeliveryImportJob(jobId, {
+        status: "failed",
+        issueCount: parsed.issues.length,
+        errorText: parsed.issues[0]?.message ?? "未识别到集边界"
+      });
+      setActionMessage({ tone: "error", text: "没有识别到集边界。可改用手动粘贴单集补救，不阻塞后续确认流程。" });
+      return;
+    }
+
+    try {
+      const next = createDeliveryPackageDraft(state, parsed.draft);
+      const created = next.deliveryPackages.at(-1);
+      if (created) {
+        setSelectedDeliveryPackageId(created.id);
+        setDeliveryParseIssuesByPackageId((items) => ({
+          ...items,
+          [created.id]: parsed.issues
+        }));
+        updateDeliveryImportJob(jobId, {
+          status: "success",
+          deliveryPackageId: created.id,
+          issueCount: parsed.issues.length
+        });
+      }
+      setState(next);
+      setActionMessage({ tone: "success", text: "文本解析已生成交稿包草稿：请在确认页检查 warnings 并勾选实际变更集。" });
+      setWordParseFeedback({
+        tone: parsed.issues.length > 0 ? "warning" : "success",
+        title: parsed.issues.length > 0 ? "解析完成，存在 warnings" : "解析完成，已进入确认页",
+        issues: parsed.issues
+      });
+      setActiveModule("交稿中心");
+    } catch (error) {
+      setWordParseFeedback({
+        tone: "error",
+        title: "解析已完成，但交稿包草稿未创建",
+        issues: parsed.issues,
+        remedies: [formatActionError(error), "可手动粘贴单集补救，或调整声明范围后重新解析。"]
+      });
+      updateDeliveryImportJob(jobId, {
+        status: "failed",
+        issueCount: parsed.issues.length,
+        errorText: formatActionError(error)
+      });
+      setActionMessage({ tone: "error", text: formatActionError(error) });
+    }
+  }
+
+  async function handleCreateDocxDelivery(file: File, declaredRangeText: string): Promise<WordUploadStatus> {
+    if (!canSubmitDelivery) {
+      setActionMessage({ tone: "error", text: "当前身份不能创建交稿包。请让主编剧或统筹处理。" });
+      return "failed";
+    }
+
+    const jobId = createDeliveryImportJob({
+      projectId: selectedProject.id,
+      source: "docx",
+      fileName: file.name,
+      declaredRangeText
+    });
+    const parsed = await parseWordDelivery(file, {
+      declaredRange: declaredRangeText.trim() || undefined,
+      fileName: file.name
+    });
+
+    if (!parsed.ok) {
+      setWordParseFeedback({
+        tone: "error",
+        title: "Word 解析失败，可手动粘贴单集补救",
+        issues: [...parsed.warnings, ...parsed.errors],
+        remedies: parsed.remedies
+      });
+      updateDeliveryImportJob(jobId, {
+        status: "failed",
+        issueCount: parsed.warnings.length + parsed.errors.length,
+        errorText: parsed.errors[0]?.message ?? "Word 解析失败"
+      });
+      setActionMessage({ tone: "error", text: "Word 没有解析出可靠的单集内容。可以改用手动粘贴单集补救。" });
+      return "failed";
+    }
+
+    const built = buildDeliveryPackageDraftFromParsed({
+      projectId: selectedProject.id,
+      uploadedByUserId: currentUserId,
+      sourceFileName: file.name,
+      parsed
+    });
+
+    try {
+      const next = createDeliveryPackageDraft(state, built.draft);
+      const created = next.deliveryPackages.at(-1);
+      if (created) {
+        setSelectedDeliveryPackageId(created.id);
+        setDeliveryParseIssuesByPackageId((items) => ({
+          ...items,
+          [created.id]: built.issues
+        }));
+        updateDeliveryImportJob(jobId, {
+          status: "success",
+          deliveryPackageId: created.id,
+          issueCount: built.issues.length
+        });
+      }
+      setState(next);
+      setWordParseFeedback({
+        tone: built.issues.length > 0 ? "warning" : "success",
+        title: built.issues.length > 0 ? "Word 解析完成，存在 warnings" : "Word 解析完成，已进入确认页",
+        issues: built.issues
+      });
+      setActionMessage({ tone: "success", text: "Word 已解析成交稿包草稿：请在确认页检查 warnings 并勾选实际变更集。" });
+      setActiveModule("交稿中心");
+      return "success";
+    } catch (error) {
+      setWordParseFeedback({
+        tone: "error",
+        title: "Word 已解析，但交稿包草稿未创建",
+        issues: built.issues,
+        remedies: [formatActionError(error), "可改用手动粘贴单集补救，或调整声明范围后重新解析。"]
+      });
+      updateDeliveryImportJob(jobId, {
+        status: "failed",
+        issueCount: built.issues.length,
+        errorText: formatActionError(error)
+      });
+      setActionMessage({ tone: "error", text: formatActionError(error) });
+      return "failed";
+    }
+  }
+
   function handleUpdateConfirmedEpisode(deliveryPackageId: string, episodeNo: number, checked: boolean) {
     const detail = selectDeliveryPackageDetail(state, deliveryPackageId);
     const confirmedEpisodeNos = checked
@@ -472,14 +728,14 @@ export function M1Dashboard() {
     if (detail.confirmedEpisodeNos.length === 0) {
       setActionMessage({
         tone: "error",
-        text: "还没有勾选实际变更集。请先确认哪些集真的改过；没有改动的集不会进入本次发布。"
+        text: "还没有勾选实际变更集。请先勾选至少一集真的改过的内容；没有改动的集不会进入本次发布。"
       });
       return;
     }
 
     runMutation(
       (current) => submitDeliveryPackageForReview(current, deliveryPackageId, currentUserId),
-      "已送到统筹待发布：统筹会检查范围和实际变更集，确认后再发布。"
+      "已提交给统筹。现在还没有覆盖当前剧本；统筹发布后，勾选的集才会变成当前生效剧本。"
     );
   }
 
@@ -492,7 +748,7 @@ export function M1Dashboard() {
     const detail = selectDeliveryPackageDetail(state, deliveryPackageId);
     runMutation(
       (current) => publishDeliveryPackage(current, deliveryPackageId, currentUserId),
-      `发布成功：第 ${detail.confirmedEpisodeNos.join("、")} 集已成为当前生效剧本，负责这些集的创作者会收到关键变更提醒。`
+      `发布成功。第 ${detail.confirmedEpisodeNos.join("、")} 集现在是当前生效剧本；已分配到这些集的人会收到“剧本已更新，请查看关键变更”。`
     );
   }
 
@@ -504,7 +760,7 @@ export function M1Dashboard() {
 
     runMutation(
       (current) => rejectDeliveryPackage(current, deliveryPackageId, currentUserId, rejectionReason),
-      "已驳回：这次没有生成新剧本版本。交稿人按原因补齐后，可以重新提交。"
+      "已驳回。这次不会生成新剧本版本；交稿人按驳回原因补齐后，可以重新提交。"
     );
   }
 
@@ -595,6 +851,9 @@ export function M1Dashboard() {
                   <button onClick={() => setState((current) => logout(current))} type="button">
                     退出登录
                   </button>
+                  <button onClick={handleResetPrototypeState} type="button">
+                    重置原型数据
+                  </button>
                 </div>
               </FloatingPanel>
             ) : null}
@@ -628,9 +887,11 @@ export function M1Dashboard() {
                   </article>
                 ))}
               </div>
-              <button className="text-link" onClick={() => setActiveModule("任务中心")} type="button">
-                查看全部任务（{todayTasks.length}）
-              </button>
+              {todayTasks.length > 0 ? (
+                <button className="text-link" onClick={() => setActiveModule("任务中心")} type="button">
+                  查看全部任务（{todayTasks.length}）
+                </button>
+              ) : null}
             </section>
 
             {actionMessage ? (
@@ -733,12 +994,16 @@ export function M1Dashboard() {
           <ModuleWorkbench
             activeModule={effectiveActiveModule}
             activeDeliveryPackage={activeDeliveryPackage}
+            activeDeliveryParseIssues={activeDeliveryParseIssues}
             assignmentSummary={assignmentSummary}
             canReviewDelivery={canReviewDelivery}
             canSubmitDelivery={canSubmitDelivery}
+            deliveryImportJobs={projectDeliveryImportJobs}
             deliveryPackageDetails={deliveryPackageDetails}
             episode={selectedEpisode}
             handleCreateMockDelivery={handleCreateMockDelivery}
+            handleCreateDocxDelivery={handleCreateDocxDelivery}
+            handleCreateTextDelivery={handleCreateTextDelivery}
             handlePublishDelivery={handlePublishDelivery}
             handleRejectDelivery={handleRejectDelivery}
             handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
@@ -752,6 +1017,11 @@ export function M1Dashboard() {
             setSelectedMockDeliveryKey={setSelectedMockDeliveryKey}
             state={state}
             tasks={todayTasks}
+            wordDeclaredRangeDraft={wordDeclaredRangeDraft}
+            wordParseFeedback={wordParseFeedback}
+            wordTextDraft={wordTextDraft}
+            setWordDeclaredRangeDraft={setWordDeclaredRangeDraft}
+            setWordTextDraft={setWordTextDraft}
           />
 
           {permissions.canManageProjects || permissions.canManageMembers || permissions.canAssignEpisodes ? (
@@ -1053,12 +1323,16 @@ function UpdatesPanel({ updates }: { updates: ReturnType<typeof buildRecentUpdat
 function ModuleWorkbench({
   activeModule,
   activeDeliveryPackage,
+  activeDeliveryParseIssues,
   assignmentSummary,
   canReviewDelivery,
   canSubmitDelivery,
+  deliveryImportJobs,
   deliveryPackageDetails,
   episode,
+  handleCreateDocxDelivery,
   handleCreateMockDelivery,
+  handleCreateTextDelivery,
   handlePublishDelivery,
   handleRejectDelivery,
   handleSubmitDeliveryForReview,
@@ -1071,16 +1345,25 @@ function ModuleWorkbench({
   setSelectedDeliveryPackageId,
   setSelectedMockDeliveryKey,
   state,
-  tasks
+  tasks,
+  wordDeclaredRangeDraft,
+  wordParseFeedback,
+  wordTextDraft,
+  setWordDeclaredRangeDraft,
+  setWordTextDraft
 }: {
   activeModule: string;
   activeDeliveryPackage: ReturnType<typeof selectDeliveryPackageDetail> | null;
+  activeDeliveryParseIssues: WordDeliveryIssue[];
   assignmentSummary: AssignmentSummaryItem[];
   canReviewDelivery: boolean;
   canSubmitDelivery: boolean;
+  deliveryImportJobs: DeliveryImportJob[];
   deliveryPackageDetails: Array<ReturnType<typeof selectDeliveryPackageDetail>>;
   episode: ReturnType<typeof selectProjectOverview>["episodes"][number] | null;
+  handleCreateDocxDelivery: (file: File, declaredRangeText: string) => Promise<WordUploadStatus>;
   handleCreateMockDelivery: () => void;
+  handleCreateTextDelivery: () => void;
   handlePublishDelivery: (deliveryPackageId: string) => void;
   handleRejectDelivery: (deliveryPackageId: string) => void;
   handleSubmitDeliveryForReview: (deliveryPackageId: string) => void;
@@ -1094,6 +1377,11 @@ function ModuleWorkbench({
   setSelectedMockDeliveryKey: React.Dispatch<React.SetStateAction<MockDeliveryKey>>;
   state: WorkspaceState;
   tasks: ReturnType<typeof buildTodayTasks>;
+  wordDeclaredRangeDraft: string;
+  wordParseFeedback: TextParseFeedback | null;
+  wordTextDraft: string;
+  setWordDeclaredRangeDraft: React.Dispatch<React.SetStateAction<string>>;
+  setWordTextDraft: React.Dispatch<React.SetStateAction<string>>;
 }) {
   if (activeModule === "集工作台") {
     if (!episode) {
@@ -1106,6 +1394,11 @@ function ModuleWorkbench({
     }
 
     const timeline = selectEpisodeScriptTimeline(state, episode.id);
+    const currentRevision = timeline.currentRevision;
+    const currentRevisionDetail = currentRevision
+      ? timeline.revisions.find((revision) => revision.id === currentRevision.id)
+      : undefined;
+    const docxDisabledHint = "暂无当前生效剧本，发布交稿包后才能导出 docx。";
 
     return (
       <section className="panel module-panel">
@@ -1114,8 +1407,8 @@ function ModuleWorkbench({
           <div>
             <span className={`status-pill ${episode.productionStatus}`}>{statusLabels[episode.productionStatus]}</span>
             <p>
-              {timeline.currentRevision
-                ? `当前生效剧本来自 ${timeline.revisions[0]?.deliveryPackageTitle ?? "已发布交稿包"}，修订号 v${timeline.currentRevision.revisionNo}。`
+              {currentRevision
+                ? `当前生效剧本来自 ${currentRevisionDetail?.deliveryPackageTitle ?? "已发布交稿包"}，修订号 v${currentRevision.revisionNo}。`
                 : "当前还没有已发布剧本。主编剧提交交稿包并由统筹发布后，这里会显示 EpisodeCurrent 对应的最新修订。"}
             </p>
           </div>
@@ -1128,27 +1421,44 @@ function ModuleWorkbench({
             <div className="script-card-head">
               <div>
                 <span>当前生效剧本</span>
-                <strong>{timeline.currentRevision?.title ?? "未发布当前剧本"}</strong>
+                <strong>{currentRevision?.title ?? "未发布当前剧本"}</strong>
               </div>
               <div className="script-tools">
                 <button disabled={timeline.revisions.length === 0} type="button">
                   <FileText size={15} />
                   历史修订
                 </button>
-                <button disabled={!timeline.currentRevision} type="button">
+                <button disabled={!currentRevision} type="button">
                   <GitCompareArrows size={15} />
                   diff 摘要
                 </button>
-                <button disabled={!timeline.currentRevision} type="button">
+                <button
+                  disabled={!currentRevision}
+                  onClick={() => {
+                    if (!currentRevision) {
+                      return;
+                    }
+
+                    void downloadCurrentRevisionDocx({
+                      deliveryPackageTitle: currentRevisionDetail?.deliveryPackageTitle,
+                      episodeNo: episode.episodeNo,
+                      projectName,
+                      revision: currentRevision
+                    });
+                  }}
+                  title={currentRevision ? "导出当前集生效剧本 docx" : docxDisabledHint}
+                  type="button"
+                >
                   <Download size={15} />
                   导出 docx
                 </button>
               </div>
             </div>
-            {timeline.currentRevision ? (
-              <p className="script-diff-summary">{timeline.currentRevision.changeSummary}</p>
+            {!currentRevision ? <p className="script-tool-hint">{docxDisabledHint}</p> : null}
+            {currentRevision ? (
+              <p className="script-diff-summary">{currentRevision.changeSummary}</p>
             ) : null}
-            <pre>{timeline.currentRevision?.content ?? "暂无当前生效剧本内容。"}</pre>
+            <pre>{currentRevision?.content ?? "暂无当前生效剧本内容。"}</pre>
           </div>
           {timeline.revisions.length > 0 ? (
             <div className="revision-list">
@@ -1169,10 +1479,14 @@ function ModuleWorkbench({
     return (
       <M2DeliveryCenter
         activeDeliveryPackage={activeDeliveryPackage}
+        activeDeliveryParseIssues={activeDeliveryParseIssues}
         canReviewDelivery={canReviewDelivery}
         canSubmitDelivery={canSubmitDelivery}
+        deliveryImportJobs={deliveryImportJobs}
         deliveryPackageDetails={deliveryPackageDetails}
+        handleCreateDocxDelivery={handleCreateDocxDelivery}
         handleCreateMockDelivery={handleCreateMockDelivery}
+        handleCreateTextDelivery={handleCreateTextDelivery}
         handlePublishDelivery={handlePublishDelivery}
         handleRejectDelivery={handleRejectDelivery}
         handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
@@ -1182,6 +1496,11 @@ function ModuleWorkbench({
         setRejectionReason={setRejectionReason}
         setSelectedDeliveryPackageId={setSelectedDeliveryPackageId}
         setSelectedMockDeliveryKey={setSelectedMockDeliveryKey}
+        wordDeclaredRangeDraft={wordDeclaredRangeDraft}
+        wordParseFeedback={wordParseFeedback}
+        wordTextDraft={wordTextDraft}
+        setWordDeclaredRangeDraft={setWordDeclaredRangeDraft}
+        setWordTextDraft={setWordTextDraft}
       />
     );
   }
@@ -1254,10 +1573,14 @@ function ModuleWorkbench({
 
 function M2DeliveryCenter({
   activeDeliveryPackage,
+  activeDeliveryParseIssues,
   canReviewDelivery,
   canSubmitDelivery,
+  deliveryImportJobs,
   deliveryPackageDetails,
+  handleCreateDocxDelivery,
   handleCreateMockDelivery,
+  handleCreateTextDelivery,
   handlePublishDelivery,
   handleRejectDelivery,
   handleSubmitDeliveryForReview,
@@ -1266,13 +1589,22 @@ function M2DeliveryCenter({
   selectedMockDeliveryKey,
   setRejectionReason,
   setSelectedDeliveryPackageId,
-  setSelectedMockDeliveryKey
+  setSelectedMockDeliveryKey,
+  wordDeclaredRangeDraft,
+  wordParseFeedback,
+  wordTextDraft,
+  setWordDeclaredRangeDraft,
+  setWordTextDraft
 }: {
   activeDeliveryPackage: ReturnType<typeof selectDeliveryPackageDetail> | null;
+  activeDeliveryParseIssues: WordDeliveryIssue[];
   canReviewDelivery: boolean;
   canSubmitDelivery: boolean;
+  deliveryImportJobs: DeliveryImportJob[];
   deliveryPackageDetails: Array<ReturnType<typeof selectDeliveryPackageDetail>>;
+  handleCreateDocxDelivery: (file: File, declaredRangeText: string) => Promise<WordUploadStatus>;
   handleCreateMockDelivery: () => void;
+  handleCreateTextDelivery: () => void;
   handlePublishDelivery: (deliveryPackageId: string) => void;
   handleRejectDelivery: (deliveryPackageId: string) => void;
   handleSubmitDeliveryForReview: (deliveryPackageId: string) => void;
@@ -1282,9 +1614,61 @@ function M2DeliveryCenter({
   setRejectionReason: React.Dispatch<React.SetStateAction<string>>;
   setSelectedDeliveryPackageId: React.Dispatch<React.SetStateAction<string | null>>;
   setSelectedMockDeliveryKey: React.Dispatch<React.SetStateAction<MockDeliveryKey>>;
+  wordDeclaredRangeDraft: string;
+  wordParseFeedback: TextParseFeedback | null;
+  wordTextDraft: string;
+  setWordDeclaredRangeDraft: React.Dispatch<React.SetStateAction<string>>;
+  setWordTextDraft: React.Dispatch<React.SetStateAction<string>>;
 }) {
   const selectedTemplate = mockDeliveryTemplates.find((item) => item.key === selectedMockDeliveryKey) ?? mockDeliveryTemplates[0];
   const confirmedCount = activeDeliveryPackage?.confirmedEpisodeNos.length ?? 0;
+  const [uploadType, setUploadType] = useState<WordUploadType>("range");
+  const [uploadEpisodeFrom, setUploadEpisodeFrom] = useState(1);
+  const [uploadEpisodeTo, setUploadEpisodeTo] = useState(10);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadFileName, setUploadFileName] = useState("");
+  const [uploadStatus, setUploadStatus] = useState<WordUploadStatus>("empty");
+  const [isDraggingDocx, setIsDraggingDocx] = useState(false);
+  const uploadStatusText = wordUploadStatusCopy[uploadStatus];
+
+  function handleUploadTypeChange(nextType: WordUploadType) {
+    setUploadType(nextType);
+
+    if (nextType === "single_replace") {
+      setUploadEpisodeTo(uploadEpisodeFrom);
+    }
+  }
+
+  function handleUploadFromChange(value: number) {
+    const nextFrom = Number.isFinite(value) && value > 0 ? value : 1;
+    setUploadEpisodeFrom(nextFrom);
+
+    if (uploadType === "single_replace") {
+      setUploadEpisodeTo(nextFrom);
+    } else if (uploadEpisodeTo < nextFrom) {
+      setUploadEpisodeTo(nextFrom);
+    }
+  }
+
+  function handleDocxFile(file?: File) {
+    if (!file) {
+      return;
+    }
+
+    setUploadFileName(file.name);
+    setUploadFile(file);
+    setUploadStatus("selected");
+  }
+
+  async function handleParseSelectedDocx() {
+    if (!uploadFile || uploadStatus === "parsing") {
+      return;
+    }
+
+    setUploadStatus("parsing");
+    const nextStatus = await handleCreateDocxDelivery(uploadFile, `${uploadEpisodeFrom}-${uploadEpisodeTo}`);
+    setUploadStatus(nextStatus);
+  }
 
   return (
     <section className="panel module-panel delivery-center">
@@ -1292,12 +1676,153 @@ function M2DeliveryCenter({
 
       <div className="delivery-grid">
         <div className="delivery-column">
+          <section className="word-upload-panel">
+            <div className="word-upload-head">
+              <div>
+                <strong>Word 上传入口</strong>
+                <p>上传 Word 后会先切成单集，不会立刻发布；必须在确认页勾选实际变更集。</p>
+              </div>
+              <span>{uploadStatusText.title}</span>
+            </div>
+
+            <div className="upload-type-switch" aria-label="选择上传类型">
+              {(["range", "single_replace"] as WordUploadType[]).map((type) => (
+                <button
+                  className={uploadType === type ? "active" : ""}
+                  key={type}
+                  onClick={() => handleUploadTypeChange(type)}
+                  type="button"
+                >
+                  {wordUploadTypeLabels[type]}
+                </button>
+              ))}
+            </div>
+
+            <div className="inline-fields">
+              <label>
+                起始集
+                <input
+                  min={1}
+                  type="number"
+                  value={uploadEpisodeFrom}
+                  onChange={(event) => handleUploadFromChange(Number(event.target.value))}
+                />
+              </label>
+              <label>
+                结束集
+                <input
+                  disabled={uploadType === "single_replace"}
+                  min={uploadEpisodeFrom}
+                  type="number"
+                  value={uploadEpisodeTo}
+                  onChange={(event) => setUploadEpisodeTo(Math.max(uploadEpisodeFrom, Number(event.target.value) || uploadEpisodeFrom))}
+                />
+              </label>
+            </div>
+
+            {canSubmitDelivery ? (
+              <>
+                <label
+                  className={`docx-dropzone ${isDraggingDocx ? "dragging" : ""}`}
+                  onDragLeave={() => setIsDraggingDocx(false)}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setIsDraggingDocx(true);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setIsDraggingDocx(false);
+                    handleDocxFile(event.dataTransfer.files.item(0) ?? undefined);
+                  }}
+                >
+                  <FileText size={22} />
+                  <span>{uploadFileName || "选择或拖拽 docx 文件到这里"}</span>
+                  <small>.docx only · 解析成功后会创建交稿草稿</small>
+                  <input
+                    accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    onChange={(event) => handleDocxFile(event.target.files?.item(0) ?? undefined)}
+                    type="file"
+                  />
+                </label>
+
+                <div className={`upload-status-card ${uploadStatus}`}>
+                  <strong>{uploadStatusText.title}</strong>
+                  <span>{uploadStatusText.body}</span>
+                </div>
+
+                {uploadStatus === "failed" ? (
+                  <div className="manual-fallback-card">
+                    <strong>手动粘贴单集补救</strong>
+                    <p>适用于 Word 标题不规范、漏写“第 X 集”、或内容在图片里导致切段失败的情况。</p>
+                    <ol>
+                      <li>先把需要补救的单集正文复制出来，例如只复制第 12 集。</li>
+                      <li>按“单集替换”处理，只确认这一集为实际变更。</li>
+                      <li>提交后仍需统筹发布，发布前不会覆盖当前生效剧本。</li>
+                    </ol>
+                    <small>文件解析失败时，可用下面的粘贴文本入口创建草稿。</small>
+                  </div>
+                ) : null}
+
+                <div className="upload-actions">
+                  <button
+                    className="primary-button"
+                    disabled={!uploadFileName || uploadStatus === "parsing"}
+                    onClick={() => {
+                      void handleParseSelectedDocx();
+                    }}
+                    type="button"
+                  >
+                    解析 Word 并创建草稿
+                  </button>
+                </div>
+
+                <div className="word-text-parser">
+                  <div>
+                    <strong>粘贴 Word 文本/解析文本</strong>
+                    <p>本轮只接文本解析。粘贴包含“第 1 集 / 第 2 集”的正文后，会生成交稿包草稿并进入确认页。</p>
+                  </div>
+                  <label>
+                    声明范围
+                    <input
+                      placeholder="1-10"
+                      value={wordDeclaredRangeDraft}
+                      onChange={(event) => setWordDeclaredRangeDraft(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Word 正文文本
+                    <textarea
+                      placeholder={"第 1 集 开场\n场 1-1 金城矿山 日 外\n正文...\n第 2 集 追踪\n正文..."}
+                      rows={8}
+                      value={wordTextDraft}
+                      onChange={(event) => setWordTextDraft(event.target.value)}
+                    />
+                  </label>
+                  <button className="primary-button" disabled={!wordTextDraft.trim()} onClick={handleCreateTextDelivery} type="button">
+                    <FileText size={16} />
+                    解析文本并创建草稿
+                  </button>
+                  {wordParseFeedback ? (
+                    <div className={`parse-feedback ${wordParseFeedback.tone}`}>
+                      <strong>{wordParseFeedback.title}</strong>
+                      <ParserIssueList issues={wordParseFeedback.issues} remedies={wordParseFeedback.remedies} />
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              <p className="permission-note">当前身份不能上传 Word。主编剧或统筹上传并确认后，创作者只查看自己负责集的当前剧本。</p>
+            )}
+          </section>
+
+          <DeliveryImportJobList jobs={deliveryImportJobs} />
+
           {deliveryPackageDetails.length === 0 ? (
             <div className="empty-card">
               <Inbox size={22} />
-              <strong>还没有交稿包</strong>
-              <p>主编剧或统筹创建交稿包后，这里会显示切出的单集、实际变更集确认和发布状态。</p>
-              <p>如果 Word 切段失败，不要卡住流程：可以先手动粘贴单集内容补救，确认这一集后再提交。</p>
+              <strong>当前没有交稿包需要处理</strong>
+              <p>主编剧或统筹创建交稿包后，这里会显示切出的单集、实际变更集确认、待发布和已发布状态。</p>
+              <p>如果 Word 切段失败，不要反复上传同一个文件；可以先手动粘贴单集内容补救，确认这一集后再提交。</p>
             </div>
           ) : (
             <div className="delivery-list">
@@ -1320,7 +1845,7 @@ function M2DeliveryCenter({
 
           <div className="delivery-create">
             <strong>创建演示交稿包</strong>
-            <p>当前 M2 只演示交稿包确认流，不做真正 Word 文件解析。切段失败时，可改用“手动粘贴单集补救”。</p>
+            <p>当前 M2 只演示交稿包确认流，不做真正 Word 文件解析，也不做 M3 资产审核。切段失败时，可改用“手动粘贴单集补救”。</p>
             <label>
               选择交稿包场景
               <select value={selectedMockDeliveryKey} onChange={(event) => setSelectedMockDeliveryKey(event.target.value as MockDeliveryKey)}>
@@ -1347,8 +1872,8 @@ function M2DeliveryCenter({
           {!activeDeliveryPackage ? (
             <div className="empty-card soft">
               <FileText size={22} />
-              <strong>请选择或创建一个交稿包</strong>
-              <p>交稿包出现后，先勾选“这次真的改过”的集，再提交统筹发布。没勾选的集不会生成新版本。</p>
+              <strong>请选择一个交稿包查看详情</strong>
+              <p>交稿包出现后，先确认“这次真的改过”的集。没勾选的集不会生成新版本，也不会通知对应负责人。</p>
             </div>
           ) : (
             <>
@@ -1364,6 +1889,13 @@ function M2DeliveryCenter({
 
               {activeDeliveryPackage.status === "rejected" && activeDeliveryPackage.rejectionReason ? (
                 <p className="inline-warning">已驳回：{activeDeliveryPackage.rejectionReason}</p>
+              ) : null}
+
+              {activeDeliveryParseIssues.length > 0 ? (
+                <div className="parse-feedback warning">
+                  <strong>解析 warnings</strong>
+                  <ParserIssueList issues={activeDeliveryParseIssues} />
+                </div>
               ) : null}
 
               {activeDeliveryPackage.status === "draft" ? (
@@ -1389,12 +1921,17 @@ function M2DeliveryCenter({
                     ))}
                   </div>
                   {canSubmitDelivery ? (
-                    <button className="primary-button" onClick={() => handleSubmitDeliveryForReview(activeDeliveryPackage.id)} type="button">
+                    <button
+                      className="primary-button"
+                      onClick={() => handleSubmitDeliveryForReview(activeDeliveryPackage.id)}
+                      title={confirmedCount === 0 ? "请先勾选至少一集实际变更，再提交给统筹。" : "提交后等待统筹发布。"}
+                      type="button"
+                    >
                       <Send size={16} />
                       {confirmedCount === 0 ? "先勾选实际变更集" : "提交给统筹发布"}
                     </button>
                   ) : (
-                    <p className="permission-note">当前身份不能提交交稿包。请让主编剧或统筹确认后提交。</p>
+                    <p className="permission-note">当前身份只能查看交稿包，不能提交。请让主编剧或统筹确认实际变更集后提交。</p>
                   )}
                 </>
               ) : null}
@@ -1402,6 +1939,14 @@ function M2DeliveryCenter({
               {activeDeliveryPackage.status === "pending_review" ? (
                 <div className="review-box">
                   <p className="inline-help">这个交稿包正在等统筹处理。发布后，勾选的集会成为当前生效剧本，并通知对应负责人查看关键变更。</p>
+                  <div className="delivery-confirmed-list" aria-label="待发布确认集">
+                    <strong>本次确认发布</strong>
+                    {activeDeliveryPackage.episodes
+                      .filter((episode) => episode.isConfirmedChange)
+                      .map((episode) => (
+                        <span key={episode.id}>第 {episode.episodeNo} 集</span>
+                      ))}
+                  </div>
                   {canReviewDelivery ? (
                     <>
                       <label>
@@ -1419,13 +1964,13 @@ function M2DeliveryCenter({
                       </div>
                     </>
                   ) : (
-                    <p className="permission-note">发布和驳回只给统筹显示。你当前没有这个权限，请等待统筹处理。</p>
+                    <p className="permission-note">发布和驳回只给统筹显示。你当前可以查看待发布内容，但不能发布或驳回，请等待统筹处理。</p>
                   )}
                 </div>
               ) : null}
 
               {activeDeliveryPackage.status === "published" ? (
-                <p className="inline-help">发布完成。勾选过的集已经更新为当前生效剧本，相关创作者会看到“剧本已更新”的关键变更提醒。</p>
+                <p className="inline-help">发布完成。勾选过的集已经更新为当前生效剧本，相关创作者会看到“剧本已更新，请查看关键变更”的提醒。</p>
               ) : null}
             </>
           )}
@@ -1433,6 +1978,86 @@ function M2DeliveryCenter({
       </div>
     </section>
   );
+}
+
+function DeliveryImportJobList({ jobs }: { jobs: DeliveryImportJob[] }) {
+  if (jobs.length === 0) {
+    return (
+      <section className="import-job-panel">
+        <div className="import-job-head">
+          <strong>切段任务</strong>
+          <span>暂无任务</span>
+        </div>
+        <p>上传 Word 或粘贴文本后，这里会记录解析状态、warning 数量和生成的交稿草稿。</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="import-job-panel">
+      <div className="import-job-head">
+        <strong>切段任务</strong>
+        <span>{jobs.length} 条</span>
+      </div>
+      <div className="import-job-list">
+        {jobs.map((job) => (
+          <article className={`import-job-card ${job.status}`} key={job.id}>
+            <div>
+              <strong>{job.fileName}</strong>
+              <span>
+                {job.source === "docx" ? "Word 文件" : "粘贴文本"} · 声明范围 {job.declaredRangeText || "未填写"}
+              </span>
+            </div>
+            <em>{deliveryImportJobStatusLabels[job.status]}</em>
+            {job.deliveryPackageId ? <small>已关联交稿草稿：{job.deliveryPackageId}</small> : null}
+            {job.issueCount ? <small>{job.issueCount} 条 warning/error 需要确认</small> : null}
+            {job.errorText ? <small>{job.errorText}</small> : null}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ParserIssueList({ issues, remedies }: { issues: WordDeliveryIssue[]; remedies?: string[] }) {
+  if (issues.length === 0 && (!remedies || remedies.length === 0)) {
+    return <span>未发现解析 warning。</span>;
+  }
+
+  return (
+    <div className="parse-issue-list">
+      {issues.map((issue, index) => (
+        <article key={`${issue.code}-${issue.episodeNo ?? "global"}-${issue.line ?? index}`}>
+          <span>{formatParseIssueMeta(issue)}</span>
+          <strong>{issue.message}</strong>
+          {issue.remedy ? <small>{issue.remedy}</small> : null}
+        </article>
+      ))}
+      {remedies && remedies.length > 0 ? (
+        <article>
+          <span>补救</span>
+          <strong>可手动粘贴单集补救</strong>
+          {remedies.map((remedy) => (
+            <small key={remedy}>{remedy}</small>
+          ))}
+        </article>
+      ) : null}
+    </div>
+  );
+}
+
+function formatParseIssueMeta(issue: WordDeliveryIssue) {
+  const parts: string[] = [issue.severity, issue.code];
+
+  if (issue.episodeNo) {
+    parts.push(`第 ${issue.episodeNo} 集`);
+  }
+
+  if (issue.line) {
+    parts.push(`第 ${issue.line} 行`);
+  }
+
+  return parts.join(" / ");
 }
 
 function DetailItem({ label, value }: { label: string; value: string }) {
@@ -1876,15 +2501,15 @@ function formatActionError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
 
   if (message.includes("请至少确认一集实际变更")) {
-    return "还没有勾选实际变更集。请先确认哪些集真的改过；没改的集不会进入本次发布。";
+    return "还没有勾选实际变更集。请先勾选至少一集真的改过的内容；没改的集不会进入本次发布。";
   }
 
   if (message.includes("发布交稿包权限不足") || message.includes("驳回交稿包权限不足")) {
-    return "你当前不是统筹，不能发布或驳回交稿包。请让统筹账号处理。";
+    return "你当前不是统筹，不能发布或驳回交稿包。可以查看内容，但这一步需要统筹处理。";
   }
 
   if (message.includes("创建交稿包权限不足") || message.includes("提交交稿包权限不足")) {
-    return "当前身份不能提交交稿包。请让主编剧或统筹处理这一步。";
+    return "当前身份不能创建或提交交稿包。请让主编剧或统筹处理这一步。";
   }
 
   if (message.includes("交稿包至少需要包含一集剧本")) {
@@ -1894,12 +2519,61 @@ function formatActionError(error: unknown) {
   return message || "操作失败，请检查输入。";
 }
 
+type CurrentRevisionDocxInput = {
+  deliveryPackageTitle?: string;
+  episodeNo: number;
+  projectName: string;
+  revision: NonNullable<ReturnType<typeof selectEpisodeScriptTimeline>["currentRevision"]>;
+};
+
+async function downloadCurrentRevisionDocx(input: CurrentRevisionDocxInput) {
+  const blob = await createEpisodeScriptDocxBlob({
+    projectName: input.projectName,
+    episodeNumber: input.episodeNo,
+    scriptTitle: input.revision.title,
+    body: input.revision.content,
+    revisionSource: {
+      deliveryPackageName: input.deliveryPackageTitle ?? "已发布交稿包",
+      deliveryPackageId: input.revision.deliveryPackageId,
+      version: `v${input.revision.revisionNo}`,
+      note: "当前集生效剧本"
+    }
+  });
+
+  triggerBrowserDownload(
+    blob,
+    buildCurrentRevisionDocxFileName(input.projectName, input.episodeNo, input.revision.revisionNo)
+  );
+}
+
+function buildCurrentRevisionDocxFileName(projectName: string, episodeNo: number, revisionNo: number) {
+  const safeProjectName = sanitizeDownloadFileName(projectName) || "项目";
+  return `${safeProjectName}-第${episodeNo}集-当前剧本-v${revisionNo}.docx`;
+}
+
+function sanitizeDownloadFileName(value: string) {
+  return value.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
+}
+
+function triggerBrowserDownload(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.style.display = "none";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 function formatNotificationBody(notification: WorkspaceState["notifications"][number]) {
   if (notification.type !== "key_change") {
     return notification.body;
   }
 
-  return `新剧本已生效，请进入这一集查看最新版本和关键改动。来源：${notification.body}`;
+  return `剧本已更新。请打开这一集查看最新正文和关键改动；没有分配给你的集不需要处理。来源：${notification.body}`;
 }
 
 type AssignmentSummaryItem = {
