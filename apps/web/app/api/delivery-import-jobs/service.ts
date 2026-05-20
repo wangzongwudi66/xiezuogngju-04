@@ -29,6 +29,25 @@ export type DeliveryImportJobResponse =
       job: DeliveryImportJob;
     };
 
+const deliveryImportJobResults = new Map<string, DeliveryImportJobResponse>();
+
+export async function createDeliveryImportJob(input: DeliveryImportJobRequest) {
+  const result = await runDeliveryImportJob(input);
+  deliveryImportJobResults.set(result.job.id, result);
+  return result;
+}
+
+export function getDeliveryImportJobResult(jobId: string) {
+  return deliveryImportJobResults.get(jobId) ?? null;
+}
+
+export function listDeliveryImportJobs(projectId?: string) {
+  return Array.from(deliveryImportJobResults.values())
+    .map((result) => result.job)
+    .filter((job) => !projectId || job.projectId === projectId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
 export async function runDeliveryImportJob(input: DeliveryImportJobRequest): Promise<DeliveryImportJobResponse> {
   const createdAt = new Date().toISOString();
   const jobBase: DeliveryImportJob = {

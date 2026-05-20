@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runDeliveryImportJob } from "./service";
+import { createDeliveryImportJob, getDeliveryImportJobResult, listDeliveryImportJobs, runDeliveryImportJob } from "./service";
 
 describe("delivery import job service", () => {
   it("returns a draft and successful job for pasted text", async () => {
@@ -50,5 +50,18 @@ describe("delivery import job service", () => {
         code: "episode_boundary_not_found"
       })
     );
+  });
+
+  it("stores created import jobs for later polling", async () => {
+    const result = await createDeliveryImportJob({
+      source: "text",
+      projectId: "project-polling",
+      uploadedByUserId: "user-head-writer",
+      declaredRangeText: "1-1",
+      rawText: "第 1 集 开场\n正文"
+    });
+
+    expect(getDeliveryImportJobResult(result.job.id)).toEqual(result);
+    expect(listDeliveryImportJobs("project-polling")).toContainEqual(result.job);
   });
 });

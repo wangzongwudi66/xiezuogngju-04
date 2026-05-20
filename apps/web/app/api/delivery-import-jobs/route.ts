@@ -1,6 +1,20 @@
 import { NextResponse } from "next/server";
-import { runDeliveryImportJob } from "./service";
+import { createDeliveryImportJob, getDeliveryImportJobResult, listDeliveryImportJobs } from "./service";
 import type { DeliveryImportSource } from "./service";
+
+export function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const jobId = searchParams.get("id");
+
+  if (jobId) {
+    const result = getDeliveryImportJobResult(jobId);
+    return result ? NextResponse.json(result) : NextResponse.json({ error: "delivery_import_job_not_found" }, { status: 404 });
+  }
+
+  return NextResponse.json({
+    jobs: listDeliveryImportJobs(searchParams.get("projectId") ?? undefined)
+  });
+}
 
 export async function POST(request: Request) {
   const form = await request.formData();
@@ -21,7 +35,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      await runDeliveryImportJob({
+      await createDeliveryImportJob({
         source,
         projectId,
         uploadedByUserId,
@@ -33,7 +47,7 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json(
-    await runDeliveryImportJob({
+    await createDeliveryImportJob({
       source,
       projectId,
       uploadedByUserId,
