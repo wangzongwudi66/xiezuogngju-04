@@ -1,4 +1,4 @@
-import type { DeliveryImportJobResponse } from "../api/delivery-import-jobs/service";
+import type { DeliveryImportJobResponse, DeliveryImportJobRetryResponse } from "../api/delivery-import-jobs/service";
 import type { DeliveryImportJob } from "./workspace-persistence";
 import type { M2WorkspacePersistenceSnapshot } from "./workspace-persistence";
 
@@ -49,7 +49,7 @@ export async function submitTextDeliveryImport(input: SubmitTextDeliveryImportIn
   form.set("declaredRangeText", input.declaredRangeText);
   form.set("rawText", input.rawText);
 
-  return postDeliveryImport(form);
+  return postDeliveryImport(form) as Promise<DeliveryImportJobResponse>;
 }
 
 export async function submitDocxDeliveryImport(input: SubmitDocxDeliveryImportInput) {
@@ -60,7 +60,15 @@ export async function submitDocxDeliveryImport(input: SubmitDocxDeliveryImportIn
   form.set("declaredRangeText", input.declaredRangeText);
   form.set("file", input.file);
 
-  return postDeliveryImport(form);
+  return postDeliveryImport(form) as Promise<DeliveryImportJobResponse>;
+}
+
+export async function retryDocxDeliveryImport(jobId: string): Promise<DeliveryImportJobRetryResponse> {
+  const form = new FormData();
+  form.set("action", "retry");
+  form.set("jobId", jobId);
+
+  return postDeliveryImport(form) as Promise<DeliveryImportJobRetryResponse>;
 }
 
 export async function fetchDeliveryImportJob(jobId: string): Promise<DeliveryImportJobResponse> {
@@ -109,17 +117,17 @@ export async function mutateDeliveryPackageState(input: DeliveryPackageMutationI
   return (await response.json()) as DeliveryWorkspaceSnapshot;
 }
 
-async function postDeliveryImport(form: FormData): Promise<DeliveryImportJobResponse> {
+async function postDeliveryImport(form: FormData): Promise<DeliveryImportJobResponse | DeliveryImportJobRetryResponse> {
   const response = await fetch("/api/delivery-import-jobs", {
     method: "POST",
     body: form
   });
 
   if (!response.ok) {
-    throw new Error("delivery_import_request_failed");
+    throw new Error(await readDeliveryApiError(response, "delivery_import_request_failed"));
   }
 
-  return (await response.json()) as DeliveryImportJobResponse;
+  return (await response.json()) as DeliveryImportJobResponse | DeliveryImportJobRetryResponse;
 }
 
 async function readDeliveryApiError(response: Response, fallback: string) {

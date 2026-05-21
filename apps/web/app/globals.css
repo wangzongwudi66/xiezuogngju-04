@@ -1315,6 +1315,10 @@ select:focus-visible {
   padding: 10px 12px;
 }
 
+.import-job-card .secondary-button {
+  margin-left: auto;
+}
+
 .import-job-card.success {
   border-left-color: var(--green);
   background: var(--green-soft);

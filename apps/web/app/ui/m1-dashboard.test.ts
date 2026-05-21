@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { registerUser, seedWorkspace, selectMyEpisodes } from "@aigc/domain";
 import { buildTodayTasks } from "./dashboard-tasks";
+import { canRetryDeliveryImportJob, formatDeliveryImportError } from "./delivery-import-feedback";
 import {
   canAccessDeliveryRole,
   canCreateDeliveryRole,
@@ -77,5 +78,62 @@ describe("coordinator delivery role view", () => {
     expect(selectDefaultDeliveryPackageId(packages, "coordinator", null)).toBe("pending-package");
     expect(selectDefaultDeliveryPackageId(packages, "head_writer", null)).toBe("draft-package");
     expect(selectDefaultDeliveryPackageId(packages, "coordinator", "published-package")).toBe("published-package");
+  });
+});
+
+describe("delivery import retry affordance", () => {
+  it("only allows retry for failed Word jobs with a saved file id", () => {
+    expect(
+      canRetryDeliveryImportJob({
+        id: "job-docx-failed",
+        projectId: "project-jincheng",
+        source: "docx",
+        status: "failed",
+        fileName: "failed.docx",
+        fileId: "file-1",
+        declaredRangeText: "1-2",
+        createdAt: "2026-05-21T00:00:00.000Z"
+      })
+    ).toBe(true);
+    expect(
+      canRetryDeliveryImportJob({
+        id: "job-docx-success",
+        projectId: "project-jincheng",
+        source: "docx",
+        status: "success",
+        fileName: "success.docx",
+        fileId: "file-2",
+        declaredRangeText: "1-2",
+        createdAt: "2026-05-21T00:00:00.000Z"
+      })
+    ).toBe(false);
+    expect(
+      canRetryDeliveryImportJob({
+        id: "job-text-failed",
+        projectId: "project-jincheng",
+        source: "text",
+        status: "failed",
+        fileName: "pasted.txt",
+        declaredRangeText: "1-2",
+        createdAt: "2026-05-21T00:00:00.000Z"
+      })
+    ).toBe(false);
+    expect(
+      canRetryDeliveryImportJob({
+        id: "job-docx-no-file",
+        projectId: "project-jincheng",
+        source: "docx",
+        status: "failed",
+        fileName: "missing.docx",
+        declaredRangeText: "1-2",
+        createdAt: "2026-05-21T00:00:00.000Z"
+      })
+    ).toBe(false);
+  });
+
+  it("maps retry backend errors to customer-facing Chinese copy", () => {
+    expect(formatDeliveryImportError(new Error("delivery_import_job_not_found"))).toBe("原解析记录不存在，请刷新后重试。");
+    expect(formatDeliveryImportError(new Error("delivery_import_job_file_id_missing"))).toBe("这条记录没有可重试文件，请重新上传 Word。");
+    expect(formatDeliveryImportError(new Error("delivery_import_job_file_missing"))).toBe("原始 Word 文件已丢失，请重新上传。");
   });
 });

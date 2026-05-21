@@ -74,6 +74,7 @@ import type {
   WorkspaceState
 } from "@aigc/domain";
 import { buildTodayTasks } from "./dashboard-tasks";
+import { canRetryDeliveryImportJob, formatDeliveryImportError } from "./delivery-import-feedback";
 import {
   canAccessDeliveryRole,
   canCreateDeliveryRole,
@@ -86,6 +87,7 @@ import {
   fetchDeliveryImportJobs,
   fetchDeliveryImportWorkspace,
   mutateDeliveryPackageState,
+  retryDocxDeliveryImport,
   submitDocxDeliveryImport,
   submitTextDeliveryImport
 } from "./delivery-import-api";
@@ -379,6 +381,7 @@ export function M1Dashboard() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [actionMessage, setActionMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
+  const [retryingImportJobId, setRetryingImportJobId] = useState<string | null>(null);
 
   useEffect(() => {
     const persistedWorkspace = readM2WorkspacePersistence();
@@ -562,6 +565,10 @@ export function M1Dashboard() {
 
   function replaceDeliveryImportJob(jobId: string, nextJob: DeliveryImportJob) {
     setDeliveryImportJobs((items) => items.map((item) => (item.id === jobId ? nextJob : item)));
+  }
+
+  function appendDeliveryImportJob(job: DeliveryImportJob) {
+    setDeliveryImportJobs((items) => mergeDeliveryImportJobs(items, [job]));
   }
 
   function applyDeliveryWorkspaceSnapshot(snapshot: Awaited<ReturnType<typeof fetchDeliveryImportWorkspace>>) {
@@ -843,6 +850,69 @@ export function M1Dashboard() {
     }
   }
 
+  async function handleRetryDeliveryImportJob(jobId: string) {
+    if (retryingImportJobId) {
+      return;
+    }
+
+    setRetryingImportJobId(jobId);
+    setActionMessage({ tone: "success", text: "正在重试 Word 解析，请稍等。" });
+
+    try {
+      const result = await retryDocxDeliveryImport(jobId);
+
+      if (!result.ok && "error" in result) {
+        setActionMessage({ tone: "error", text: formatActionError(result.error) });
+        return;
+      }
+
+      appendDeliveryImportJob(result.job);
+
+      if (!result.ok) {
+        setActionMessage({
+          tone: "error",
+          text: result.job.errorText ? formatActionError(result.job.errorText) : "重试失败：仍未能解析这个 Word 文件。"
+        });
+        setWordParseFeedback({
+          tone: "error",
+          title: "重试失败",
+          issues: result.issues,
+          remedies: result.remedies
+        });
+        return;
+      }
+
+      let workspaceRefreshFailed = false;
+      try {
+        const snapshot = await refreshDeliveryWorkspaceFromServer();
+        const created = snapshot.state.deliveryPackages.find((item) => item.id === result.job.deliveryPackageId);
+        if (created) {
+          setSelectedDeliveryPackageId(created.id);
+        }
+      } catch {
+        workspaceRefreshFailed = true;
+      }
+
+      setWordParseFeedback({
+        tone: result.issues.length > 0 ? "warning" : "success",
+        title: result.issues.length > 0 ? "重试成功，但有内容需要确认" : "重试成功，已生成新的交稿草稿",
+        issues: result.issues,
+        remedies: ["下一步：在右侧交稿草稿中勾选这次真正改过的集，再提交给统筹处理。"]
+      });
+      setActionMessage({
+        tone: workspaceRefreshFailed ? "error" : "success",
+        text: workspaceRefreshFailed
+          ? "重试成功，已生成新的交稿草稿，但页面刷新失败。请手动刷新后查看。"
+          : "重试成功，已生成新的交稿草稿。"
+      });
+      navigateToModule("交稿中心");
+    } catch (error) {
+      setActionMessage({ tone: "error", text: formatActionError(error) });
+    } finally {
+      setRetryingImportJobId(null);
+    }
+  }
+
   async function handleUpdateConfirmedEpisode(deliveryPackageId: string, episodeNo: number, checked: boolean) {
     const detail = selectDeliveryPackageDetail(state, deliveryPackageId);
     const confirmedEpisodeNos = checked
@@ -1062,11 +1132,13 @@ export function M1Dashboard() {
               handleCreateTextDelivery={handleCreateTextDelivery}
               handlePublishDelivery={handlePublishDelivery}
               handleRejectDelivery={handleRejectDelivery}
+              handleRetryDeliveryImportJob={handleRetryDeliveryImportJob}
               handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
               handleUpdateConfirmedEpisode={handleUpdateConfirmedEpisode}
               projectName={selectedProject.name}
               recentUpdates={recentUpdates}
               rejectionReason={rejectionReason}
+              retryingImportJobId={retryingImportJobId}
               selectedMockDeliveryKey={selectedMockDeliveryKey}
               setRejectionReason={setRejectionReason}
               setSelectedDeliveryPackageId={setSelectedDeliveryPackageId}
@@ -1649,11 +1721,13 @@ function ModuleWorkbench({
   handleCreateTextDelivery,
   handlePublishDelivery,
   handleRejectDelivery,
+  handleRetryDeliveryImportJob,
   handleSubmitDeliveryForReview,
   handleUpdateConfirmedEpisode,
   projectName,
   recentUpdates,
   rejectionReason,
+  retryingImportJobId,
   selectedMockDeliveryKey,
   setRejectionReason,
   setSelectedDeliveryPackageId,
@@ -1682,11 +1756,13 @@ function ModuleWorkbench({
   handleCreateTextDelivery: () => void;
   handlePublishDelivery: (deliveryPackageId: string) => void;
   handleRejectDelivery: (deliveryPackageId: string) => void;
+  handleRetryDeliveryImportJob: (jobId: string) => void;
   handleSubmitDeliveryForReview: (deliveryPackageId: string) => void;
   handleUpdateConfirmedEpisode: (deliveryPackageId: string, episodeNo: number, checked: boolean) => void;
   projectName: string;
   recentUpdates: ReturnType<typeof buildRecentUpdates>;
   rejectionReason: string;
+  retryingImportJobId: string | null;
   selectedMockDeliveryKey: MockDeliveryKey;
   setRejectionReason: React.Dispatch<React.SetStateAction<string>>;
   setSelectedDeliveryPackageId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -1817,10 +1893,12 @@ function ModuleWorkbench({
         handleCreateTextDelivery={handleCreateTextDelivery}
         handlePublishDelivery={handlePublishDelivery}
         handleRejectDelivery={handleRejectDelivery}
+        handleRetryDeliveryImportJob={handleRetryDeliveryImportJob}
         handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
         handleUpdateConfirmedEpisode={handleUpdateConfirmedEpisode}
         projectName={projectName}
         rejectionReason={rejectionReason}
+        retryingImportJobId={retryingImportJobId}
         selectedMockDeliveryKey={selectedMockDeliveryKey}
         setRejectionReason={setRejectionReason}
         setSelectedDeliveryPackageId={setSelectedDeliveryPackageId}
@@ -1913,10 +1991,12 @@ function M2DeliveryCenter({
   handleCreateTextDelivery,
   handlePublishDelivery,
   handleRejectDelivery,
+  handleRetryDeliveryImportJob,
   handleSubmitDeliveryForReview,
   handleUpdateConfirmedEpisode,
   projectName,
   rejectionReason,
+  retryingImportJobId,
   selectedMockDeliveryKey,
   setRejectionReason,
   setSelectedDeliveryPackageId,
@@ -1939,10 +2019,12 @@ function M2DeliveryCenter({
   handleCreateTextDelivery: () => void;
   handlePublishDelivery: (deliveryPackageId: string) => void;
   handleRejectDelivery: (deliveryPackageId: string) => void;
+  handleRetryDeliveryImportJob: (jobId: string) => void;
   handleSubmitDeliveryForReview: (deliveryPackageId: string) => void;
   handleUpdateConfirmedEpisode: (deliveryPackageId: string, episodeNo: number, checked: boolean) => void;
   projectName: string;
   rejectionReason: string;
+  retryingImportJobId: string | null;
   selectedMockDeliveryKey: MockDeliveryKey;
   setRejectionReason: React.Dispatch<React.SetStateAction<string>>;
   setSelectedDeliveryPackageId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -2153,7 +2235,11 @@ function M2DeliveryCenter({
             )}
           </section>
 
-          <DeliveryImportJobList jobs={deliveryImportJobs} />
+          <DeliveryImportJobList
+            jobs={deliveryImportJobs}
+            onRetry={handleRetryDeliveryImportJob}
+            retryingJobId={retryingImportJobId}
+          />
 
           {deliveryPackageDetails.length === 0 ? (
             <div className="empty-card">
@@ -2330,7 +2416,15 @@ function M2DeliveryCenter({
   );
 }
 
-function DeliveryImportJobList({ jobs }: { jobs: DeliveryImportJob[] }) {
+function DeliveryImportJobList({
+  jobs,
+  onRetry,
+  retryingJobId
+}: {
+  jobs: DeliveryImportJob[];
+  onRetry: (jobId: string) => void;
+  retryingJobId: string | null;
+}) {
   if (jobs.length === 0) {
     return (
       <section className="import-job-panel">
@@ -2360,8 +2454,19 @@ function DeliveryImportJobList({ jobs }: { jobs: DeliveryImportJob[] }) {
             </div>
             <em>{deliveryImportJobStatusLabels[job.status]}</em>
             {job.deliveryPackageId ? <small>已生成交稿草稿：{job.deliveryPackageId}</small> : null}
+            {job.retryOfJobId ? <small>来自重试：{job.retryOfJobId}</small> : null}
             {job.issueCount ? <small>{job.issueCount} 条提示需要确认</small> : null}
             {job.errorText ? <small>{job.errorText}</small> : null}
+            {canRetryDeliveryImportJob(job) ? (
+              <button
+                className="secondary-button compact"
+                disabled={retryingJobId === job.id}
+                onClick={() => onRetry(job.id)}
+                type="button"
+              >
+                {retryingJobId === job.id ? "正在重试..." : "重试"}
+              </button>
+            ) : null}
           </article>
         ))}
       </div>
@@ -2874,6 +2979,11 @@ function buildShortcutItems(permissions: ReturnType<typeof selectPermissions>, p
 
 function formatActionError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
+  const deliveryImportError = formatDeliveryImportError(error);
+
+  if (deliveryImportError) {
+    return deliveryImportError;
+  }
 
   if (message.includes("请至少确认一集实际变更")) {
     return "还没有勾选实际变更集。请先勾选至少一集真的改过的内容；没改的集不会进入本次发布。";
@@ -2901,10 +3011,6 @@ function formatActionError(error: unknown) {
 
   if (message.includes("delivery_package_mutation_failed")) {
     return "操作失败，请刷新后重试。";
-  }
-
-  if (message.includes("delivery_import_workspace_request_failed")) {
-    return "交稿包数据刷新失败，页面已保留当前状态，请稍后再试。";
   }
 
   if (message.includes("交稿包状态必须是")) {
