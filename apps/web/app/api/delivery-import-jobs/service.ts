@@ -2,7 +2,12 @@ import { parseWordDelivery, parseWordDeliveryText } from "@aigc/domain";
 import type { DeliveryPackageDraftInput, WordDeliveryIssue } from "@aigc/domain";
 import { buildDeliveryPackageDraftFromParsed } from "../../ui/delivery-text-parser";
 import type { DeliveryImportJob } from "../../ui/workspace-persistence";
-import { readDeliveryImportJobResult, readDeliveryImportJobs, saveDeliveryImportJobResult } from "./persistence";
+import {
+  readDeliveryImportJobResult,
+  readDeliveryImportJobs,
+  readDeliveryImportWorkspace,
+  saveDeliveryImportJobResultWithDraft
+} from "./persistence";
 
 export type DeliveryImportSource = "docx" | "text";
 
@@ -32,8 +37,7 @@ export type DeliveryImportJobResponse =
 
 export async function createDeliveryImportJob(input: DeliveryImportJobRequest) {
   const result = await runDeliveryImportJob(input);
-  await saveDeliveryImportJobResult(result);
-  return result;
+  return saveDeliveryImportJobResultWithDraft(result);
 }
 
 export async function getDeliveryImportJobResult(jobId: string) {
@@ -42,6 +46,10 @@ export async function getDeliveryImportJobResult(jobId: string) {
 
 export async function listDeliveryImportJobs(projectId?: string) {
   return readDeliveryImportJobs(projectId);
+}
+
+export async function getDeliveryImportWorkspace() {
+  return readDeliveryImportWorkspace();
 }
 
 export async function runDeliveryImportJob(input: DeliveryImportJobRequest): Promise<DeliveryImportJobResponse> {

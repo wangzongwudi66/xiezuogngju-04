@@ -666,6 +666,29 @@ export function selectMyEpisodes(state: WorkspaceState, userId = state.currentUs
     .sort((a, b) => a.projectName.localeCompare(b.projectName, "zh-CN") || a.episodeNo - b.episodeNo);
 }
 
+export function selectMyProjects(state: WorkspaceState, userId = state.currentUserId) {
+  if (!userId) {
+    return [];
+  }
+
+  return Array.from(new Set(state.members.filter((member) => member.userId === userId).map((member) => member.projectId)))
+    .map((projectId) => {
+      const project = requireProject(state, projectId);
+      const roles = selectProjectRoles(state, userId, projectId);
+      const assignedEpisodeNos = selectMyEpisodes(state, userId)
+        .filter((episode) => episode.projectId === projectId)
+        .map((episode) => episode.episodeNo)
+        .sort((a, b) => a - b);
+
+      return {
+        ...project,
+        roles,
+        assignedEpisodeNos
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+}
+
 export function selectProjectOverview(state: WorkspaceState, projectId: string) {
   const project = state.projects.find((item) => item.id === projectId);
 

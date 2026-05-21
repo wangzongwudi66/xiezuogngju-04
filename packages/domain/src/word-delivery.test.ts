@@ -111,6 +111,33 @@ describe("Word delivery episode parser", () => {
     ]);
   });
 
+  it("falls back to declared range when docx automatic numbering hides episode titles", async () => {
+    const xml = [
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>',
+      paragraph("矿灯一盏盏亮起。"),
+      paragraph("调度室电话响起。"),
+      "</w:body></w:document>"
+    ].join("");
+
+    const result = await parseWordDeliveryDocx(createStoredDocx("word/document.xml", xml), {
+      declaredRange: "1-2"
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.episodes.map((episode) => episode.episodeNo)).toEqual([1, 2]);
+    expect(result.episodes[0].content).toContain("原始解析文本");
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({
+        code: "episode_boundary_not_found",
+        message: "未识别到正文里的集数标题，已按声明范围生成待确认草稿。"
+      })
+    );
+  });
+
   it("accepts common declared range forms", () => {
     expect(parseDeclaredEpisodeRange("1-10")).toEqual({ from: 1, to: 10 });
     expect(parseDeclaredEpisodeRange("第 1 至 20 集")).toEqual({ from: 1, to: 20 });

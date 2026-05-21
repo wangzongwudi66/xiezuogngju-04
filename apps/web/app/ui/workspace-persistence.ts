@@ -19,6 +19,7 @@ export interface DeliveryImportJob {
 export interface M2WorkspacePersistenceSnapshot {
   deliveryImportJobs: DeliveryImportJob[];
   deliveryParseIssuesByPackageId: Record<string, WordDeliveryIssue[]>;
+  selectedProjectId?: string;
   state: WorkspaceState;
 }
 
@@ -67,7 +68,8 @@ export function encodeM2WorkspacePersistence(snapshot: M2WorkspacePersistenceSna
     version: 1,
     state: snapshot.state,
     deliveryImportJobs: snapshot.deliveryImportJobs,
-    deliveryParseIssuesByPackageId: snapshot.deliveryParseIssuesByPackageId
+    deliveryParseIssuesByPackageId: snapshot.deliveryParseIssuesByPackageId,
+    selectedProjectId: snapshot.selectedProjectId
   } satisfies StoredM2WorkspacePersistenceSnapshot);
 }
 
@@ -86,6 +88,7 @@ export function decodeM2WorkspacePersistence(raw: string | null): M2WorkspacePer
     return {
       state: parsed.state,
       deliveryImportJobs: Array.isArray(parsed.deliveryImportJobs) ? parsed.deliveryImportJobs : [],
+      selectedProjectId: typeof parsed.selectedProjectId === "string" ? parsed.selectedProjectId : undefined,
       deliveryParseIssuesByPackageId:
         parsed.deliveryParseIssuesByPackageId && typeof parsed.deliveryParseIssuesByPackageId === "object"
           ? parsed.deliveryParseIssuesByPackageId

@@ -21,6 +21,7 @@ describe("M2 workspace persistence", () => {
           issueCount: 1
         }
       ],
+      selectedProjectId: "project-tide",
       deliveryParseIssuesByPackageId: {
         "delivery-001": [
           {
@@ -46,6 +47,7 @@ describe("M2 workspace persistence", () => {
     );
 
     expect(decoded?.deliveryImportJobs).toEqual([]);
+    expect(decoded?.selectedProjectId).toBeUndefined();
   });
 
   it("ignores stale or invalid stored snapshots", () => {

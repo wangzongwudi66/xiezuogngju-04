@@ -14,6 +14,7 @@ import {
   selectDeliveryPackageDetail,
   selectEpisodeScriptTimeline,
   selectMyEpisodes,
+  selectMyProjects,
   selectPermissions,
   selectPrimaryRole,
   selectProjectMembers,
@@ -109,6 +110,35 @@ describe("M1 workspace store", () => {
     const myEpisodes = selectMyEpisodes(state, "user-creator-a");
     expect(myEpisodes.some((episode) => episode.projectCode === "JC" && episode.episodeNo === 17)).toBe(true);
     expect(myEpisodes.some((episode) => episode.projectCode === "JC" && episode.episodeNo === 18)).toBe(true);
+  });
+
+  it("keeps project roles separate from episode work assignments", () => {
+    const withNewProject = createProject(seedWorkspace, {
+      name: "裂隙边境",
+      code: "LX",
+      episodeCount: 12
+    });
+    const projectId = withNewProject.projects.at(-1)?.id ?? "";
+    const withMember = saveProjectMemberRoles(withNewProject, {
+      projectId,
+      userId: "user-writer",
+      roles: ["writer"]
+    });
+    const assigned = assignEpisodes(withMember, {
+      projectId,
+      userId: "user-writer",
+      episodeFrom: 3,
+      episodeTo: 5,
+      responsibility: "reviewer"
+    });
+
+    const projectMember = selectProjectMembers(assigned, projectId).find((member) => member.userId === "user-writer");
+    const myProject = selectMyProjects(assigned, "user-writer").find((project) => project.id === projectId);
+    const myEpisodes = selectMyEpisodes(assigned, "user-writer").filter((episode) => episode.projectId === projectId);
+
+    expect(projectMember?.roles).toEqual(["writer"]);
+    expect(myProject?.assignedEpisodeNos).toEqual([3, 4, 5]);
+    expect(myEpisodes.map((episode) => episode.responsibility)).toEqual(["reviewer", "reviewer", "reviewer"]);
   });
 
   it("requires project membership before assigning episode work", () => {

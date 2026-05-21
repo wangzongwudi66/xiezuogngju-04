@@ -193,6 +193,10 @@ export async function parseWordDeliveryDocx(
     const text = extractTextFromDocumentXml(documentXml);
     const parsed = parseWordDeliveryText(text, options);
 
+    if (!parsed.ok && range && parsed.errors.some((issue) => issue.code === "episode_boundary_not_found")) {
+      return buildDocxDeclaredRangeFallback(range, text, [...parsed.warnings, ...parsed.errors]);
+    }
+
     return {
       ...parsed,
       source: "docx"
@@ -310,6 +314,55 @@ function finalizeEpisode(draft: EpisodeDraft, range?: EpisodeRange): ParsedWordE
     content,
     warnings
   };
+}
+
+function buildDocxDeclaredRangeFallback(
+  range: EpisodeRange,
+  extractedText: string,
+  sourceIssues: WordDeliveryIssue[]
+): WordDeliveryParseSuccess {
+  const trimmedText = normalizeText(extractedText).trim();
+  const fallbackWarning: WordDeliveryIssue = {
+    code: "episode_boundary_not_found",
+    severity: "warning",
+    message: "未识别到正文里的集数标题，已按声明范围生成待确认草稿。",
+    remedy: "这可能是 Word 自动编号没有写入正文。请在提交前检查每集内容，并只勾选实际变更集。"
+  };
+
+  return {
+    ok: true,
+    source: "docx",
+    declaredRange: range,
+    episodes: Array.from({ length: range.to - range.from + 1 }, (_, index) => {
+      const episodeNo = range.from + index;
+      const content =
+        range.from === range.to
+          ? trimmedText || buildFallbackEpisodeContent(episodeNo)
+          : [
+              buildFallbackEpisodeContent(episodeNo),
+              index === 0 && trimmedText ? `\n原始解析文本：\n${trimmedText}` : ""
+            ]
+              .filter(Boolean)
+              .join("\n");
+
+      return {
+        episodeNo,
+        title: `第 ${episodeNo} 集（按声明范围生成）`,
+        content,
+        warnings: []
+      };
+    }),
+    warnings: [fallbackWarning, ...sourceIssues.map((issue) => ({ ...issue, severity: "warning" as const }))],
+    errors: []
+  };
+}
+
+function buildFallbackEpisodeContent(episodeNo: number) {
+  return [
+    `【待整理】第 ${episodeNo} 集内容需要人工确认。`,
+    "系统没有在 Word 正文中识别到“第 x 集”标题，可能是 Word 自动编号未被读取。",
+    "请在提交给统筹前从原文中整理这一集内容，并只勾选实际变更集。"
+  ].join("\n");
 }
 
 function applyDuplicateWarnings(drafts: EpisodeDraft[]) {

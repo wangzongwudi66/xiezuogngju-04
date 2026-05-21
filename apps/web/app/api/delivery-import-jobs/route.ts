@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createDeliveryImportJob, getDeliveryImportJobResult, listDeliveryImportJobs } from "./service";
+import { createDeliveryImportJob, getDeliveryImportJobResult, getDeliveryImportWorkspace, listDeliveryImportJobs } from "./service";
 import type { DeliveryImportSource } from "./service";
 
 export async function GET(request: Request) {
@@ -9,6 +9,10 @@ export async function GET(request: Request) {
   if (jobId) {
     const result = await getDeliveryImportJobResult(jobId);
     return result ? NextResponse.json(result) : NextResponse.json({ error: "delivery_import_job_not_found" }, { status: 404 });
+  }
+
+  if (searchParams.get("scope") === "workspace") {
+    return NextResponse.json(await getDeliveryImportWorkspace());
   }
 
   return NextResponse.json({

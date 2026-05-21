@@ -60,7 +60,6 @@ import {
   selectProjectOverview,
   selectUnreadNotifications,
   submitDeliveryPackageForReview,
-  updateDeliveryPackageConfirmation,
   updateProject,
   updateProjectMemberPermissions
 } from "@aigc/domain";
@@ -75,7 +74,21 @@ import type {
   WorkspaceState
 } from "@aigc/domain";
 import { buildTodayTasks } from "./dashboard-tasks";
-import { submitDocxDeliveryImport, submitTextDeliveryImport } from "./delivery-import-api";
+import {
+  canAccessDeliveryRole,
+  canCreateDeliveryRole,
+  canReviewDeliveryRole,
+  canSubmitDeliveryRole,
+  filterProjectItems,
+  selectDefaultDeliveryPackageId
+} from "./delivery-role-view";
+import {
+  fetchDeliveryImportJobs,
+  fetchDeliveryImportWorkspace,
+  mutateDeliveryPackageState,
+  submitDocxDeliveryImport,
+  submitTextDeliveryImport
+} from "./delivery-import-api";
 import { clearM2WorkspacePersistence, readM2WorkspacePersistence, writeM2WorkspacePersistence } from "./workspace-persistence";
 import type { DeliveryImportJob } from "./workspace-persistence";
 
@@ -147,7 +160,7 @@ type MockDeliveryKey = "range-1-10" | "range-1-20" | "single-replace-5";
 type WordUploadType = "range" | "single_replace";
 type WordUploadStatus = "empty" | "selected" | "parsing" | "success" | "failed";
 type TextParseFeedback = {
-  tone: "success" | "warning" | "error";
+  tone: "info" | "success" | "warning" | "error";
   title: string;
   issues: WordDeliveryIssue[];
   remedies?: string[];
@@ -169,16 +182,16 @@ const wordUploadStatusCopy: Record<WordUploadStatus, { title: string; body: stri
     body: "文件已就绪。下一步会解析 docx 正文并创建草稿，解析完成后仍需要在确认页勾选实际变更集。"
   },
   parsing: {
-    title: "正在解析",
-    body: "正在读取 Word 正文并按集切段。解析完成后会进入交稿确认。"
+    title: "正在解析 Word",
+    body: "正在读取 Word 正文并识别“第 1 集 / 第 2 集”这类标题。请稍等，完成后会生成交稿草稿。"
   },
   success: {
     title: "解析成功，等待确认",
     body: "已生成可确认的单集草稿。必须在确认页勾选实际变更集，提交后也不会立刻发布。"
   },
   failed: {
-    title: "解析失败，可手动粘贴单集补救",
-    body: "没有识别出可靠的单集内容。不要反复上传同一份文件；可以改用“手动粘贴单集文本”的补救流程，再确认这一集是否真的变更。"
+    title: "Word 解析失败",
+    body: "未识别到集数标题。请确认文档中包含类似“第 1 集”“第01集”的标题；如果标题在图片或表格里，可以先复制正文到下方文本框解析。"
   }
 };
 
@@ -333,8 +346,8 @@ function buildM2PrototypeWorkspace(): WorkspaceState {
 }
 
 export function M1Dashboard() {
-  const [persistedWorkspace] = useState(() => readM2WorkspacePersistence());
-  const [state, setState] = useState<WorkspaceState>(() => persistedWorkspace?.state ?? buildM2PrototypeWorkspace());
+  const [hasHydrated, setHasHydrated] = useState(false);
+  const [state, setState] = useState<WorkspaceState>(seedWorkspace);
   const [selectedProjectId, setSelectedProjectId] = useState(seedWorkspace.projects[0].id);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [projectDraft, setProjectDraft] = useState({ name: "裂隙边境", code: "LX", episodeCount: 60 });
@@ -359,10 +372,8 @@ export function M1Dashboard() {
   const [wordTextDraft, setWordTextDraft] = useState("");
   const [wordDeclaredRangeDraft, setWordDeclaredRangeDraft] = useState("1-2");
   const [wordParseFeedback, setWordParseFeedback] = useState<TextParseFeedback | null>(null);
-  const [deliveryParseIssuesByPackageId, setDeliveryParseIssuesByPackageId] = useState<Record<string, WordDeliveryIssue[]>>(
-    () => persistedWorkspace?.deliveryParseIssuesByPackageId ?? {}
-  );
-  const [deliveryImportJobs, setDeliveryImportJobs] = useState<DeliveryImportJob[]>(() => persistedWorkspace?.deliveryImportJobs ?? []);
+  const [deliveryParseIssuesByPackageId, setDeliveryParseIssuesByPackageId] = useState<Record<string, WordDeliveryIssue[]>>({});
+  const [deliveryImportJobs, setDeliveryImportJobs] = useState<DeliveryImportJob[]>([]);
   const [rejectionReason, setRejectionReason] = useState("范围声明需要再确认");
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -370,8 +381,74 @@ export function M1Dashboard() {
   const [actionMessage, setActionMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
 
   useEffect(() => {
-    writeM2WorkspacePersistence({ state, deliveryImportJobs, deliveryParseIssuesByPackageId });
-  }, [deliveryImportJobs, deliveryParseIssuesByPackageId, state]);
+    const persistedWorkspace = readM2WorkspacePersistence();
+
+    if (persistedWorkspace) {
+      setState(persistedWorkspace.state);
+      setDeliveryParseIssuesByPackageId(persistedWorkspace.deliveryParseIssuesByPackageId);
+      setDeliveryImportJobs(persistedWorkspace.deliveryImportJobs);
+      setSelectedProjectId(persistedWorkspace.selectedProjectId ?? seedWorkspace.projects[0].id);
+    } else {
+      setState(buildM2PrototypeWorkspace());
+    }
+
+    setHasHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+
+    writeM2WorkspacePersistence({ state, deliveryImportJobs, deliveryParseIssuesByPackageId, selectedProjectId });
+  }, [deliveryImportJobs, deliveryParseIssuesByPackageId, hasHydrated, selectedProjectId, state]);
+
+  useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+
+    let cancelled = false;
+
+    fetchDeliveryImportWorkspace()
+      .then((snapshot) => {
+        if (!cancelled) {
+          applyDeliveryWorkspaceSnapshot(snapshot);
+        }
+      })
+      .catch(() => {
+        // The local prototype should stay usable if the API is unavailable during development.
+      });
+
+    fetchDeliveryImportJobs(selectedProjectId)
+      .then(({ jobs }) => {
+        if (!cancelled) {
+          setDeliveryImportJobs((current) => mergeDeliveryImportJobs(current, jobs));
+        }
+      })
+      .catch(() => {
+        // The local prototype should stay usable if the API is unavailable during development.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasHydrated, selectedProjectId]);
+
+  useEffect(() => {
+    const activeProjectIds = new Set(state.projects.filter((project) => project.status === "active").map((project) => project.id));
+
+    if (activeProjectIds.size > 0 && !activeProjectIds.has(selectedProjectId)) {
+      setSelectedProjectId(Array.from(activeProjectIds)[0]);
+      setSelectedDeliveryPackageId(null);
+      setSelectedEpisodeId(null);
+      setActiveModule("项目总览");
+    }
+  }, [selectedProjectId, state.projects]);
+
+  if (!hasHydrated) {
+    return <AuthGate state={seedWorkspace} setState={setState} />;
+  }
 
   const currentUser = selectCurrentUser(state);
   const activeProjects = state.projects.filter((project) => project.status === "active");
@@ -384,39 +461,56 @@ export function M1Dashboard() {
   const currentUserId = currentUser.id;
   const permissions = selectPermissions(state, currentUser.id, selectedProject.id);
   const primaryRole = selectPrimaryRole(state, currentUser.id, selectedProject.id);
-  const canReviewDelivery = primaryRole === "owner" || primaryRole === "coordinator";
-  const canSubmitDelivery = primaryRole === "head_writer" || canReviewDelivery;
+  const canReviewDelivery = canReviewDeliveryRole(primaryRole);
+  const canCreateDelivery = canCreateDeliveryRole(primaryRole);
+  const canSubmitDelivery = canSubmitDeliveryRole(primaryRole);
+  const isSelectedProjectMember = state.members.some((member) => member.projectId === selectedProject.id && member.userId === currentUser.id);
+  const canAccessDelivery = isSelectedProjectMember && canAccessDeliveryRole(primaryRole);
   const overview = selectProjectOverview(state, selectedProject.id);
   const projectMembers = selectProjectMembers(state, selectedProject.id);
-  const myEpisodes = selectMyEpisodes(state, currentUser.id);
-  const unreadNotifications = selectUnreadNotifications(state, currentUser.id);
+  const myEpisodes = filterProjectItems(selectMyEpisodes(state, currentUser.id), selectedProject.id);
+  const unreadNotifications = filterProjectItems(selectUnreadNotifications(state, currentUser.id), selectedProject.id);
   const inProgressCount = overview.episodes.filter((episode) => episode.productionStatus === "in_progress").length;
-  const canViewFullProject = permissions.canViewAllEpisodes;
+  const canViewFullProject = isSelectedProjectMember && permissions.canViewAllEpisodes;
   const visibleEpisodes = canViewFullProject
     ? overview.episodes
     : overview.episodes.filter((episode) => episode.assignments.some((assignment) => assignment.userId === currentUser.id));
   const todayTasks = buildTodayTasks(myEpisodes);
+  const myProjectSummaries = buildMyProjectSummaries(myEpisodes);
   const recentUpdates = buildRecentUpdates(visibleEpisodes, selectedProject.name);
   const selectedEpisode = visibleEpisodes.find((episode) => episode.id === selectedEpisodeId) ?? visibleEpisodes[0] ?? null;
   const assignmentSummary = buildAssignmentSummary(visibleEpisodes);
-  const shortcutItems = buildShortcutItems(permissions, primaryRole);
-  const navigationItems = buildNavigationItems(permissions, primaryRole);
+  const shortcutItems = isSelectedProjectMember ? buildShortcutItems(permissions, primaryRole) : [];
+  const navigationItems = buildNavigationItems(isSelectedProjectMember ? permissions : null, primaryRole, isSelectedProjectMember);
   const allowedModules = new Set([...shortcutItems.map((item) => item.label), ...navigationItems.map((item) => item.label), "集工作台"]);
   const effectiveActiveModule = allowedModules.has(activeModule) ? activeModule : "项目总览";
+  const isProjectHome = effectiveActiveModule === "项目总览";
+
+  function navigateToModule(module: string) {
+    setActiveModule(module);
+    setNoticeOpen(false);
+    setUserMenuOpen(false);
+
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
   const searchableMembers = permissions.canManageMembers || permissions.canViewAllEpisodes ? projectMembers : [];
   const searchResults = buildSearchResults(searchQuery, activeProjects, searchableMembers, visibleEpisodes);
   const currentProjectParticipation = canViewFullProject ? myEpisodes.length : visibleEpisodes.length;
   const projectDeliveryPackages = state.deliveryPackages.filter((deliveryPackage) => deliveryPackage.projectId === selectedProject.id);
   const projectDeliveryImportJobs = deliveryImportJobs.filter((job) => job.projectId === selectedProject.id).slice(0, 8);
-  const activeDeliveryPackageId =
-    selectedDeliveryPackageId && projectDeliveryPackages.some((deliveryPackage) => deliveryPackage.id === selectedDeliveryPackageId)
-      ? selectedDeliveryPackageId
-      : projectDeliveryPackages.at(-1)?.id ?? null;
+  const activeDeliveryPackageId = selectDefaultDeliveryPackageId(projectDeliveryPackages, primaryRole, selectedDeliveryPackageId);
   const activeDeliveryPackage = activeDeliveryPackageId ? selectDeliveryPackageDetail(state, activeDeliveryPackageId) : null;
   const activeDeliveryParseIssues = activeDeliveryPackageId ? deliveryParseIssuesByPackageId[activeDeliveryPackageId] ?? [] : [];
   const deliveryPackageDetails = projectDeliveryPackages
     .map((deliveryPackage) => selectDeliveryPackageDetail(state, deliveryPackage.id))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const pendingDeliveryPackages = deliveryPackageDetails.filter((deliveryPackage) => deliveryPackage.status === "pending_review");
+  const recentPublishedDeliveryPackages = deliveryPackageDetails
+    .filter((deliveryPackage) => deliveryPackage.status === "published")
+    .sort((a, b) => (b.publishedAt ?? b.createdAt).localeCompare(a.publishedAt ?? a.createdAt))
+    .slice(0, 3);
 
   function runMutation(mutator: (current: WorkspaceState) => WorkspaceState, successText: string) {
     try {
@@ -470,6 +564,29 @@ export function M1Dashboard() {
     setDeliveryImportJobs((items) => items.map((item) => (item.id === jobId ? nextJob : item)));
   }
 
+  function applyDeliveryWorkspaceSnapshot(snapshot: Awaited<ReturnType<typeof fetchDeliveryImportWorkspace>>) {
+    setDeliveryParseIssuesByPackageId((current) => ({
+      ...current,
+      ...snapshot.deliveryParseIssuesByPackageId
+    }));
+    setState((current) => ({
+      ...current,
+      episodes: mergeById(current.episodes, snapshot.state.episodes),
+      deliveryPackages: mergeById(current.deliveryPackages, snapshot.state.deliveryPackages),
+      deliveryPackageEpisodes: mergeById(current.deliveryPackageEpisodes, snapshot.state.deliveryPackageEpisodes),
+      episodeRevisions: mergeById(current.episodeRevisions, snapshot.state.episodeRevisions),
+      episodeCurrents: mergeById(current.episodeCurrents, snapshot.state.episodeCurrents),
+      notifications: mergeById(current.notifications, snapshot.state.notifications)
+    }));
+  }
+
+  async function refreshDeliveryWorkspaceFromServer() {
+    const snapshot = await fetchDeliveryImportWorkspace();
+    applyDeliveryWorkspaceSnapshot(snapshot);
+
+    return snapshot;
+  }
+
   function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     runMutation((current) => {
@@ -477,6 +594,9 @@ export function M1Dashboard() {
       const created = next.projects.at(-1);
       if (created) {
         setSelectedProjectId(created.id);
+        setSelectedDeliveryPackageId(null);
+        setSelectedEpisodeId(null);
+        navigateToModule("项目总览");
       }
       return next;
     }, "项目已创建");
@@ -529,6 +649,11 @@ export function M1Dashboard() {
 
   function handleAssignEpisodes(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!projectMembers.some((member) => member.userId === assignmentDraft.userId)) {
+      setActionMessage({ tone: "error", text: "请先在“成员与角色”里把这个人加入当前项目，再分配集数。" });
+      return;
+    }
+
     runMutation((current) =>
       assignEpisodes(current, {
         projectId: selectedProject.id,
@@ -552,11 +677,11 @@ export function M1Dashboard() {
       }
       return next;
     }, "已创建模拟交稿包：先确认哪些集真的改过，再提交给统筹发布。");
-    setActiveModule("交稿中心");
+    navigateToModule("交稿中心");
   }
 
   async function handleCreateTextDelivery() {
-    if (!canSubmitDelivery) {
+    if (!canCreateDelivery) {
       setActionMessage({ tone: "error", text: "当前身份不能创建交稿包。请让主编剧或统筹处理。" });
       return;
     }
@@ -567,6 +692,13 @@ export function M1Dashboard() {
       fileName: "pasted-word-text.txt",
       declaredRangeText: wordDeclaredRangeDraft
     });
+    setWordParseFeedback({
+      tone: "info",
+      title: "正在解析文本",
+      issues: [],
+      remedies: ["正在识别集数标题并生成交稿草稿，请稍等。"]
+    });
+    setActionMessage({ tone: "success", text: "正在解析文本，完成后会生成交稿草稿。" });
 
     try {
       const result = await submitTextDeliveryImport({
@@ -580,37 +712,43 @@ export function M1Dashboard() {
         replaceDeliveryImportJob(jobId, result.job);
         setWordParseFeedback({
           tone: "error",
-          title: "解析失败，可手动粘贴单集补救",
+          title: "解析失败：没有识别到集数标题",
           issues: result.issues,
-          remedies: result.remedies
+          remedies: [
+            "请确认文本里包含“第 1 集”“第01集”这类集数标题。",
+            "如果 Word 使用自动编号生成“第 x 集”，正文纯文本里可能没有这个标题；请手动在文本里补上集数标题后再解析。",
+            "也可以只填写声明范围，再用 Word 上传入口按范围生成待确认草稿。",
+            ...result.remedies
+          ]
         });
-        setActionMessage({ tone: "error", text: "没有识别到集边界。可改用手动粘贴单集补救，不阻塞后续确认流程。" });
+        setActionMessage({ tone: "error", text: "解析失败：未识别到集数标题。可能是 Word 自动编号没有进入正文，请补上“第 1 集”这类标题后重试。" });
         return;
       }
 
-      const next = createDeliveryPackageDraft(state, result.draft);
-      const created = next.deliveryPackages.at(-1);
-      if (created) {
-        setSelectedDeliveryPackageId(created.id);
-        setDeliveryParseIssuesByPackageId((items) => ({
-          ...items,
-          [created.id]: result.issues
-        }));
-        replaceDeliveryImportJob(jobId, {
-          ...result.job,
-          deliveryPackageId: created.id
-        });
-      } else {
-        replaceDeliveryImportJob(jobId, result.job);
+      replaceDeliveryImportJob(jobId, result.job);
+      let workspaceRefreshFailed = false;
+      try {
+        const snapshot = await refreshDeliveryWorkspaceFromServer();
+        const created = snapshot.state.deliveryPackages.find((item) => item.id === result.job.deliveryPackageId);
+        if (created) {
+          setSelectedDeliveryPackageId(created.id);
+        }
+      } catch {
+        workspaceRefreshFailed = true;
       }
-      setState(next);
-      setActionMessage({ tone: "success", text: "文本解析已生成交稿包草稿：请在确认页检查 warnings 并勾选实际变更集。" });
+      setActionMessage({
+        tone: workspaceRefreshFailed ? "error" : "success",
+        text: workspaceRefreshFailed
+          ? "交稿草稿已生成，但页面刷新失败。请手动刷新页面后查看新草稿。"
+          : "文本解析成功，已生成交稿草稿。下一步请勾选实际变更集，再提交给统筹。"
+      });
       setWordParseFeedback({
         tone: result.issues.length > 0 ? "warning" : "success",
-        title: result.issues.length > 0 ? "解析完成，存在 warnings" : "解析完成，已进入确认页",
-        issues: result.issues
+        title: result.issues.length > 0 ? "解析成功，但有内容需要确认" : "解析成功，已生成交稿草稿",
+        issues: result.issues,
+        remedies: ["下一步：在右侧交稿草稿中勾选这次真正改过的集，再提交给统筹处理。"]
       });
-      setActiveModule("交稿中心");
+      navigateToModule("交稿中心");
     } catch (error) {
       updateDeliveryImportJob(jobId, {
         status: "failed",
@@ -621,14 +759,14 @@ export function M1Dashboard() {
         tone: "error",
         title: "解析请求失败",
         issues: [],
-        remedies: [formatActionError(error), "可稍后重试，或先创建演示交稿包继续确认流程。"]
+        remedies: [formatActionError(error), "请检查网络或稍后重试。也可以先复制 Word 正文到文本框进行解析。"]
       });
       setActionMessage({ tone: "error", text: formatActionError(error) });
     }
   }
 
   async function handleCreateDocxDelivery(file: File, declaredRangeText: string): Promise<WordUploadStatus> {
-    if (!canSubmitDelivery) {
+    if (!canCreateDelivery) {
       setActionMessage({ tone: "error", text: "当前身份不能创建交稿包。请让主编剧或统筹处理。" });
       return "failed";
     }
@@ -651,44 +789,49 @@ export function M1Dashboard() {
         replaceDeliveryImportJob(jobId, result.job);
         setWordParseFeedback({
           tone: "error",
-          title: "Word 解析失败，可手动粘贴单集补救",
+          title: "Word 解析失败：没有识别到集数标题",
           issues: result.issues,
-          remedies: result.remedies
+          remedies: [
+            "请确认 Word 正文里包含“第 1 集”“第01集”这类标题。",
+            "如果 Word 使用自动编号生成“第 x 集”，系统可能读不到编号文字；可改用粘贴文本，或填写声明范围后让系统按范围生成待确认草稿。",
+            ...result.remedies
+          ]
         });
-        setActionMessage({ tone: "error", text: "Word 没有解析出可靠的单集内容。可以改用手动粘贴单集补救。" });
+        setActionMessage({ tone: "error", text: "Word 解析失败：未识别到集数标题，可能是 Word 自动编号未被识别。请改用粘贴文本，或按声明范围生成待确认草稿。" });
         return "failed";
       }
 
-      const next = createDeliveryPackageDraft(state, result.draft);
-      const created = next.deliveryPackages.at(-1);
-      if (created) {
-        setSelectedDeliveryPackageId(created.id);
-        setDeliveryParseIssuesByPackageId((items) => ({
-          ...items,
-          [created.id]: result.issues
-        }));
-        replaceDeliveryImportJob(jobId, {
-          ...result.job,
-          deliveryPackageId: created.id,
-        });
-      } else {
-        replaceDeliveryImportJob(jobId, result.job);
+      replaceDeliveryImportJob(jobId, result.job);
+      let workspaceRefreshFailed = false;
+      try {
+        const snapshot = await refreshDeliveryWorkspaceFromServer();
+        const created = snapshot.state.deliveryPackages.find((item) => item.id === result.job.deliveryPackageId);
+        if (created) {
+          setSelectedDeliveryPackageId(created.id);
+        }
+      } catch {
+        workspaceRefreshFailed = true;
       }
-      setState(next);
       setWordParseFeedback({
         tone: result.issues.length > 0 ? "warning" : "success",
-        title: result.issues.length > 0 ? "Word 解析完成，存在 warnings" : "Word 解析完成，已进入确认页",
-        issues: result.issues
+        title: result.issues.length > 0 ? "Word 解析成功，但有内容需要确认" : "Word 解析成功，已生成交稿草稿",
+        issues: result.issues,
+        remedies: ["下一步：在右侧交稿草稿中勾选这次真正改过的集，再提交给统筹处理。"]
       });
-      setActionMessage({ tone: "success", text: "Word 已解析成交稿包草稿：请在确认页检查 warnings 并勾选实际变更集。" });
-      setActiveModule("交稿中心");
+      setActionMessage({
+        tone: workspaceRefreshFailed ? "error" : "success",
+        text: workspaceRefreshFailed
+          ? "交稿草稿已生成，但页面刷新失败。请手动刷新页面后查看新草稿。"
+          : "Word 解析成功，已生成交稿草稿。下一步请勾选实际变更集，再提交给统筹。"
+      });
+      navigateToModule("交稿中心");
       return "success";
     } catch (error) {
       setWordParseFeedback({
         tone: "error",
         title: "Word 解析请求失败",
         issues: [],
-        remedies: [formatActionError(error), "可改用手动粘贴单集补救，或稍后重新解析。"]
+        remedies: [formatActionError(error), "请检查文件是否为 .docx。也可以复制正文到下方文本框解析。"]
       });
       updateDeliveryImportJob(jobId, {
         status: "failed",
@@ -700,23 +843,26 @@ export function M1Dashboard() {
     }
   }
 
-  function handleUpdateConfirmedEpisode(deliveryPackageId: string, episodeNo: number, checked: boolean) {
+  async function handleUpdateConfirmedEpisode(deliveryPackageId: string, episodeNo: number, checked: boolean) {
     const detail = selectDeliveryPackageDetail(state, deliveryPackageId);
     const confirmedEpisodeNos = checked
-      ? [...detail.confirmedEpisodeNos, episodeNo]
+      ? Array.from(new Set([...detail.confirmedEpisodeNos, episodeNo])).sort((a, b) => a - b)
       : detail.confirmedEpisodeNos.filter((item) => item !== episodeNo);
 
-    runMutation(
-      (current) =>
-        updateDeliveryPackageConfirmation(current, {
-          deliveryPackageId,
-          confirmedEpisodeNos
-        }),
-      "实际变更集已更新"
-    );
+    try {
+      const snapshot = await mutateDeliveryPackageState({
+        action: "update_confirmation",
+        deliveryPackageId,
+        confirmedEpisodeNos
+      });
+      applyDeliveryWorkspaceSnapshot(snapshot);
+      setActionMessage({ tone: "success", text: "实际变更集已更新" });
+    } catch (error) {
+      setActionMessage({ tone: "error", text: formatActionError(error) });
+    }
   }
 
-  function handleSubmitDeliveryForReview(deliveryPackageId: string) {
+  async function handleSubmitDeliveryForReview(deliveryPackageId: string) {
     const detail = selectDeliveryPackageDetail(state, deliveryPackageId);
     if (detail.confirmedEpisodeNos.length === 0) {
       setActionMessage({
@@ -726,35 +872,66 @@ export function M1Dashboard() {
       return;
     }
 
-    runMutation(
-      (current) => submitDeliveryPackageForReview(current, deliveryPackageId, currentUserId),
-      "已提交给统筹。现在还没有覆盖当前剧本；统筹发布后，勾选的集才会变成当前生效剧本。"
-    );
+    try {
+      const snapshot = await mutateDeliveryPackageState({
+        action: "submit",
+        deliveryPackageId,
+        actorUserId: currentUserId
+      });
+      applyDeliveryWorkspaceSnapshot(snapshot);
+      setActionMessage({
+        tone: "success",
+        text: "已提交给统筹。现在还没有覆盖当前剧本；统筹发布后，勾选的集才会变成当前生效剧本。"
+      });
+    } catch (error) {
+      setActionMessage({ tone: "error", text: formatActionError(error) });
+    }
   }
 
-  function handlePublishDelivery(deliveryPackageId: string) {
+  async function handlePublishDelivery(deliveryPackageId: string) {
     if (!canReviewDelivery) {
       setActionMessage({ tone: "error", text: "你当前不是统筹，不能发布交稿包。请让统筹账号处理发布或驳回。" });
       return;
     }
 
     const detail = selectDeliveryPackageDetail(state, deliveryPackageId);
-    runMutation(
-      (current) => publishDeliveryPackage(current, deliveryPackageId, currentUserId),
-      `发布成功。第 ${detail.confirmedEpisodeNos.join("、")} 集现在是当前生效剧本；已分配到这些集的人会收到“剧本已更新，请查看关键变更”。`
-    );
+    try {
+      const snapshot = await mutateDeliveryPackageState({
+        action: "publish",
+        deliveryPackageId,
+        actorUserId: currentUserId
+      });
+      applyDeliveryWorkspaceSnapshot(snapshot);
+      setActionMessage({
+        tone: "success",
+        text: `发布成功。第 ${detail.confirmedEpisodeNos.join("、")} 集现在是当前生效剧本；已分配到这些集的人会收到“剧本已更新，请查看关键变更”。`
+      });
+    } catch (error) {
+      setActionMessage({ tone: "error", text: formatActionError(error) });
+    }
   }
 
-  function handleRejectDelivery(deliveryPackageId: string) {
+  async function handleRejectDelivery(deliveryPackageId: string) {
     if (!canReviewDelivery) {
       setActionMessage({ tone: "error", text: "你当前不是统筹，不能驳回交稿包。请让统筹账号处理发布或驳回。" });
       return;
     }
 
-    runMutation(
-      (current) => rejectDeliveryPackage(current, deliveryPackageId, currentUserId, rejectionReason),
-      "已驳回。这次不会生成新剧本版本；交稿人按驳回原因补齐后，可以重新提交。"
-    );
+    try {
+      const snapshot = await mutateDeliveryPackageState({
+        action: "reject",
+        deliveryPackageId,
+        actorUserId: currentUserId,
+        rejectionReason
+      });
+      applyDeliveryWorkspaceSnapshot(snapshot);
+      setActionMessage({
+        tone: "success",
+        text: "已驳回。这次不会生成新剧本版本；交稿人按驳回原因补齐后，可以重新提交。"
+      });
+    } catch (error) {
+      setActionMessage({ tone: "error", text: formatActionError(error) });
+    }
   }
 
   return (
@@ -764,7 +941,7 @@ export function M1Dashboard() {
         currentUser={currentUser}
         items={navigationItems}
         onLogout={() => setState((current) => logout(current))}
-        onSelectModule={setActiveModule}
+        onSelectModule={navigateToModule}
       />
 
       <section className="replica-main">
@@ -788,9 +965,13 @@ export function M1Dashboard() {
                     <button
                       key={`${item.type}-${item.id}`}
                       onClick={() => {
-                        setActiveModule(item.module);
                         if (item.type === "project") {
                           setSelectedProjectId(item.id);
+                          setSelectedDeliveryPackageId(null);
+                          setSelectedEpisodeId(null);
+                          navigateToModule("项目总览");
+                        } else {
+                          navigateToModule(item.module);
                         }
                         if (item.episodeId) {
                           setSelectedEpisodeId(item.episodeId);
@@ -853,6 +1034,53 @@ export function M1Dashboard() {
           </div>
         </header>
 
+        {!isProjectHome ? (
+          <div className="subview-shell">
+            <div className="subview-heading">
+              <div>
+                <span>{selectedProject.name}</span>
+                <h1>{effectiveActiveModule}</h1>
+              </div>
+              <button className="text-link back-link" onClick={() => navigateToModule("项目总览")} type="button">
+                返回角色首页
+              </button>
+            </div>
+            <ModuleWorkbench
+              activeModule={effectiveActiveModule}
+              activeDeliveryPackage={activeDeliveryPackage}
+            activeDeliveryParseIssues={activeDeliveryParseIssues}
+            assignmentSummary={assignmentSummary}
+            canAccessDelivery={canAccessDelivery}
+            canCreateDelivery={canCreateDelivery}
+              canReviewDelivery={canReviewDelivery}
+              canSubmitDelivery={canSubmitDelivery}
+              deliveryImportJobs={projectDeliveryImportJobs}
+              deliveryPackageDetails={deliveryPackageDetails}
+              episode={selectedEpisode}
+              handleCreateMockDelivery={handleCreateMockDelivery}
+              handleCreateDocxDelivery={handleCreateDocxDelivery}
+              handleCreateTextDelivery={handleCreateTextDelivery}
+              handlePublishDelivery={handlePublishDelivery}
+              handleRejectDelivery={handleRejectDelivery}
+              handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
+              handleUpdateConfirmedEpisode={handleUpdateConfirmedEpisode}
+              projectName={selectedProject.name}
+              recentUpdates={recentUpdates}
+              rejectionReason={rejectionReason}
+              selectedMockDeliveryKey={selectedMockDeliveryKey}
+              setRejectionReason={setRejectionReason}
+              setSelectedDeliveryPackageId={setSelectedDeliveryPackageId}
+              setSelectedMockDeliveryKey={setSelectedMockDeliveryKey}
+              state={state}
+              tasks={todayTasks}
+              wordDeclaredRangeDraft={wordDeclaredRangeDraft}
+              wordParseFeedback={wordParseFeedback}
+              wordTextDraft={wordTextDraft}
+              setWordDeclaredRangeDraft={setWordDeclaredRangeDraft}
+              setWordTextDraft={setWordTextDraft}
+            />
+          </div>
+        ) : (
         <div className="replica-grid">
           <aside className="personal-column">
             <section className="hello-card">
@@ -863,29 +1091,42 @@ export function M1Dashboard() {
               </div>
             </section>
 
-            <section className="panel today-card">
-              <PanelTitle title="今日任务" eyebrow={`${todayTasks.length} 项`} />
-              <div className="task-list">
-                {todayTasks.length === 0 ? (
-                  <p className="empty-text">还没有分配给你的负责集。请等待统筹分配，分配后这里才会出现任务。</p>
+            {!isSelectedProjectMember ? (
+              <section className="panel today-card">
+                <PanelTitle title="当前项目未加入" eyebrow={selectedProject.name} />
+                <p className="empty-state">你当前还不是这个项目的成员。请联系统筹先加入项目，再分配具体集数；加入前不会显示任务、我的集或交稿入口。</p>
+              </section>
+            ) : canReviewDelivery ? (
+              <CoordinatorDeliverySummary
+                pendingDeliveryPackages={pendingDeliveryPackages}
+                recentPublishedDeliveryPackages={recentPublishedDeliveryPackages}
+                onOpenDeliveryCenter={() => navigateToModule("交稿中心")}
+              />
+            ) : (
+              <section className="panel today-card">
+                <PanelTitle title="今日任务" eyebrow={`${todayTasks.length} 项`} />
+                <div className="task-list">
+                  {todayTasks.length === 0 ? (
+                    <p className="empty-text">还没有分配给你的负责集。请等待统筹分配，分配后这里才会出现任务。</p>
+                  ) : null}
+                  {todayTasks.map((task) => (
+                    <article className={`task-item ${task.status}`} key={task.title}>
+                      <span />
+                      <div>
+                        <strong>{task.title}</strong>
+                        <small>{task.meta}</small>
+                      </div>
+                      <em>{task.badge}</em>
+                    </article>
+                  ))}
+                </div>
+                {todayTasks.length > 0 ? (
+                  <button className="text-link" onClick={() => navigateToModule("任务中心")} type="button">
+                    查看全部任务（{todayTasks.length}）
+                  </button>
                 ) : null}
-                {todayTasks.map((task) => (
-                  <article className={`task-item ${task.status}`} key={task.title}>
-                    <span />
-                    <div>
-                      <strong>{task.title}</strong>
-                      <small>{task.meta}</small>
-                    </div>
-                    <em>{task.badge}</em>
-                  </article>
-                ))}
-              </div>
-              {todayTasks.length > 0 ? (
-                <button className="text-link" onClick={() => setActiveModule("任务中心")} type="button">
-                  查看全部任务（{todayTasks.length}）
-                </button>
-              ) : null}
-            </section>
+              </section>
+            )}
 
             {actionMessage ? (
               <div className={`action-message ${actionMessage.tone}`} role="status">
@@ -893,27 +1134,45 @@ export function M1Dashboard() {
               </div>
             ) : null}
 
-            <section className="panel mine-card">
-              <PanelTitle title={`我的集（${myEpisodes.length}）`} eyebrow="进度" />
-              <div className="mine-list">
-                {myEpisodes.length === 0 ? (
-                  <p className="empty-state">你还没有负责集。先不用处理任务，等统筹分配具体集数后，这里会自动出现你的单集工作入口。</p>
+            {isSelectedProjectMember && canAccessDelivery && !canReviewDelivery ? (
+              <section className="panel delivery-home-card">
+                <PanelTitle title="交稿入口" eyebrow={canSubmitDelivery ? "可提交" : "查看"} />
+                {myEpisodes.length > 0 ? (
+                  <>
+                    <p className="inline-help">你已分配 {myEpisodes.length} 集。进入交稿中心后，可以上传 Word 或粘贴文本生成交稿草稿。</p>
+                    <button className="primary-button" onClick={() => navigateToModule("交稿中心")} type="button">
+                      <FileText size={16} />
+                      提交交稿 / 上传 Word / 粘贴文本
+                    </button>
+                  </>
                 ) : (
-                  myEpisodes.slice(0, 3).map((episode) => (
-                    <article key={`${episode.projectCode}-${episode.episodeNo}`}>
-                      <div>
-                        <strong>第 {episode.episodeNo} 集 · {episode.projectName}</strong>
-                        <small>
-                          {assignmentLabels[episode.responsibility]}
-                          {episode.hasUnreadKeyChange ? " · 关键变更待查看" : ""}
-                        </small>
-                      </div>
-                      <ProgressBar value={episode.productionStatus === "in_progress" ? 60 : episode.productionStatus === "key_update" ? 35 : 15} />
-                    </article>
-                  ))
+                  <p className="empty-state">暂无分配集数，请联系统筹分配。分配后这里会出现交稿入口。</p>
                 )}
-              </div>
-            </section>
+              </section>
+            ) : null}
+
+            {!isSelectedProjectMember ? null : canReviewDelivery ? (
+              <CoordinatorNotificationSummary notifications={unreadNotifications} />
+            ) : (
+              <section className="panel mine-card">
+                <PanelTitle title={`我的集（${myEpisodes.length}）`} eyebrow={selectedProject.name} />
+                <div className="mine-list">
+                  {myProjectSummaries.length === 0 ? (
+                    <p className="empty-state">你在当前项目还没有负责集。请联系统筹加入项目并分配具体集数。</p>
+                  ) : (
+                    myProjectSummaries.slice(0, 3).map((project) => (
+                      <article key={project.projectCode}>
+                        <div>
+                          <strong>{project.projectName}</strong>
+                          <small>{project.ranges.join("、")} · {project.responsibilities.join("、")}</small>
+                        </div>
+                        <ProgressBar value={Math.min(95, Math.max(12, project.episodeCount * 6))} />
+                      </article>
+                    ))
+                  )}
+                </div>
+              </section>
+            )}
           </aside>
 
           <section className="project-banner">
@@ -922,28 +1181,52 @@ export function M1Dashboard() {
             <div className="banner-copy">
               <span>当前项目</span>
               <h2>{selectedProject.name}</h2>
-              <p>科幻 / {selectedProject.episodeCount} 集 / {inProgressCount} 制作中</p>
+              <p>{selectedProject.code} / {selectedProject.episodeCount} 集 / {inProgressCount} 制作中</p>
+              {!isSelectedProjectMember ? (
+                <p className="project-context-warning">你当前未参与该项目。任务、我的集和交稿入口会等待统筹分配后出现。</p>
+              ) : null}
             </div>
             <div className="banner-stats">
               <Metric label="总集数" value={selectedProject.episodeCount.toString()} />
               <Metric label="我的参与" value={currentProjectParticipation.toString()} />
               <Metric label="进行中" value={inProgressCount.toString()} />
             </div>
-            <button className="banner-button" onClick={() => setActiveModule("项目总览")} type="button">进入项目</button>
+            <div className="project-switcher">
+              <label>
+                切换当前项目
+                <select
+                  value={selectedProject.id}
+                  onChange={(event) => {
+                    setSelectedProjectId(event.target.value);
+                    setSelectedDeliveryPackageId(null);
+                    setSelectedEpisodeId(null);
+                    navigateToModule("项目总览");
+                  }}
+                >
+                  {activeProjects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className="current-project-pill">当前项目</span>
+            </div>
           </section>
 
           <NotificationsPanel
             notifications={unreadNotifications}
+            onOpenAll={() => navigateToModule("通知中心")}
             onRead={(notificationId) => setState((current) => markNotificationRead(current, notificationId))}
           />
 
-          <UpdatesPanel updates={recentUpdates} />
+          <UpdatesPanel updates={recentUpdates} onOpenAll={() => navigateToModule("项目总览")} />
 
           <section className="panel shortcuts-panel">
             <PanelTitle title="快捷入口" />
             <div className="shortcut-grid">
               {shortcutItems.map((item) => (
-                <button key={item.label} onClick={() => setActiveModule(item.label)} type="button">
+                <button key={item.label} onClick={() => navigateToModule(item.label)} type="button">
                   <item.icon size={20} />
                   <span>{item.label}</span>
                 </button>
@@ -966,7 +1249,7 @@ export function M1Dashboard() {
                     key={episode.id}
                     onClick={() => {
                       setSelectedEpisodeId(episode.id);
-                      setActiveModule("集工作台");
+                      navigateToModule("集工作台");
                     }}
                     type="button"
                   >
@@ -984,40 +1267,7 @@ export function M1Dashboard() {
             )}
           </section>
 
-          <ModuleWorkbench
-            activeModule={effectiveActiveModule}
-            activeDeliveryPackage={activeDeliveryPackage}
-            activeDeliveryParseIssues={activeDeliveryParseIssues}
-            assignmentSummary={assignmentSummary}
-            canReviewDelivery={canReviewDelivery}
-            canSubmitDelivery={canSubmitDelivery}
-            deliveryImportJobs={projectDeliveryImportJobs}
-            deliveryPackageDetails={deliveryPackageDetails}
-            episode={selectedEpisode}
-            handleCreateMockDelivery={handleCreateMockDelivery}
-            handleCreateDocxDelivery={handleCreateDocxDelivery}
-            handleCreateTextDelivery={handleCreateTextDelivery}
-            handlePublishDelivery={handlePublishDelivery}
-            handleRejectDelivery={handleRejectDelivery}
-            handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
-            handleUpdateConfirmedEpisode={handleUpdateConfirmedEpisode}
-            projectName={selectedProject.name}
-            recentUpdates={recentUpdates}
-            rejectionReason={rejectionReason}
-            selectedMockDeliveryKey={selectedMockDeliveryKey}
-            setRejectionReason={setRejectionReason}
-            setSelectedDeliveryPackageId={setSelectedDeliveryPackageId}
-            setSelectedMockDeliveryKey={setSelectedMockDeliveryKey}
-            state={state}
-            tasks={todayTasks}
-            wordDeclaredRangeDraft={wordDeclaredRangeDraft}
-            wordParseFeedback={wordParseFeedback}
-            wordTextDraft={wordTextDraft}
-            setWordDeclaredRangeDraft={setWordDeclaredRangeDraft}
-            setWordTextDraft={setWordTextDraft}
-          />
-
-          {permissions.canManageProjects || permissions.canManageMembers || permissions.canAssignEpisodes ? (
+          {isSelectedProjectMember && (permissions.canManageProjects || permissions.canManageMembers || permissions.canAssignEpisodes) ? (
             <section className="ops-drawer">
               {permissions.canManageProjects ? (
                 <ProjectOpsPanel
@@ -1039,6 +1289,7 @@ export function M1Dashboard() {
                   memberDraft={memberDraft}
                   members={projectMembers}
                   permissionDraft={permissionDraft}
+                  selectedProject={selectedProject}
                   setPermissionDraft={setPermissionDraft}
                   setMemberDraft={setMemberDraft}
                   users={state.users}
@@ -1050,12 +1301,14 @@ export function M1Dashboard() {
                   assignmentSummary={assignmentSummary}
                   handleAssignEpisodes={handleAssignEpisodes}
                   projectMembers={projectMembers}
+                  selectedProject={selectedProject}
                   setAssignmentDraft={setAssignmentDraft}
                 />
               ) : null}
             </section>
           ) : null}
         </div>
+        )}
       </section>
     </main>
   );
@@ -1218,9 +1471,11 @@ function IconRail({
 
 function NotificationsPanel({
   notifications,
+  onOpenAll,
   onRead
 }: {
   notifications: ReturnType<typeof selectUnreadNotifications>;
+  onOpenAll: () => void;
   onRead: (notificationId: string) => void;
 }) {
   return (
@@ -1244,7 +1499,7 @@ function NotificationsPanel({
           ))
         )}
       </div>
-      <button className="text-link" type="button">查看全部</button>
+      <button className="text-link" onClick={onOpenAll} type="button">查看全部</button>
     </section>
   );
 }
@@ -1286,7 +1541,7 @@ function FloatingPanel({ children, title }: { children: React.ReactNode; title: 
   );
 }
 
-function UpdatesPanel({ updates }: { updates: ReturnType<typeof buildRecentUpdates> }) {
+function UpdatesPanel({ onOpenAll, updates }: { onOpenAll: () => void; updates: ReturnType<typeof buildRecentUpdates> }) {
   return (
     <section className="panel updates-card">
       <PanelTitle title="最近更新" />
@@ -1306,9 +1561,73 @@ function UpdatesPanel({ updates }: { updates: ReturnType<typeof buildRecentUpdat
               </article>
             ))}
           </div>
-          <button className="text-link" type="button">查看全部更新</button>
+          <button className="text-link" onClick={onOpenAll} type="button">查看全部更新</button>
         </>
       )}
+    </section>
+  );
+}
+
+function CoordinatorDeliverySummary({
+  pendingDeliveryPackages,
+  recentPublishedDeliveryPackages,
+  onOpenDeliveryCenter
+}: {
+  pendingDeliveryPackages: Array<ReturnType<typeof selectDeliveryPackageDetail>>;
+  recentPublishedDeliveryPackages: Array<ReturnType<typeof selectDeliveryPackageDetail>>;
+  onOpenDeliveryCenter: () => void;
+}) {
+  return (
+    <section className="panel coordinator-card">
+      <PanelTitle title="待处理交稿" eyebrow={`${pendingDeliveryPackages.length} 个`} />
+      <div className="coordinator-metrics">
+        <div>
+          <strong>{pendingDeliveryPackages.length}</strong>
+          <span>待发布</span>
+        </div>
+        <div>
+          <strong>{recentPublishedDeliveryPackages.length}</strong>
+          <span>最近发布</span>
+        </div>
+      </div>
+      <div className="coordinator-list">
+        {pendingDeliveryPackages.length === 0 ? (
+          <p className="empty-state">当前没有等待统筹处理的交稿包。</p>
+        ) : (
+          pendingDeliveryPackages.slice(0, 3).map((deliveryPackage) => (
+            <article key={deliveryPackage.id}>
+              <strong>{deliveryPackage.title}</strong>
+              <small>
+                第 {deliveryPackage.declaredEpisodeFrom}-{deliveryPackage.declaredEpisodeTo} 集 · {deliveryPackage.confirmedEpisodeNos.length} 集待发布
+              </small>
+            </article>
+          ))
+        )}
+      </div>
+      <button className="primary-button" onClick={onOpenDeliveryCenter} type="button">
+        <ShieldCheck size={16} />
+        处理交稿包
+      </button>
+    </section>
+  );
+}
+
+function CoordinatorNotificationSummary({ notifications }: { notifications: ReturnType<typeof selectUnreadNotifications> }) {
+  return (
+    <section className="panel coordinator-card">
+      <PanelTitle title="关键变更通知" eyebrow={notifications.length.toString()} />
+      <div className="coordinator-list">
+        {notifications.length === 0 ? (
+          <p className="empty-state">当前没有新的关键变更通知。</p>
+        ) : (
+          notifications.slice(0, 4).map((notification) => (
+            <article key={notification.id}>
+              <strong>{notification.title}</strong>
+              <small>{formatNotificationBody(notification)}</small>
+            </article>
+          ))
+        )}
+      </div>
     </section>
   );
 }
@@ -1318,6 +1637,8 @@ function ModuleWorkbench({
   activeDeliveryPackage,
   activeDeliveryParseIssues,
   assignmentSummary,
+  canAccessDelivery,
+  canCreateDelivery,
   canReviewDelivery,
   canSubmitDelivery,
   deliveryImportJobs,
@@ -1349,6 +1670,8 @@ function ModuleWorkbench({
   activeDeliveryPackage: ReturnType<typeof selectDeliveryPackageDetail> | null;
   activeDeliveryParseIssues: WordDeliveryIssue[];
   assignmentSummary: AssignmentSummaryItem[];
+  canAccessDelivery: boolean;
+  canCreateDelivery: boolean;
   canReviewDelivery: boolean;
   canSubmitDelivery: boolean;
   deliveryImportJobs: DeliveryImportJob[];
@@ -1469,10 +1792,22 @@ function ModuleWorkbench({
   }
 
   if (activeModule === "交稿中心") {
+    if (!canAccessDelivery) {
+      return (
+        <section className="panel module-panel">
+          <PanelTitle title="交稿中心" eyebrow={projectName} />
+          <p className="empty-state">
+            你还不是“{projectName}”的项目成员，不能查看或提交这个项目的交稿包。请先让统筹在“成员与角色”中加入项目，再分配具体集数。
+          </p>
+        </section>
+      );
+    }
+
     return (
       <M2DeliveryCenter
         activeDeliveryPackage={activeDeliveryPackage}
         activeDeliveryParseIssues={activeDeliveryParseIssues}
+        canCreateDelivery={canCreateDelivery}
         canReviewDelivery={canReviewDelivery}
         canSubmitDelivery={canSubmitDelivery}
         deliveryImportJobs={deliveryImportJobs}
@@ -1484,6 +1819,7 @@ function ModuleWorkbench({
         handleRejectDelivery={handleRejectDelivery}
         handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
         handleUpdateConfirmedEpisode={handleUpdateConfirmedEpisode}
+        projectName={projectName}
         rejectionReason={rejectionReason}
         selectedMockDeliveryKey={selectedMockDeliveryKey}
         setRejectionReason={setRejectionReason}
@@ -1567,6 +1903,7 @@ function ModuleWorkbench({
 function M2DeliveryCenter({
   activeDeliveryPackage,
   activeDeliveryParseIssues,
+  canCreateDelivery,
   canReviewDelivery,
   canSubmitDelivery,
   deliveryImportJobs,
@@ -1578,6 +1915,7 @@ function M2DeliveryCenter({
   handleRejectDelivery,
   handleSubmitDeliveryForReview,
   handleUpdateConfirmedEpisode,
+  projectName,
   rejectionReason,
   selectedMockDeliveryKey,
   setRejectionReason,
@@ -1591,6 +1929,7 @@ function M2DeliveryCenter({
 }: {
   activeDeliveryPackage: ReturnType<typeof selectDeliveryPackageDetail> | null;
   activeDeliveryParseIssues: WordDeliveryIssue[];
+  canCreateDelivery: boolean;
   canReviewDelivery: boolean;
   canSubmitDelivery: boolean;
   deliveryImportJobs: DeliveryImportJob[];
@@ -1602,6 +1941,7 @@ function M2DeliveryCenter({
   handleRejectDelivery: (deliveryPackageId: string) => void;
   handleSubmitDeliveryForReview: (deliveryPackageId: string) => void;
   handleUpdateConfirmedEpisode: (deliveryPackageId: string, episodeNo: number, checked: boolean) => void;
+  projectName: string;
   rejectionReason: string;
   selectedMockDeliveryKey: MockDeliveryKey;
   setRejectionReason: React.Dispatch<React.SetStateAction<string>>;
@@ -1665,7 +2005,7 @@ function M2DeliveryCenter({
 
   return (
     <section className="panel module-panel delivery-center">
-      <PanelTitle title="交稿中心" eyebrow="M2" />
+      <PanelTitle title="交稿中心" eyebrow={`当前项目：${projectName}`} />
 
       <div className="delivery-grid">
         <div className="delivery-column">
@@ -1713,7 +2053,7 @@ function M2DeliveryCenter({
               </label>
             </div>
 
-            {canSubmitDelivery ? (
+            {canCreateDelivery ? (
               <>
                 <label
                   className={`docx-dropzone ${isDraggingDocx ? "dragging" : ""}`}
@@ -1746,7 +2086,7 @@ function M2DeliveryCenter({
                 {uploadStatus === "failed" ? (
                   <div className="manual-fallback-card">
                     <strong>手动粘贴单集补救</strong>
-                    <p>适用于 Word 标题不规范、漏写“第 X 集”、或内容在图片里导致切段失败的情况。</p>
+                    <p>适用于 Word 标题不规范、漏写“第 X 集”、或内容在图片里导致解析失败的情况。</p>
                     <ol>
                       <li>先把需要补救的单集正文复制出来，例如只复制第 12 集。</li>
                       <li>按“单集替换”处理，只确认这一集为实际变更。</li>
@@ -1791,9 +2131,14 @@ function M2DeliveryCenter({
                       onChange={(event) => setWordTextDraft(event.target.value)}
                     />
                   </label>
-                  <button className="primary-button" disabled={!wordTextDraft.trim()} onClick={handleCreateTextDelivery} type="button">
+                  <button
+                    className="primary-button"
+                    disabled={!wordTextDraft.trim() || wordParseFeedback?.tone === "info"}
+                    onClick={handleCreateTextDelivery}
+                    type="button"
+                  >
                     <FileText size={16} />
-                    解析文本并创建草稿
+                    {wordParseFeedback?.tone === "info" ? "正在解析文本..." : "解析文本并创建草稿"}
                   </button>
                   {wordParseFeedback ? (
                     <div className={`parse-feedback ${wordParseFeedback.tone}`}>
@@ -1813,9 +2158,9 @@ function M2DeliveryCenter({
           {deliveryPackageDetails.length === 0 ? (
             <div className="empty-card">
               <Inbox size={22} />
-              <strong>当前没有交稿包需要处理</strong>
-              <p>主编剧或统筹创建交稿包后，这里会显示切出的单集、实际变更集确认、待发布和已发布状态。</p>
-              <p>如果 Word 切段失败，不要反复上传同一个文件；可以先手动粘贴单集内容补救，确认这一集后再提交。</p>
+              <strong>当前还没有交稿草稿</strong>
+              <p>Word 或文本解析成功后，这里会出现待确认的交稿草稿。</p>
+              <p>下一步是在草稿里勾选这次真正改过的集，然后提交给统筹发布或驳回。</p>
             </div>
           ) : (
             <div className="delivery-list">
@@ -1838,7 +2183,7 @@ function M2DeliveryCenter({
 
           <div className="delivery-create">
             <strong>创建演示交稿包</strong>
-            <p>当前 M2 只演示交稿包确认流，不做真正 Word 文件解析，也不做 M3 资产审核。切段失败时，可改用“手动粘贴单集补救”。</p>
+            <p>当前 M2 只演示交稿包确认流，不做真正 Word 文件解析，也不做 M3 资产审核。解析失败时，可改用“手动粘贴单集补救”。</p>
             <label>
               选择交稿包场景
               <select value={selectedMockDeliveryKey} onChange={(event) => setSelectedMockDeliveryKey(event.target.value as MockDeliveryKey)}>
@@ -1850,13 +2195,13 @@ function M2DeliveryCenter({
               </select>
             </label>
             <small>{selectedTemplate.description}</small>
-            {canSubmitDelivery ? (
+            {canCreateDelivery ? (
               <button className="primary-button" onClick={handleCreateMockDelivery} type="button">
                 <CirclePlus size={16} />
                 创建交稿包
               </button>
             ) : (
-              <p className="permission-note">当前身份不能创建或提交交稿包。等待主编剧或统筹创建后，你可以查看与你相关的集。</p>
+              <p className="permission-note">当前身份不能创建交稿包。等待主编剧或统筹创建后，你可以查看与你相关的集。</p>
             )}
           </div>
         </div>
@@ -1866,7 +2211,7 @@ function M2DeliveryCenter({
             <div className="empty-card soft">
               <FileText size={22} />
               <strong>请选择一个交稿包查看详情</strong>
-              <p>交稿包出现后，先确认“这次真的改过”的集。没勾选的集不会生成新版本，也不会通知对应负责人。</p>
+              <p>交稿草稿出现后，先确认“这次真的改过”的集。没勾选的集不会生成新版本，也不会通知对应负责人。</p>
             </div>
           ) : (
             <>
@@ -1876,9 +2221,14 @@ function M2DeliveryCenter({
                   <span>{activeDeliveryPackage.status} / {deliveryStatusLabels[activeDeliveryPackage.status]}</span>
                 </div>
                 <small>
-                  声明范围：第 {activeDeliveryPackage.declaredEpisodeFrom}-{activeDeliveryPackage.declaredEpisodeTo} 集
+                  所属项目：{projectName} · 声明范围：第 {activeDeliveryPackage.declaredEpisodeFrom}-{activeDeliveryPackage.declaredEpisodeTo} 集
                 </small>
               </div>
+              {activeDeliveryPackage.status === "draft" ? (
+                <p className="inline-help">
+                  这是导入后生成的待确认交稿草稿。请勾选实际变更集，确认后提交给统筹；统筹之后会发布或驳回。
+                </p>
+              ) : null}
 
               {activeDeliveryPackage.status === "rejected" && activeDeliveryPackage.rejectionReason ? (
                 <p className="inline-warning">已驳回：{activeDeliveryPackage.rejectionReason}</p>
@@ -1894,15 +2244,20 @@ function M2DeliveryCenter({
               {activeDeliveryPackage.status === "draft" ? (
                 <>
                   <p className={confirmedCount === 0 ? "inline-warning" : "inline-help"}>
-                    {confirmedCount === 0
-                      ? "还没勾选实际变更集。请勾选这次真的改过的集，没改的不要提交发布。"
-                      : `已勾选 ${confirmedCount} 集实际变更。提交后会进入统筹待发布，不会立刻覆盖当前生效剧本。`}
+                    {canReviewDelivery
+                      ? confirmedCount === 0
+                        ? "草稿还没有确认实际变更集。请等待主编剧提交，或先确认后再进入发布流程。"
+                        : `已确认 ${confirmedCount} 集实际变更。草稿提交后会进入你的待发布列表。`
+                      : confirmedCount === 0
+                        ? "还没勾选实际变更集。请勾选这次真的改过的集，没改的不要提交发布。"
+                        : `已勾选 ${confirmedCount} 集实际变更。提交后会进入统筹待发布，不会立刻覆盖当前生效剧本。`}
                   </p>
                   <div className="delivery-episode-list">
                     {activeDeliveryPackage.episodes.map((episode) => (
                       <label className="check-row" key={episode.id}>
                         <input
                           checked={episode.isConfirmedChange}
+                          disabled={!canSubmitDelivery}
                           onChange={(event) => handleUpdateConfirmedEpisode(activeDeliveryPackage.id, episode.episodeNo, event.target.checked)}
                           type="checkbox"
                         />
@@ -1923,6 +2278,8 @@ function M2DeliveryCenter({
                       <Send size={16} />
                       {confirmedCount === 0 ? "先勾选实际变更集" : "提交给统筹发布"}
                     </button>
+                  ) : canReviewDelivery ? (
+                    <p className="permission-note">这是尚未提交的草稿。统筹处理从“待发布”开始，主编剧提交后这里会显示发布和驳回入口。</p>
                   ) : (
                     <p className="permission-note">当前身份只能查看交稿包，不能提交。请让主编剧或统筹确认实际变更集后提交。</p>
                   )}
@@ -1978,10 +2335,10 @@ function DeliveryImportJobList({ jobs }: { jobs: DeliveryImportJob[] }) {
     return (
       <section className="import-job-panel">
         <div className="import-job-head">
-          <strong>切段任务</strong>
-          <span>暂无任务</span>
+          <strong>解析记录</strong>
+          <span>暂无记录</span>
         </div>
-        <p>上传 Word 或粘贴文本后，这里会记录解析状态、warning 数量和生成的交稿草稿。</p>
+        <p>这里记录每次 Word 上传或文本解析的结果：正在解析、解析成功、解析失败，以及是否生成交稿草稿。</p>
       </section>
     );
   }
@@ -1989,7 +2346,7 @@ function DeliveryImportJobList({ jobs }: { jobs: DeliveryImportJob[] }) {
   return (
     <section className="import-job-panel">
       <div className="import-job-head">
-        <strong>切段任务</strong>
+        <strong>解析记录</strong>
         <span>{jobs.length} 条</span>
       </div>
       <div className="import-job-list">
@@ -2002,8 +2359,8 @@ function DeliveryImportJobList({ jobs }: { jobs: DeliveryImportJob[] }) {
               </span>
             </div>
             <em>{deliveryImportJobStatusLabels[job.status]}</em>
-            {job.deliveryPackageId ? <small>已关联交稿草稿：{job.deliveryPackageId}</small> : null}
-            {job.issueCount ? <small>{job.issueCount} 条 warning/error 需要确认</small> : null}
+            {job.deliveryPackageId ? <small>已生成交稿草稿：{job.deliveryPackageId}</small> : null}
+            {job.issueCount ? <small>{job.issueCount} 条提示需要确认</small> : null}
             {job.errorText ? <small>{job.errorText}</small> : null}
           </article>
         ))}
@@ -2181,6 +2538,7 @@ function MembersPanel({
   memberDraft,
   members,
   permissionDraft,
+  selectedProject,
   setPermissionDraft,
   setMemberDraft,
   users
@@ -2190,6 +2548,7 @@ function MembersPanel({
   memberDraft: { userId: string; roles: ProjectRole[] };
   members: ReturnType<typeof selectProjectMembers>;
   permissionDraft: { userId: string; permissions: PermissionKey[] };
+  selectedProject: WorkspaceState["projects"][number];
   setPermissionDraft: React.Dispatch<React.SetStateAction<{ userId: string; permissions: PermissionKey[] }>>;
   setMemberDraft: React.Dispatch<React.SetStateAction<{ userId: string; roles: ProjectRole[] }>>;
   users: WorkspaceState["users"];
@@ -2228,7 +2587,8 @@ function MembersPanel({
 
   return (
     <section className="panel ops-panel">
-      <PanelTitle title="成员与角色" eyebrow="Access" />
+      <PanelTitle title="成员与角色" eyebrow={selectedProject.name} />
+      <p className="panel-note">这里只决定谁属于“{selectedProject.name}”，以及在这个项目里的权限角色；具体负责哪几集，请到“集数分配”。</p>
       <form className="form-stack" onSubmit={handleUpsertMember}>
         <label>
           成员
@@ -2245,7 +2605,7 @@ function MembersPanel({
           >
             {users.map((user) => (
               <option key={user.id} value={user.id}>
-                {user.name}
+                {user.name}{members.some((member) => member.userId === user.id) ? " · 已在本项目" : ""}
               </option>
             ))}
           </select>
@@ -2263,7 +2623,7 @@ function MembersPanel({
         </div>
         <button className="primary-button" type="submit">
           <UserPlus size={16} />
-          保存成员身份
+          保存到当前项目
         </button>
       </form>
 
@@ -2304,7 +2664,7 @@ function MembersPanel({
             <span className={`avatar mini ${member.avatarTone}`}>{member.userName.slice(0, 1)}</span>
             <div>
               <strong>{member.userName}</strong>
-              <small>{member.roles.map((role) => roleLabels[role]).join("、")}</small>
+              <small>{selectedProject.name} · {member.roles.map((role) => roleLabels[role]).join("、")}</small>
               <small>
                 权限：{member.permissions.map((permission) => permissionLabels[permission]).join("、")}
                 {member.hasCustomPermissions ? "（已自定义）" : ""}
@@ -2322,32 +2682,43 @@ function AssignmentPanel({
   assignmentSummary,
   handleAssignEpisodes,
   projectMembers,
+  selectedProject,
   setAssignmentDraft
 }: {
   assignmentDraft: { userId: string; responsibility: EpisodeAssignment["responsibility"]; episodeFrom: number; episodeTo: number };
   assignmentSummary: AssignmentSummaryItem[];
   handleAssignEpisodes: (event: FormEvent<HTMLFormElement>) => void;
   projectMembers: ReturnType<typeof selectProjectMembers>;
+  selectedProject: WorkspaceState["projects"][number];
   setAssignmentDraft: React.Dispatch<
     React.SetStateAction<{ userId: string; responsibility: EpisodeAssignment["responsibility"]; episodeFrom: number; episodeTo: number }>
   >;
 }) {
   return (
     <section className="panel ops-panel">
-      <PanelTitle title="集数分配" eyebrow="Assignment" />
+      <PanelTitle title="集数分配" eyebrow={selectedProject.name} />
+      <p className="panel-note">集数分配只表示具体工作，不改变权限。可分配对象必须先是“{selectedProject.name}”的项目成员。</p>
       <form className="form-stack" onSubmit={handleAssignEpisodes}>
         <label>
-          成员
-          <select value={assignmentDraft.userId} onChange={(event) => setAssignmentDraft((draft) => ({ ...draft, userId: event.target.value }))}>
-            {projectMembers.map((member) => (
-              <option key={member.id} value={member.userId}>
-                {member.userName} · {roleLabels[member.role]}
-              </option>
-            ))}
-          </select>
+          项目
+          <input readOnly value={`${selectedProject.name} · ${selectedProject.code} · ${selectedProject.episodeCount} 集`} />
         </label>
         <label>
-          分工类型
+          项目成员
+          {projectMembers.length === 0 ? (
+            <p className="permission-note">当前项目还没有成员。请先在“成员与角色”里加入成员。</p>
+          ) : (
+            <select value={assignmentDraft.userId} onChange={(event) => setAssignmentDraft((draft) => ({ ...draft, userId: event.target.value }))}>
+              {projectMembers.map((member) => (
+                <option key={member.id} value={member.userId}>
+                  {member.userName} · 项目角色：{member.roles.map((role) => roleLabels[role]).join("、")}
+                </option>
+              ))}
+            </select>
+          )}
+        </label>
+        <label>
+          工作内容
           <select
             value={assignmentDraft.responsibility}
             onChange={(event) =>
@@ -2371,7 +2742,7 @@ function AssignmentPanel({
         />
         <button className="primary-button" type="submit">
           <Save size={16} />
-          分配集范围
+          分配当前项目集数
         </button>
       </form>
       <AssignmentSummaryList items={assignmentSummary.slice(0, 4)} />
@@ -2442,14 +2813,25 @@ function buildRecentUpdates(episodes: ReturnType<typeof selectProjectOverview>["
     }));
 }
 
-function buildNavigationItems(permissions: ReturnType<typeof selectPermissions>, primaryRole: ProjectRole): NavigationItem[] {
+function buildNavigationItems(
+  permissions: ReturnType<typeof selectPermissions> | null,
+  primaryRole: ProjectRole,
+  isProjectMember = true
+): NavigationItem[] {
   const items: NavigationItem[] = [
-    { icon: Home, label: "项目总览" },
+    { icon: Home, label: "项目总览" }
+  ];
+
+  if (!permissions || !isProjectMember) {
+    return items;
+  }
+
+  items.push(
     { icon: Inbox, label: "通知中心" },
     { icon: CalendarDays, label: "任务中心" },
     { icon: Package, label: "素材库" }
-  ];
-  const canUseDeliveryCenter = primaryRole === "owner" || primaryRole === "coordinator" || primaryRole === "head_writer";
+  );
+  const canUseDeliveryCenter = canAccessDeliveryRole(primaryRole);
 
   if (canUseDeliveryCenter) {
     items.push({ icon: FileText, label: "交稿中心" });
@@ -2467,7 +2849,7 @@ function buildNavigationItems(permissions: ReturnType<typeof selectPermissions>,
 }
 
 function buildShortcutItems(permissions: ReturnType<typeof selectPermissions>, primaryRole: ProjectRole): NavigationItem[] {
-  const canUseDeliveryCenter = primaryRole === "owner" || primaryRole === "coordinator" || primaryRole === "head_writer";
+  const canUseDeliveryCenter = canAccessDeliveryRole(primaryRole);
 
   return baseShortcutItems.filter((item) => {
     if (item.label === "集数分配") {
@@ -2506,10 +2888,45 @@ function formatActionError(error: unknown) {
   }
 
   if (message.includes("交稿包至少需要包含一集剧本")) {
-    return "交稿包里没有识别到单集内容。Word 切段失败时，可以手动粘贴单集补救。";
+    return "交稿包里没有识别到单集内容。Word 解析失败时，可以手动粘贴单集补救。";
+  }
+
+  if (message.includes("delivery_package_mutation_request_failed")) {
+    return "交稿包状态服务暂时不可用，页面已保留当前状态，请稍后再试。";
+  }
+
+  if (message.includes("invalid_delivery_package_request")) {
+    return "操作信息不完整，请刷新页面后重试。";
+  }
+
+  if (message.includes("delivery_package_mutation_failed")) {
+    return "操作失败，请刷新后重试。";
+  }
+
+  if (message.includes("delivery_import_workspace_request_failed")) {
+    return "交稿包数据刷新失败，页面已保留当前状态，请稍后再试。";
+  }
+
+  if (message.includes("交稿包状态必须是")) {
+    return "当前交稿包状态已变化，请刷新页面后再处理。";
+  }
+
+  if (message.includes("交稿包不存在")) {
+    return "没有找到这个交稿包，请刷新页面后再试。";
   }
 
   return message || "操作失败，请检查输入。";
+}
+
+function mergeById<T extends { id: string }>(current: T[], incoming: T[]) {
+  const incomingIds = new Set(incoming.map((item) => item.id));
+  return [...current.filter((item) => !incomingIds.has(item.id)), ...incoming];
+}
+
+function mergeDeliveryImportJobs(current: DeliveryImportJob[], incoming: DeliveryImportJob[]) {
+  return mergeById(current, incoming)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 20);
 }
 
 type CurrentRevisionDocxInput = {
@@ -2577,6 +2994,15 @@ type AssignmentSummaryItem = {
   userName: string;
 };
 
+type MyProjectSummaryItem = {
+  episodeCount: number;
+  episodeNos: number[];
+  projectCode: string;
+  projectName: string;
+  ranges: string[];
+  responsibilities: string[];
+};
+
 type SearchResult = {
   episodeId?: string;
   id: string;
@@ -2615,6 +3041,41 @@ function buildAssignmentSummary(episodes: ReturnType<typeof selectProjectOvervie
       ranges: compactEpisodeRanges(item.episodeNos)
     }))
     .sort((a, b) => a.userName.localeCompare(b.userName, "zh-CN"));
+}
+
+function buildMyProjectSummaries(episodes: ReturnType<typeof selectMyEpisodes>): MyProjectSummaryItem[] {
+  const groups = new Map<string, { episodeNos: number[]; projectCode: string; projectName: string; responsibilities: Set<string> }>();
+
+  for (const episode of episodes) {
+    const existing = groups.get(episode.projectCode);
+
+    if (existing) {
+      existing.episodeNos.push(episode.episodeNo);
+      existing.responsibilities.add(assignmentLabels[episode.responsibility]);
+    } else {
+      groups.set(episode.projectCode, {
+        episodeNos: [episode.episodeNo],
+        projectCode: episode.projectCode,
+        projectName: episode.projectName,
+        responsibilities: new Set([assignmentLabels[episode.responsibility]])
+      });
+    }
+  }
+
+  return Array.from(groups.values())
+    .map((item) => {
+      const episodeNos = item.episodeNos.sort((a, b) => a - b);
+
+      return {
+        episodeCount: episodeNos.length,
+        episodeNos,
+        projectCode: item.projectCode,
+        projectName: item.projectName,
+        ranges: compactEpisodeRanges(episodeNos),
+        responsibilities: Array.from(item.responsibilities)
+      };
+    })
+    .sort((a, b) => a.projectName.localeCompare(b.projectName, "zh-CN"));
 }
 
 function compactEpisodeRanges(episodeNos: number[]) {
