@@ -8,6 +8,7 @@ export interface DeliveryImportJob {
   source: "docx" | "text";
   status: "processing" | "success" | "failed";
   fileName: string;
+  fileId?: string;
   declaredRangeText: string;
   createdAt: string;
   completedAt?: string;

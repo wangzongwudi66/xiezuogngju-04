@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { parseWordDelivery, parseWordDeliveryText } from "@aigc/domain";
 import type { DeliveryPackageDraftInput, WordDeliveryIssue } from "@aigc/domain";
 import { buildDeliveryPackageDraftFromParsed } from "../../ui/delivery-text-parser";
@@ -6,6 +7,7 @@ import {
   readDeliveryImportJobResult,
   readDeliveryImportJobs,
   readDeliveryImportWorkspace,
+  saveDeliveryImportJobFile,
   saveDeliveryImportJobResultWithDraft
 } from "./persistence";
 
@@ -18,7 +20,12 @@ export interface DeliveryImportJobRequest {
   uploadedByUserId: string;
   fileName?: string;
   rawText?: string;
-  fileBuffer?: ArrayBuffer;
+  fileBuffer?: ArrayBuffer | Uint8Array;
+}
+
+interface DeliveryImportJobRunOptions {
+  createdAt?: string;
+  fileId?: string;
 }
 
 export type DeliveryImportJobResponse =
@@ -36,7 +43,18 @@ export type DeliveryImportJobResponse =
     };
 
 export async function createDeliveryImportJob(input: DeliveryImportJobRequest) {
-  const result = await runDeliveryImportJob(input);
+  const createdAt = new Date().toISOString();
+  let fileId: string | undefined;
+
+  if (input.source === "docx") {
+    fileId = createImportFileId(createdAt);
+    await saveDeliveryImportJobFile({
+      fileId,
+      fileBuffer: input.fileBuffer ?? new ArrayBuffer(0)
+    });
+  }
+
+  const result = await runDeliveryImportJob(input, { createdAt, fileId });
   return saveDeliveryImportJobResultWithDraft(result);
 }
 
@@ -52,14 +70,18 @@ export async function getDeliveryImportWorkspace() {
   return readDeliveryImportWorkspace();
 }
 
-export async function runDeliveryImportJob(input: DeliveryImportJobRequest): Promise<DeliveryImportJobResponse> {
-  const createdAt = new Date().toISOString();
+export async function runDeliveryImportJob(
+  input: DeliveryImportJobRequest,
+  options: DeliveryImportJobRunOptions = {}
+): Promise<DeliveryImportJobResponse> {
+  const createdAt = options.createdAt ?? new Date().toISOString();
   const jobBase: DeliveryImportJob = {
     id: createImportJobId(input.source, createdAt),
     projectId: input.projectId,
     source: input.source,
     status: "processing",
     fileName: input.fileName ?? (input.source === "docx" ? "uploaded.docx" : "pasted-word-text.txt"),
+    fileId: options.fileId,
     declaredRangeText: input.declaredRangeText,
     createdAt
   };
@@ -113,4 +135,8 @@ export async function runDeliveryImportJob(input: DeliveryImportJobRequest): Pro
 
 function createImportJobId(source: DeliveryImportSource, createdAt: string) {
   return `import-${source}-${Date.parse(createdAt).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createImportFileId(createdAt: string) {
+  return `file-${Date.parse(createdAt).toString(36)}-${randomUUID()}`;
 }

@@ -9,6 +9,7 @@ import {
   listDeliveryImportJobs,
   runDeliveryImportJob
 } from "./service";
+import { readDeliveryImportJobFile } from "./persistence";
 
 describe("delivery import job service", () => {
   let storeDir: string;
@@ -17,10 +18,12 @@ describe("delivery import job service", () => {
     storeDir = join(tmpdir(), `aigc-delivery-import-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
+    process.env.AIGC_DELIVERY_IMPORT_FILE_DIR = join(storeDir, "files");
   });
 
   afterEach(async () => {
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
+    delete process.env.AIGC_DELIVERY_IMPORT_FILE_DIR;
     await rm(storeDir, { recursive: true, force: true });
   });
 
@@ -85,6 +88,62 @@ describe("delivery import job service", () => {
 
     await expect(getDeliveryImportJobResult(result.job.id)).resolves.toEqual(result);
     await expect(listDeliveryImportJobs("project-jincheng")).resolves.toContainEqual(result.job);
+  });
+
+  it("saves a successful docx import before parsing and records its file id", async () => {
+    const fileBuffer = createStoredDocx(
+      "word/document.xml",
+      [
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>',
+        paragraph("绗?1 闆?寮€鍦?"),
+        paragraph("姝ｆ枃"),
+        "</w:body></w:document>"
+      ].join("")
+    );
+    const result = await createDeliveryImportJob({
+      source: "docx",
+      projectId: "project-jincheng",
+      uploadedByUserId: "user-head-writer",
+      declaredRangeText: "1-1",
+      fileName: "delivery.docx",
+      fileBuffer
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.job.fileId).toMatch(/^file-/);
+    expect(result.job).not.toHaveProperty("filePath");
+
+    const saved = await readDeliveryImportJobFile(result.job.fileId ?? "");
+
+    expect(saved).toBeTruthy();
+    expect(saved ? [...saved] : []).toEqual([...fileBuffer]);
+    await expect(getDeliveryImportJobResult(result.job.id)).resolves.toMatchObject({
+      job: {
+        fileId: result.job.fileId
+      }
+    });
+  });
+
+  it("keeps the original docx file when parsing fails", async () => {
+    const fileBuffer = new TextEncoder().encode("not a zip");
+    const result = await createDeliveryImportJob({
+      source: "docx",
+      projectId: "project-jincheng",
+      uploadedByUserId: "user-head-writer",
+      declaredRangeText: "1-1",
+      fileName: "broken.docx",
+      fileBuffer
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.job.status).toBe("failed");
+    expect(result.job.fileId).toMatch(/^file-/);
+    expect(result.job).not.toHaveProperty("filePath");
+
+    const saved = await readDeliveryImportJobFile(result.job.fileId ?? "");
+
+    expect(saved).toBeTruthy();
+    expect(saved ? [...saved] : []).toEqual([...fileBuffer]);
   });
 
   it("persists a successful draft in the server workspace and links it to the job", async () => {
@@ -240,3 +299,94 @@ describe("delivery import job service", () => {
     expect(tideJobs[0]).not.toHaveProperty("deliveryPackageId");
   });
 });
+
+function paragraph(text: string) {
+  return `<w:p><w:r><w:t>${escapeXml(text)}</w:t></w:r></w:p>`;
+}
+
+function escapeXml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function createStoredDocx(filePath: string, content: string) {
+  const encoder = new TextEncoder();
+  const fileName = encoder.encode(filePath);
+  const payload = encoder.encode(content);
+  const localHeader = bytes(
+    u32(0x04034b50),
+    u16(20),
+    u16(0),
+    u16(0),
+    u16(0),
+    u16(0),
+    u32(0),
+    u32(payload.length),
+    u32(payload.length),
+    u16(fileName.length),
+    u16(0),
+    fileName,
+    payload
+  );
+  const centralDirectory = bytes(
+    u32(0x02014b50),
+    u16(20),
+    u16(20),
+    u16(0),
+    u16(0),
+    u16(0),
+    u16(0),
+    u32(0),
+    u32(payload.length),
+    u32(payload.length),
+    u16(fileName.length),
+    u16(0),
+    u16(0),
+    u16(0),
+    u16(0),
+    u32(0),
+    u32(0),
+    fileName
+  );
+  const endOfCentralDirectory = bytes(
+    u32(0x06054b50),
+    u16(0),
+    u16(0),
+    u16(1),
+    u16(1),
+    u32(centralDirectory.length),
+    u32(localHeader.length),
+    u16(0)
+  );
+
+  return bytes(localHeader, centralDirectory, endOfCentralDirectory);
+}
+
+function bytes(...chunks: Uint8Array[]) {
+  const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  const output = new Uint8Array(length);
+  let offset = 0;
+
+  chunks.forEach((chunk) => {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  });
+
+  return output;
+}
+
+function u16(value: number) {
+  const output = new Uint8Array(2);
+  new DataView(output.buffer).setUint16(0, value, true);
+  return output;
+}
+
+function u32(value: number) {
+  const output = new Uint8Array(4);
+  new DataView(output.buffer).setUint32(0, value, true);
+  return output;
+}

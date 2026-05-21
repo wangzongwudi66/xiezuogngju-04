@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -11,10 +11,12 @@ describe("delivery import job route", () => {
     storeDir = join(tmpdir(), `aigc-delivery-import-route-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
+    process.env.AIGC_DELIVERY_IMPORT_FILE_DIR = join(storeDir, "files");
   });
 
   afterEach(async () => {
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
+    delete process.env.AIGC_DELIVERY_IMPORT_FILE_DIR;
     await rm(storeDir, { recursive: true, force: true });
   });
 
@@ -76,7 +78,55 @@ describe("delivery import job route", () => {
     await expect(missingResponse.json()).resolves.toEqual({ error: "delivery_import_job_not_found" });
     expect(missingResponse.status).toBe(404);
   });
+
+  it("rejects docx imports without a file and does not save anything", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildDocxForm() })
+    );
+
+    await expect(response.json()).resolves.toEqual({ error: "docx_file_required" });
+    expect(response.status).toBe(400);
+    await expect(readSavedFileNames(storeDir)).resolves.toEqual([]);
+  });
+
+  it("rejects non-docx uploads and does not save anything", async () => {
+    const form = buildDocxForm();
+    form.set("file", new File(["not a docx"], "delivery.pdf", { type: "application/pdf" }));
+    const response = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: form }));
+
+    await expect(response.json()).resolves.toEqual({ error: "docx_file_type_invalid" });
+    expect(response.status).toBe(400);
+    await expect(readSavedFileNames(storeDir)).resolves.toEqual([]);
+  });
+
+  it("returns docx import jobs with file id but without the server file path", async () => {
+    const form = buildDocxForm();
+    form.set("file", new File(["not a zip"], "broken.docx"));
+    const response = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: form }));
+    const created = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(created).toMatchObject({
+      ok: false,
+      job: {
+        source: "docx",
+        status: "failed",
+        fileId: expect.stringMatching(/^file-/)
+      }
+    });
+    expect(created.job).not.toHaveProperty("filePath");
+    await expect(readSavedFileNames(storeDir)).resolves.toHaveLength(1);
+  });
 });
+
+function buildDocxForm() {
+  const form = new FormData();
+  form.set("source", "docx");
+  form.set("projectId", "project-jincheng");
+  form.set("uploadedByUserId", "user-head-writer");
+  form.set("declaredRangeText", "1-2");
+  return form;
+}
 
 function buildTextForm() {
   const form = new FormData();
@@ -86,4 +136,12 @@ function buildTextForm() {
   form.set("declaredRangeText", "1-2");
   form.set("rawText", "第 1 集 开场\n正文一\n第 2 集 追踪\n正文二");
   return form;
+}
+
+async function readSavedFileNames(storeDir: string) {
+  try {
+    return await readdir(join(storeDir, "files"));
+  } catch {
+    return [];
+  }
 }

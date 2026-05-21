@@ -17,7 +17,9 @@ export interface DeliveryImportWorkspaceSnapshot {
 }
 
 const storePathEnvKey = "AIGC_DELIVERY_IMPORT_STORE_PATH";
+const fileDirEnvKey = "AIGC_DELIVERY_IMPORT_FILE_DIR";
 const defaultStorePath = path.join(process.cwd(), ".local-data", "delivery-import-jobs.json");
+const defaultFileDir = path.join(process.cwd(), ".local-data", "delivery-import-files");
 
 export async function saveDeliveryImportJobResult(result: DeliveryImportJobResponse) {
   const store = await readDeliveryImportJobStore();
@@ -100,6 +102,22 @@ export async function mutateDeliveryImportWorkspace(
   };
 }
 
+export async function saveDeliveryImportJobFile(input: { fileBuffer: ArrayBuffer | Uint8Array; fileId: string }) {
+  const filePath = resolveDeliveryImportJobFilePath(input.fileId);
+  const bytes = input.fileBuffer instanceof Uint8Array ? input.fileBuffer : new Uint8Array(input.fileBuffer);
+
+  await mkdir(/* turbopackIgnore: true */ path.dirname(filePath), { recursive: true });
+  await writeFile(/* turbopackIgnore: true */ filePath, bytes);
+}
+
+export async function readDeliveryImportJobFile(fileId: string) {
+  try {
+    return await readFile(/* turbopackIgnore: true */ resolveDeliveryImportJobFilePath(fileId));
+  } catch {
+    return null;
+  }
+}
+
 async function readDeliveryImportJobStore(): Promise<DeliveryImportJobStore> {
   try {
     const raw = await readFile(/* turbopackIgnore: true */ resolveDeliveryImportStorePath(), "utf8");
@@ -131,6 +149,30 @@ async function writeDeliveryImportJobStore(store: DeliveryImportJobStore) {
 
 function resolveDeliveryImportStorePath() {
   return process.env[storePathEnvKey] || defaultStorePath;
+}
+
+function resolveDeliveryImportJobFilePath(fileId: string) {
+  const baseDir = path.resolve(/* turbopackIgnore: true */ resolveDeliveryImportFileDir());
+  const filePath = path.resolve(/* turbopackIgnore: true */ baseDir, `${assertDeliveryImportFileId(fileId)}.docx`);
+  const relativePath = path.relative(baseDir, filePath);
+
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    throw new Error("invalid_delivery_import_file_path");
+  }
+
+  return filePath;
+}
+
+function resolveDeliveryImportFileDir() {
+  return process.env[fileDirEnvKey] || defaultFileDir;
+}
+
+function assertDeliveryImportFileId(fileId: string) {
+  if (!/^file-[a-z0-9-]+$/i.test(fileId)) {
+    throw new Error("invalid_delivery_import_file_id");
+  }
+
+  return fileId;
 }
 
 function emptyStore(): DeliveryImportJobStore {

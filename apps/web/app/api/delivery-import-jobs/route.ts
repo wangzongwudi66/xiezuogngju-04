@@ -38,6 +38,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "docx_file_required" }, { status: 400 });
     }
 
+    if (!file.name.toLowerCase().endsWith(".docx")) {
+      return NextResponse.json({ error: "docx_file_type_invalid" }, { status: 400 });
+    }
+
     return NextResponse.json(
       await createDeliveryImportJob({
         source,
