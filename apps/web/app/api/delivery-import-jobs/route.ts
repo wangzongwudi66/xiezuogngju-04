@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { createDeliveryImportJob, getDeliveryImportJobResult, getDeliveryImportWorkspace, listDeliveryImportJobs } from "./service";
+import {
+  createDeliveryImportJob,
+  getDeliveryImportJobResult,
+  getDeliveryImportWorkspace,
+  listDeliveryImportJobs,
+  retryDeliveryImportJob
+} from "./service";
 import type { DeliveryImportSource } from "./service";
 
 export async function GET(request: Request) {
@@ -22,6 +28,17 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const form = await request.formData();
+  const action = readString(form, "action");
+
+  if (action === "retry") {
+    const result = await retryDeliveryImportJob(readString(form, "jobId"));
+    if (!result.ok && "error" in result) {
+      return NextResponse.json(result, { status: result.error === "delivery_import_job_not_found" ? 404 : 400 });
+    }
+
+    return NextResponse.json(result);
+  }
+
   const source = readString(form, "source") as DeliveryImportSource;
   const projectId = readString(form, "projectId");
   const uploadedByUserId = readString(form, "uploadedByUserId");

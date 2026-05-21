@@ -6,6 +6,7 @@ import type { DeliveryImportJob } from "../../ui/workspace-persistence";
 import {
   readDeliveryImportJobResult,
   readDeliveryImportJobs,
+  readDeliveryImportJobFile,
   readDeliveryImportWorkspace,
   saveDeliveryImportJobFile,
   saveDeliveryImportJobResultWithDraft
@@ -26,7 +27,15 @@ export interface DeliveryImportJobRequest {
 interface DeliveryImportJobRunOptions {
   createdAt?: string;
   fileId?: string;
+  retryOfJobId?: string;
 }
+
+export type DeliveryImportJobRetryResponse =
+  | DeliveryImportJobResponse
+  | {
+      ok: false;
+      error: "delivery_import_job_not_found" | "delivery_import_job_file_id_missing" | "delivery_import_job_file_missing";
+    };
 
 export type DeliveryImportJobResponse =
   | {
@@ -62,6 +71,43 @@ export async function getDeliveryImportJobResult(jobId: string) {
   return readDeliveryImportJobResult(jobId);
 }
 
+export async function retryDeliveryImportJob(jobId: string): Promise<DeliveryImportJobRetryResponse> {
+  const sourceResult = await readDeliveryImportJobResult(jobId);
+
+  if (!sourceResult) {
+    return { ok: false, error: "delivery_import_job_not_found" };
+  }
+
+  const sourceJob = sourceResult.job;
+
+  if (!sourceJob.fileId) {
+    return { ok: false, error: "delivery_import_job_file_id_missing" };
+  }
+
+  const fileBuffer = await readDeliveryImportJobFile(sourceJob.fileId);
+
+  if (!fileBuffer) {
+    return { ok: false, error: "delivery_import_job_file_missing" };
+  }
+
+  const result = await runDeliveryImportJob(
+    {
+      source: "docx",
+      projectId: sourceJob.projectId,
+      uploadedByUserId: sourceJob.uploadedByUserId ?? "",
+      declaredRangeText: sourceJob.declaredRangeText,
+      fileName: sourceJob.fileName,
+      fileBuffer
+    },
+    {
+      fileId: sourceJob.fileId,
+      retryOfJobId: sourceJob.id
+    }
+  );
+
+  return saveDeliveryImportJobResultWithDraft(result);
+}
+
 export async function listDeliveryImportJobs(projectId?: string) {
   return readDeliveryImportJobs(projectId);
 }
@@ -82,6 +128,8 @@ export async function runDeliveryImportJob(
     status: "processing",
     fileName: input.fileName ?? (input.source === "docx" ? "uploaded.docx" : "pasted-word-text.txt"),
     fileId: options.fileId,
+    uploadedByUserId: input.uploadedByUserId,
+    retryOfJobId: options.retryOfJobId,
     declaredRangeText: input.declaredRangeText,
     createdAt
   };

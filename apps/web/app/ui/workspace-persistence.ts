@@ -9,6 +9,8 @@ export interface DeliveryImportJob {
   status: "processing" | "success" | "failed";
   fileName: string;
   fileId?: string;
+  uploadedByUserId?: string;
+  retryOfJobId?: string;
   declaredRangeText: string;
   createdAt: string;
   completedAt?: string;

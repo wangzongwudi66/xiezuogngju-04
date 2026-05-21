@@ -7,9 +7,10 @@ import {
   getDeliveryImportJobResult,
   getDeliveryImportWorkspace,
   listDeliveryImportJobs,
+  retryDeliveryImportJob,
   runDeliveryImportJob
 } from "./service";
-import { readDeliveryImportJobFile } from "./persistence";
+import { readDeliveryImportJobFile, saveDeliveryImportJobFile, saveDeliveryImportJobResult } from "./persistence";
 
 describe("delivery import job service", () => {
   let storeDir: string;
@@ -144,6 +145,131 @@ describe("delivery import job service", () => {
 
     expect(saved).toBeTruthy();
     expect(saved ? [...saved] : []).toEqual([...fileBuffer]);
+  });
+
+  it("retries a failed docx import from the saved original file as a new job", async () => {
+    const fileId = "file-retry-success";
+    const fileBuffer = createStoredDocx(
+      "word/document.xml",
+      [
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>',
+        paragraph("\u7b2c 1 \u96c6 \u5f00\u573a"),
+        paragraph("\u6b63\u6587"),
+        "</w:body></w:document>"
+      ].join("")
+    );
+    const failedJob = {
+      id: "import-docx-retry-source",
+      projectId: "project-jincheng",
+      source: "docx" as const,
+      status: "failed" as const,
+      fileName: "retryable.docx",
+      fileId,
+      uploadedByUserId: "user-head-writer",
+      declaredRangeText: "1-1",
+      createdAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      issueCount: 1,
+      errorText: "previous parse failure"
+    };
+
+    await saveDeliveryImportJobFile({ fileId, fileBuffer });
+    await saveDeliveryImportJobResult({
+      ok: false,
+      issues: [],
+      remedies: [],
+      job: failedJob
+    });
+
+    const retried = await retryDeliveryImportJob(failedJob.id);
+
+    expect(retried.ok).toBe(true);
+    if (!retried.ok || !("job" in retried)) {
+      return;
+    }
+
+    expect(retried.job).toMatchObject({
+      source: "docx",
+      status: "success",
+      projectId: failedJob.projectId,
+      fileName: failedJob.fileName,
+      fileId: failedJob.fileId,
+      retryOfJobId: failedJob.id,
+      uploadedByUserId: "user-head-writer"
+    });
+    expect(retried.job.id).not.toBe(failedJob.id);
+    expect(retried.job.deliveryPackageId).toBeTruthy();
+    expect(retried.job).not.toHaveProperty("filePath");
+    await expect(getDeliveryImportJobResult(failedJob.id)).resolves.toMatchObject({ job: failedJob });
+    await expect(getDeliveryImportJobResult(retried.job.id)).resolves.toEqual(retried);
+  });
+
+  it("keeps a retried docx failure with its source job relationship", async () => {
+    const failed = await createDeliveryImportJob({
+      source: "docx",
+      projectId: "project-jincheng",
+      uploadedByUserId: "user-head-writer",
+      declaredRangeText: "1-1",
+      fileName: "still-broken.docx",
+      fileBuffer: new TextEncoder().encode("not a zip")
+    });
+    const retried = await retryDeliveryImportJob(failed.job.id);
+
+    expect(retried.ok).toBe(false);
+    expect(retried).toMatchObject({
+      job: {
+        status: "failed",
+        fileId: failed.job.fileId,
+        retryOfJobId: failed.job.id
+      }
+    });
+    expect("job" in retried ? retried.job.id : "").not.toBe(failed.job.id);
+  });
+
+  it("returns clear retry errors for missing source job, file id, or original file", async () => {
+    await expect(retryDeliveryImportJob("missing-job")).resolves.toEqual({
+      ok: false,
+      error: "delivery_import_job_not_found"
+    });
+
+    await saveDeliveryImportJobResult({
+      ok: false,
+      issues: [],
+      remedies: [],
+      job: {
+        id: "import-docx-without-file-id",
+        projectId: "project-jincheng",
+        source: "docx",
+        status: "failed",
+        fileName: "missing-file-id.docx",
+        declaredRangeText: "1-1",
+        createdAt: new Date().toISOString()
+      }
+    });
+    await expect(retryDeliveryImportJob("import-docx-without-file-id")).resolves.toEqual({
+      ok: false,
+      error: "delivery_import_job_file_id_missing"
+    });
+
+    await saveDeliveryImportJobResult({
+      ok: false,
+      issues: [],
+      remedies: [],
+      job: {
+        id: "import-docx-lost-file",
+        projectId: "project-jincheng",
+        source: "docx",
+        status: "failed",
+        fileName: "lost.docx",
+        fileId: "file-lost-file",
+        declaredRangeText: "1-1",
+        createdAt: new Date().toISOString()
+      }
+    });
+    await expect(retryDeliveryImportJob("import-docx-lost-file")).resolves.toEqual({
+      ok: false,
+      error: "delivery_import_job_file_missing"
+    });
   });
 
   it("persists a successful draft in the server workspace and links it to the job", async () => {

@@ -117,6 +117,42 @@ describe("delivery import job route", () => {
     expect(created.job).not.toHaveProperty("filePath");
     await expect(readSavedFileNames(storeDir)).resolves.toHaveLength(1);
   });
+
+  it("retries a docx import job from its saved file", async () => {
+    const form = buildDocxForm();
+    form.set("file", new File(["not a zip"], "broken.docx"));
+    const createResponse = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: form }));
+    const failed = await createResponse.json();
+    const retryResponse = await POST(
+      new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildRetryForm(failed.job.id) })
+    );
+    const retried = await retryResponse.json();
+
+    expect(retryResponse.status).toBe(200);
+    expect(retried).toMatchObject({
+      ok: false,
+      job: {
+        source: "docx",
+        status: "failed",
+        fileId: failed.job.fileId,
+        retryOfJobId: failed.job.id
+      }
+    });
+    expect(retried.job.id).not.toBe(failed.job.id);
+    expect(retried.job).not.toHaveProperty("filePath");
+  });
+
+  it("returns clear retry errors for missing source jobs", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildRetryForm("missing-job") })
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: "delivery_import_job_not_found"
+    });
+  });
 });
 
 function buildDocxForm() {
@@ -125,6 +161,13 @@ function buildDocxForm() {
   form.set("projectId", "project-jincheng");
   form.set("uploadedByUserId", "user-head-writer");
   form.set("declaredRangeText", "1-2");
+  return form;
+}
+
+function buildRetryForm(jobId: string) {
+  const form = new FormData();
+  form.set("action", "retry");
+  form.set("jobId", jobId);
   return form;
 }
 
