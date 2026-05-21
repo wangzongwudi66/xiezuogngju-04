@@ -10,6 +10,7 @@ import {
   filterProjectItems,
   selectDefaultDeliveryPackageId
 } from "./delivery-role-view";
+import { filterAssetChanges, getMockAssetChanges, getNextAssetLockOwner, summarizeAssetLock } from "./asset-lock-workbench-data";
 
 describe("M1 dashboard task list", () => {
   it("does not invent today tasks when a creator has no assigned episodes", () => {
@@ -135,5 +136,35 @@ describe("delivery import retry affordance", () => {
     expect(formatDeliveryImportError(new Error("delivery_import_job_not_found"))).toBe("原解析记录不存在，请刷新后重试。");
     expect(formatDeliveryImportError(new Error("delivery_import_job_file_id_missing"))).toBe("这条记录没有可重试文件，请重新上传 Word。");
     expect(formatDeliveryImportError(new Error("delivery_import_job_file_missing"))).toBe("原始 Word 文件已丢失，请重新上传。");
+  });
+});
+
+describe("asset lock workbench model", () => {
+  it("summarizes pending confirmations and blockers", () => {
+    const summary = summarizeAssetLock(getMockAssetChanges());
+
+    expect(summary.totalCount).toBeGreaterThan(0);
+    expect(summary.writerPendingCount).toBeGreaterThan(0);
+    expect(summary.productionPendingCount).toBeGreaterThan(0);
+    expect(summary.disputeCount).toBeGreaterThan(0);
+    expect(summary.canLock).toBe(false);
+  });
+
+  it("filters asset changes by episode, type, status, owner, and risk", () => {
+    const items = getMockAssetChanges();
+    const filtered = filterAssetChanges(items, {
+      episode: "5",
+      owner: "沈制作 A",
+      risk: "high",
+      status: "disputed",
+      type: "effect"
+    });
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].assetName).toBe("井底粉尘爆闪");
+  });
+
+  it("prioritizes disputed items before final lock", () => {
+    expect(getNextAssetLockOwner(getMockAssetChanges())).toBe("统筹协调争议项");
   });
 });

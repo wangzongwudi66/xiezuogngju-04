@@ -10,6 +10,7 @@ import {
   Check,
   ChevronDown,
   CirclePlus,
+  ClipboardCheck,
   Clapperboard,
   ClipboardList,
   Command,
@@ -93,6 +94,7 @@ import {
 } from "./delivery-import-api";
 import { clearM2WorkspacePersistence, readM2WorkspacePersistence, writeM2WorkspacePersistence } from "./workspace-persistence";
 import type { DeliveryImportJob } from "./workspace-persistence";
+import { AssetLockWorkbench } from "./asset-lock-workbench";
 
 const roleLabels: Record<ProjectRole, string> = {
   owner: "项目所有者",
@@ -152,6 +154,7 @@ type NavigationItem = {
 const baseShortcutItems: NavigationItem[] = [
   { label: "集数分配", icon: ClipboardList },
   { label: "素材库", icon: Image },
+  { label: "资产定版", icon: ShieldCheck },
   { label: "模型与模板", icon: BookOpen },
   { label: "交稿中心", icon: FileText },
   { label: "团队成员", icon: Users },
@@ -485,7 +488,7 @@ export function M1Dashboard() {
   const assignmentSummary = buildAssignmentSummary(visibleEpisodes);
   const shortcutItems = isSelectedProjectMember ? buildShortcutItems(permissions, primaryRole) : [];
   const navigationItems = buildNavigationItems(isSelectedProjectMember ? permissions : null, primaryRole, isSelectedProjectMember);
-  const allowedModules = new Set([...shortcutItems.map((item) => item.label), ...navigationItems.map((item) => item.label), "集工作台"]);
+  const allowedModules = new Set([...shortcutItems.map((item) => item.label), ...navigationItems.map((item) => item.label), "集工作台", "资产定版"]);
   const effectiveActiveModule = allowedModules.has(activeModule) ? activeModule : "项目总览";
   const isProjectHome = effectiveActiveModule === "项目总览";
 
@@ -1143,6 +1146,7 @@ export function M1Dashboard() {
               setRejectionReason={setRejectionReason}
               setSelectedDeliveryPackageId={setSelectedDeliveryPackageId}
               setSelectedMockDeliveryKey={setSelectedMockDeliveryKey}
+              navigateToModule={navigateToModule}
               state={state}
               tasks={todayTasks}
               wordDeclaredRangeDraft={wordDeclaredRangeDraft}
@@ -1173,6 +1177,7 @@ export function M1Dashboard() {
                 pendingDeliveryPackages={pendingDeliveryPackages}
                 recentPublishedDeliveryPackages={recentPublishedDeliveryPackages}
                 onOpenDeliveryCenter={() => navigateToModule("交稿中心")}
+                onOpenAssetLock={() => navigateToModule("资产定版")}
               />
             ) : (
               <section className="panel today-card">
@@ -1212,10 +1217,16 @@ export function M1Dashboard() {
                 {myEpisodes.length > 0 ? (
                   <>
                     <p className="inline-help">你已分配 {myEpisodes.length} 集。进入交稿中心后，可以上传 Word 或粘贴文本生成交稿草稿。</p>
-                    <button className="primary-button" onClick={() => navigateToModule("交稿中心")} type="button">
-                      <FileText size={16} />
-                      提交交稿 / 上传 Word / 粘贴文本
-                    </button>
+                    <div className="delivery-home-actions">
+                      <button className="primary-button" onClick={() => navigateToModule("交稿中心")} type="button">
+                        <FileText size={16} />
+                        提交交稿 / 上传 Word / 粘贴文本
+                      </button>
+                      <button className="secondary-button" onClick={() => navigateToModule("资产定版")} type="button">
+                        <ShieldCheck size={16} />
+                        查看资产核对
+                      </button>
+                    </div>
                   </>
                 ) : (
                   <p className="empty-state">暂无分配集数，请联系统筹分配。分配后这里会出现交稿入口。</p>
@@ -1643,10 +1654,12 @@ function UpdatesPanel({ onOpenAll, updates }: { onOpenAll: () => void; updates: 
 function CoordinatorDeliverySummary({
   pendingDeliveryPackages,
   recentPublishedDeliveryPackages,
+  onOpenAssetLock,
   onOpenDeliveryCenter
 }: {
   pendingDeliveryPackages: Array<ReturnType<typeof selectDeliveryPackageDetail>>;
   recentPublishedDeliveryPackages: Array<ReturnType<typeof selectDeliveryPackageDetail>>;
+  onOpenAssetLock: () => void;
   onOpenDeliveryCenter: () => void;
 }) {
   return (
@@ -1676,10 +1689,16 @@ function CoordinatorDeliverySummary({
           ))
         )}
       </div>
-      <button className="primary-button" onClick={onOpenDeliveryCenter} type="button">
-        <ShieldCheck size={16} />
-        处理交稿包
-      </button>
+      <div className="delivery-home-actions">
+        <button className="primary-button" onClick={onOpenDeliveryCenter} type="button">
+          <ShieldCheck size={16} />
+          处理交稿包
+        </button>
+        <button className="secondary-button" onClick={onOpenAssetLock} type="button">
+          <ClipboardCheck size={16} />
+          资产核对与定版
+        </button>
+      </div>
     </section>
   );
 }
@@ -1732,6 +1751,7 @@ function ModuleWorkbench({
   setRejectionReason,
   setSelectedDeliveryPackageId,
   setSelectedMockDeliveryKey,
+  navigateToModule,
   state,
   tasks,
   wordDeclaredRangeDraft,
@@ -1767,6 +1787,7 @@ function ModuleWorkbench({
   setRejectionReason: React.Dispatch<React.SetStateAction<string>>;
   setSelectedDeliveryPackageId: React.Dispatch<React.SetStateAction<string | null>>;
   setSelectedMockDeliveryKey: React.Dispatch<React.SetStateAction<MockDeliveryKey>>;
+  navigateToModule: (module: string) => void;
   state: WorkspaceState;
   tasks: ReturnType<typeof buildTodayTasks>;
   wordDeclaredRangeDraft: string;
@@ -1903,11 +1924,32 @@ function ModuleWorkbench({
         setRejectionReason={setRejectionReason}
         setSelectedDeliveryPackageId={setSelectedDeliveryPackageId}
         setSelectedMockDeliveryKey={setSelectedMockDeliveryKey}
+        navigateToModule={navigateToModule}
         wordDeclaredRangeDraft={wordDeclaredRangeDraft}
         wordParseFeedback={wordParseFeedback}
         wordTextDraft={wordTextDraft}
         setWordDeclaredRangeDraft={setWordDeclaredRangeDraft}
         setWordTextDraft={setWordTextDraft}
+      />
+    );
+  }
+
+  if (activeModule === "资产定版") {
+    if (!canAccessDelivery) {
+      return (
+        <section className="panel module-panel">
+          <PanelTitle title="资产核对与定版工作台" eyebrow={projectName} />
+          <p className="empty-state">你还不是“{projectName}”的项目成员，不能查看本项目资产核对状态。</p>
+        </section>
+      );
+    }
+
+    return (
+      <AssetLockWorkbench
+        activeDeliveryPackage={activeDeliveryPackage}
+        deliveryPackages={deliveryPackageDetails}
+        onOpenDeliveryCenter={() => navigateToModule("交稿中心")}
+        projectName={projectName}
       />
     );
   }
@@ -2001,6 +2043,7 @@ function M2DeliveryCenter({
   setRejectionReason,
   setSelectedDeliveryPackageId,
   setSelectedMockDeliveryKey,
+  navigateToModule,
   wordDeclaredRangeDraft,
   wordParseFeedback,
   wordTextDraft,
@@ -2029,6 +2072,7 @@ function M2DeliveryCenter({
   setRejectionReason: React.Dispatch<React.SetStateAction<string>>;
   setSelectedDeliveryPackageId: React.Dispatch<React.SetStateAction<string | null>>;
   setSelectedMockDeliveryKey: React.Dispatch<React.SetStateAction<MockDeliveryKey>>;
+  navigateToModule: (module: string) => void;
   wordDeclaredRangeDraft: string;
   wordParseFeedback: TextParseFeedback | null;
   wordTextDraft: string;
@@ -2309,6 +2353,12 @@ function M2DeliveryCenter({
                 <small>
                   所属项目：{projectName} · 声明范围：第 {activeDeliveryPackage.declaredEpisodeFrom}-{activeDeliveryPackage.declaredEpisodeTo} 集
                 </small>
+              </div>
+              <div className="delivery-actions">
+                <button className="secondary-button" onClick={() => navigateToModule("资产定版")} type="button">
+                  <ClipboardCheck size={16} />
+                  进入资产核对与定版
+                </button>
               </div>
               {activeDeliveryPackage.status === "draft" ? (
                 <p className="inline-help">
@@ -2936,10 +2986,15 @@ function buildNavigationItems(
     { icon: CalendarDays, label: "任务中心" },
     { icon: Package, label: "素材库" }
   );
+
   const canUseDeliveryCenter = canAccessDeliveryRole(primaryRole);
 
   if (canUseDeliveryCenter) {
     items.push({ icon: FileText, label: "交稿中心" });
+  }
+
+  if (permissions.canReviewAssets || canUseDeliveryCenter) {
+    items.push({ icon: ShieldCheck, label: "资产定版" });
   }
 
   if (permissions.canManageMembers || permissions.canViewAllEpisodes) {
@@ -2971,6 +3026,10 @@ function buildShortcutItems(permissions: ReturnType<typeof selectPermissions>, p
 
     if (item.label === "交稿中心") {
       return canUseDeliveryCenter;
+    }
+
+    if (item.label === "资产定版") {
+      return permissions.canReviewAssets || canUseDeliveryCenter;
     }
 
     return true;
