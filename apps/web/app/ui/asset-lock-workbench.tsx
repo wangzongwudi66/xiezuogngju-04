@@ -22,6 +22,7 @@ import type { ChangeEvent } from "react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
+  canUploadAssetAttachmentToRecord,
   filterAssetChanges,
   getAssetLockBulkHint,
   getAssetLockEmptyState,
@@ -183,6 +184,7 @@ export function AssetLockWorkbench({
   const bulkHint = getAssetLockBulkHint(selectedIds.length, Boolean(isMutating || activeOperation));
   const isBusy = Boolean(isMutating || activeOperation);
   const selectedAssetCanFinalLock = Boolean(selectedAsset && selectedAsset.reviewStatus !== "locked" && summary.canLock);
+  const selectedAssetIsLocked = !canUploadAssetAttachmentToRecord(selectedAsset);
   const selectedAssetAttachments = selectedAsset ? attachmentsByRecordId[selectedAsset.id] ?? [] : [];
 
   useEffect(() => {
@@ -572,6 +574,7 @@ export function AssetLockWorkbench({
               attachmentType={attachmentType}
               attachments={selectedAssetAttachments}
               attachmentUploading={attachmentUploading}
+              isLocked={selectedAssetIsLocked}
               onFileChange={handleAttachmentFileChange}
               onNoteChange={setAttachmentNote}
               onTypeChange={setAttachmentType}
@@ -637,6 +640,7 @@ function AssetAttachmentPanel({
   attachmentType,
   attachments,
   attachmentUploading,
+  isLocked,
   onFileChange,
   onNoteChange,
   onTypeChange,
@@ -649,6 +653,7 @@ function AssetAttachmentPanel({
   attachmentType: AssetAttachmentType;
   attachments: AssetAttachment[];
   attachmentUploading: boolean;
+  isLocked: boolean;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onNoteChange: (note: string) => void;
   onTypeChange: (type: AssetAttachmentType) => void;
@@ -683,9 +688,14 @@ function AssetAttachmentPanel({
       )}
 
       <div className="asset-attachment-form">
+        {isLocked ? <p className="inline-help">这条资产记录已定版，不能新增附件。</p> : null}
         <label>
           类型
-          <select value={attachmentType} onChange={(event) => onTypeChange(event.target.value as AssetAttachmentType)}>
+          <select
+            disabled={isLocked}
+            value={attachmentType}
+            onChange={(event) => onTypeChange(event.target.value as AssetAttachmentType)}
+          >
             {Object.entries(attachmentTypeLabels).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
@@ -696,6 +706,7 @@ function AssetAttachmentPanel({
         <label>
           说明
           <input
+            disabled={isLocked}
             onChange={(event) => onNoteChange(event.target.value)}
             placeholder="可选，例如：正脸参考、制作拆解、最终定版说明"
             value={attachmentNote}
@@ -703,11 +714,16 @@ function AssetAttachmentPanel({
         </label>
         <label>
           文件
-          <input accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf" onChange={onFileChange} type="file" />
+          <input
+            accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf"
+            disabled={isLocked}
+            onChange={onFileChange}
+            type="file"
+          />
         </label>
         {attachmentFile ? <p className="asset-attachment-selected">已选择：{attachmentFile.name}</p> : null}
         {attachmentError ? <p className="inline-warning">{attachmentError}</p> : null}
-        <button className="secondary-button" disabled={!attachmentFile || attachmentUploading} onClick={onUpload} type="button">
+        <button className="secondary-button" disabled={isLocked || !attachmentFile || attachmentUploading} onClick={onUpload} type="button">
           <FileUp size={15} />
           {attachmentUploading ? "上传中..." : "上传附件"}
         </button>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canCreateAssetLockRecordFromPackage,
+  canUploadAssetAttachmentToRecord,
   filterAssetChanges,
   getAssetLockBulkHint,
   getAssetLockEmptyState,
@@ -109,6 +110,12 @@ describe("asset lock workbench data helpers", () => {
     });
     expect(getAssetLockEmptyState({ hasPublishedPackage: false }).actionLabel).toBe("去交稿中心");
     expect(getAssetLockEmptyState({ hasPublishedPackage: false }).body).toContain("生成演示资产记录");
+  });
+
+  it("blocks attachment upload for locked asset records", () => {
+    expect(canUploadAssetAttachmentToRecord({ reviewStatus: "locked" })).toBe(false);
+    expect(canUploadAssetAttachmentToRecord({ status: "locked" })).toBe(false);
+    expect(canUploadAssetAttachmentToRecord({ reviewStatus: "ready_to_lock" })).toBe(true);
   });
 
   it("keeps role-specific asset lock actions separated", () => {

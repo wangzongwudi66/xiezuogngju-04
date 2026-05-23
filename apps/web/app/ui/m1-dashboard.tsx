@@ -777,6 +777,7 @@ export function M1Dashboard() {
       episodeRevisions: mergeById(current.episodeRevisions, snapshot.state.episodeRevisions),
       episodeCurrents: mergeById(current.episodeCurrents, snapshot.state.episodeCurrents),
       assetLockRecords: mergeById(current.assetLockRecords ?? [], snapshot.state.assetLockRecords ?? []),
+      assetAttachments: mergeById(current.assetAttachments ?? [], snapshot.state.assetAttachments ?? []),
       notifications: mergeById(current.notifications, snapshot.state.notifications)
     }));
     setAssetLockRecords((current) => mergeById(current, snapshot.state.assetLockRecords ?? []));
@@ -3358,7 +3359,8 @@ function mergeDeliveryImportJobs(current: DeliveryImportJob[], incoming: Deliver
 function normalizeWorkspaceState(state: WorkspaceState): WorkspaceState {
   return {
     ...state,
-    assetLockRecords: state.assetLockRecords ?? []
+    assetLockRecords: state.assetLockRecords ?? [],
+    assetAttachments: state.assetAttachments ?? []
   };
 }
 

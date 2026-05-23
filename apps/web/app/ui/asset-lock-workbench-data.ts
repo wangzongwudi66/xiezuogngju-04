@@ -283,6 +283,10 @@ export function canCreateAssetLockRecordFromPackage(deliveryPackage: { status: s
   return deliveryPackage?.status === "published";
 }
 
+export function canUploadAssetAttachmentToRecord(record: { status?: string; reviewStatus?: string } | null | undefined) {
+  return Boolean(record && (record.reviewStatus ?? record.status) !== "locked");
+}
+
 export function getAssetLockEmptyState(input: { hasPublishedPackage: boolean; packageTitle?: string | null }) {
   if (input.hasPublishedPackage) {
     return {
