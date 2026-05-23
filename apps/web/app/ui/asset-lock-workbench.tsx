@@ -107,6 +107,7 @@ export function AssetLockWorkbench({
   onMarkNeedsInfo,
   deliveryPackages,
   onOpenDeliveryCenter,
+  onPrepareDemo,
   onProductionConfirm,
   onRefresh,
   onWriterConfirm,
@@ -126,6 +127,7 @@ export function AssetLockWorkbench({
   onMarkNeedsInfo: (assetLockRecordId: string, missingInfo: string) => Promise<void>;
   deliveryPackages: AssetLockPackage[];
   onOpenDeliveryCenter: () => void;
+  onPrepareDemo: () => Promise<void>;
   onProductionConfirm: (assetLockRecordId: string) => Promise<void>;
   onRefresh: () => Promise<void>;
   onWriterConfirm: (assetLockRecordId: string) => Promise<void>;
@@ -191,43 +193,7 @@ export function AssetLockWorkbench({
   }
 
   async function handleCreateDemoRecords() {
-    if (!packageForView || packageForView.status !== "published") {
-      return;
-    }
-
-    const episodeNos = packageForView.confirmedEpisodeNos.length
-      ? packageForView.confirmedEpisodeNos
-      : Array.from({ length: packageForView.declaredEpisodeTo - packageForView.declaredEpisodeFrom + 1 }, (_, index) => packageForView.declaredEpisodeFrom + index);
-
-    const drafts: Array<Omit<AssetLockCreateDraft, "deliveryPackageId">> = [
-      {
-        assetName: `第 ${episodeNos[0] ?? packageForView.declaredEpisodeFrom} 集角色设定核对`,
-        assetType: "character",
-        changeType: "modified",
-        episodeNos,
-        productionNote: "请制作侧确认角色外观是否需要同步到资产库。",
-        risk: "attention",
-        writerNote: "基于已发布交稿包生成的资产核对记录。"
-      },
-      {
-        assetName: `第 ${episodeNos.join("、")} 集场景与道具核对`,
-        assetType: "scene",
-        changeType: "new",
-        episodeNos,
-        productionNote: "请核对新增场景、道具和可复用资产。",
-        risk: "normal",
-        writerNote: "请编剧确认变更是否准确覆盖本次发布内容。"
-      }
-    ];
-
-    await runAssetOperation("正在生成资产核对记录，请稍等。", async () => {
-      for (const draft of drafts) {
-        await onCreateRecord({
-          ...draft,
-          deliveryPackageId: packageForView.id
-        });
-      }
-    });
+    await runAssetOperation("正在准备已发布交稿包并生成资产核对记录。", onPrepareDemo);
   }
 
   return (
@@ -342,9 +308,15 @@ export function AssetLockWorkbench({
           ) : (
             <>
               <p>{emptyState.body}</p>
-              <button className="secondary-button" onClick={onOpenDeliveryCenter} type="button">
-                {emptyState.actionLabel}
-              </button>
+              <p className="inline-help">当前阶段还没有真实资产文件上传和自动资产解析；请先用演示数据验证确认、补资料、争议和定版流程。</p>
+              <div className="asset-empty-actions">
+                <button className="primary-button" disabled={isBusy || !actorUserId} onClick={() => runAssetOperation("正在准备演示交稿包和资产核对记录。", onPrepareDemo)} type="button">
+                  {activeOperation ? "正在准备..." : "生成演示资产记录"}
+                </button>
+                <button className="secondary-button" onClick={onOpenDeliveryCenter} type="button">
+                  {emptyState.actionLabel}
+                </button>
+              </div>
             </>
           )}
         </div>

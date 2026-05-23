@@ -76,7 +76,7 @@ import type {
   WorkspaceState
 } from "@aigc/domain";
 import { buildTodayTasks } from "./dashboard-tasks";
-import { fetchAssetLockRecords, formatAssetLockError, mutateAssetLockRecord } from "./asset-lock-api";
+import { fetchAssetLockRecords, formatAssetLockError, mutateAssetLockRecord, prepareAssetLockDemo } from "./asset-lock-api";
 import type { AssetLockCreateDraft, AssetLockRecordSummary } from "./asset-lock-api";
 import { canRetryDeliveryImportJob, formatDeliveryImportError } from "./delivery-import-feedback";
 import {
@@ -733,6 +733,35 @@ export function M1Dashboard() {
     );
   }
 
+  async function handlePrepareAssetLockDemo() {
+    setAssetLockMutating(true);
+    setAssetLockError(null);
+
+    try {
+      const response = await prepareAssetLockDemo({
+        projectId: selectedProject.id,
+        actorUserId: currentUserId
+      });
+      const snapshot = await refreshDeliveryWorkspaceFromServer();
+      applyAssetLockResponse(response);
+      const publishedPackage = snapshot.state.deliveryPackages
+        .filter((deliveryPackage) => deliveryPackage.projectId === selectedProject.id && deliveryPackage.status === "published")
+        .sort((a, b) => (b.publishedAt ?? b.createdAt).localeCompare(a.publishedAt ?? a.createdAt))[0];
+
+      if (publishedPackage) {
+        setSelectedDeliveryPackageId(publishedPackage.id);
+      }
+
+      setActionMessage({ tone: "success", text: "已准备演示交稿包，并生成资产核对记录。现在可以验证编剧确认、制作确认和统筹定版。" });
+    } catch (error) {
+      const message = formatAssetLockError(error) || "演示资产记录生成失败，请刷新后重试。";
+      setAssetLockError(message);
+      setActionMessage({ tone: "error", text: message });
+    } finally {
+      setAssetLockMutating(false);
+    }
+  }
+
   function applyDeliveryWorkspaceSnapshot(snapshot: Awaited<ReturnType<typeof fetchDeliveryImportWorkspace>>) {
     setDeliveryParseIssuesByPackageId((current) => ({
       ...current,
@@ -1307,6 +1336,7 @@ export function M1Dashboard() {
               handleFinalLockAsset={handleFinalLockAsset}
               handleMarkAssetLockDispute={handleMarkAssetLockDispute}
               handleMarkAssetLockNeedsInfo={handleMarkAssetLockNeedsInfo}
+              handlePrepareAssetLockDemo={handlePrepareAssetLockDemo}
               handleProductionConfirmAssetLock={handleProductionConfirmAssetLock}
               handleWriterConfirmAssetLock={handleWriterConfirmAssetLock}
               handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
@@ -1926,6 +1956,7 @@ function ModuleWorkbench({
   handleFinalLockAsset,
   handleMarkAssetLockDispute,
   handleMarkAssetLockNeedsInfo,
+  handlePrepareAssetLockDemo,
   handleProductionConfirmAssetLock,
   handleWriterConfirmAssetLock,
   handleSubmitDeliveryForReview,
@@ -1976,6 +2007,7 @@ function ModuleWorkbench({
   handleFinalLockAsset: (assetLockRecordId: string) => Promise<void>;
   handleMarkAssetLockDispute: (assetLockRecordId: string, disputeReason: string) => Promise<void>;
   handleMarkAssetLockNeedsInfo: (assetLockRecordId: string, missingInfo: string) => Promise<void>;
+  handlePrepareAssetLockDemo: () => Promise<void>;
   handleProductionConfirmAssetLock: (assetLockRecordId: string) => Promise<void>;
   handleWriterConfirmAssetLock: (assetLockRecordId: string) => Promise<void>;
   handleSubmitDeliveryForReview: (deliveryPackageId: string) => void;
@@ -2160,6 +2192,7 @@ function ModuleWorkbench({
         onMarkNeedsInfo={handleMarkAssetLockNeedsInfo}
         deliveryPackages={deliveryPackageDetails}
         onOpenDeliveryCenter={() => navigateToModule("交稿中心")}
+        onPrepareDemo={handlePrepareAssetLockDemo}
         onProductionConfirm={handleProductionConfirmAssetLock}
         onRefresh={refreshAssetLockRecordsFromServer}
         onWriterConfirm={handleWriterConfirmAssetLock}

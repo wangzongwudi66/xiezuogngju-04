@@ -108,6 +108,7 @@ describe("asset lock workbench data helpers", () => {
       actionLabel: "生成资产核对记录"
     });
     expect(getAssetLockEmptyState({ hasPublishedPackage: false }).actionLabel).toBe("去交稿中心");
+    expect(getAssetLockEmptyState({ hasPublishedPackage: false }).body).toContain("生成演示资产记录");
   });
 
   it("keeps role-specific asset lock actions separated", () => {

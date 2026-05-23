@@ -294,7 +294,7 @@ export function getAssetLockEmptyState(input: { hasPublishedPackage: boolean; pa
 
   return {
     title: "当前项目还没有资产核对记录",
-    body: "资产核对记录只能基于已发布交稿包生成。请先到交稿中心发布交稿包，再回来做资产确认和定版。",
+    body: "资产核对记录只能基于已发布交稿包生成。当前项目还没有可用记录；可以先生成演示资产记录继续验收，或到交稿中心发布真实交稿包。",
     actionLabel: "去交稿中心"
   };
 }

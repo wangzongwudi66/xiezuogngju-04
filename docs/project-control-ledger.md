@@ -81,6 +81,7 @@ Asset branch completed so far:
 - Added `/api/asset-lock-records` for list, create, writer confirm, production confirm, needs info, dispute, and final lock.
 - Replaced mock-only workbench flow with API-backed records and server mutation refresh.
 - Kept mock/demo mapping only as a minimal create/demo helper and display adapter.
+- Added an acceptance-test demo action so asset lock can prepare a published demo delivery package and generate records when server workspace has no usable package.
 - Asset helper, domain, API, and frontend behavior have tests.
 
 Latest verification on asset branch:
@@ -89,11 +90,12 @@ Latest verification on asset branch:
 npm.cmd run verify
 ```
 
-Passed:
+Previous full verify passed after `36393f5 Connect asset lock workflow to API`.
+After the acceptance demo fix, targeted verification passed:
 
-- web: 7 test files, 48 tests passed.
-- domain: 4 test files, 30 tests passed.
-- build passed.
+- `npm.cmd run typecheck -w apps/web`
+- `npm.cmd run test -w apps/web -- app/api/asset-lock-records app/ui/asset-lock-workbench.test.ts`
+- 3 web test files, 29 tests passed.
 
 Next step for asset branch:
 
@@ -207,7 +209,6 @@ Start the next asset stage with parallel support:
 
 Recommended next stage:
 
-1. Run full `npm.cmd run verify`.
-2. Commit the asset domain/API/frontend integration stage if verification passes.
-3. Do not push or merge until the user asks.
-4. Keep larger visual polish as a later stage.
+1. Commit the asset lock acceptance demo fix after full verification.
+2. Do not push or merge until the user asks.
+3. Start parallel planning for the next stage after the fix is committed.

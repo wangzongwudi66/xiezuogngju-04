@@ -147,6 +147,20 @@ function parseMutationRequest(body: unknown): AssetLockRecordMutationRequest | n
         lockedByUserId
       };
     }
+    case "prepare_demo": {
+      const projectId = readString(body.projectId);
+      const actorUserId = readString(body.actorUserId);
+
+      if (!projectId || !actorUserId) {
+        return null;
+      }
+
+      return {
+        action: body.action,
+        projectId,
+        actorUserId
+      };
+    }
     default:
       return null;
   }

@@ -1,10 +1,13 @@
 import {
   confirmAssetLockRecordByProduction,
   confirmAssetLockRecordByWriter,
+  createDeliveryPackageDraft,
   createAssetLockRecord,
   finalLockAssetRecord,
   markAssetLockRecordDisputed,
-  markAssetLockRecordNeedsInfo
+  markAssetLockRecordNeedsInfo,
+  publishDeliveryPackage,
+  submitDeliveryPackageForReview
 } from "@aigc/domain";
 import type {
   AssetChangeType,
@@ -57,6 +60,11 @@ export type AssetLockRecordMutationRequest =
       action: "final_lock";
       assetLockRecordId: string;
       lockedByUserId: string;
+    }
+  | {
+      action: "prepare_demo";
+      projectId: string;
+      actorUserId: string;
     };
 
 export interface AssetLockRecordListResponse {
@@ -142,6 +150,8 @@ function applyAssetLockRecordMutation(state: WorkspaceState, input: AssetLockRec
         assetLockRecordId: input.assetLockRecordId,
         lockedByUserId: input.lockedByUserId
       });
+    case "prepare_demo":
+      return prepareAssetLockDemoRecords(state, input.projectId, input.actorUserId);
   }
 }
 
@@ -158,6 +168,16 @@ function findMutatedRecord(state: WorkspaceState, input: AssetLockRecordMutation
     return record;
   }
 
+  if (input.action === "prepare_demo") {
+    const record = records.find((item) => item.projectId === input.projectId);
+
+    if (!record) {
+      throw new Error("asset_lock_record_not_created");
+    }
+
+    return record;
+  }
+
   const record = records.find((item) => item.id === input.assetLockRecordId);
 
   if (!record) {
@@ -165,6 +185,88 @@ function findMutatedRecord(state: WorkspaceState, input: AssetLockRecordMutation
   }
 
   return record;
+}
+
+function prepareAssetLockDemoRecords(state: WorkspaceState, projectId: string, actorUserId: string) {
+  const existingPublishedPackage = state.deliveryPackages.find(
+    (deliveryPackage) => deliveryPackage.projectId === projectId && deliveryPackage.status === "published"
+  );
+  let nextState = state;
+  let deliveryPackageId = existingPublishedPackage?.id ?? "";
+
+  if (!deliveryPackageId) {
+    nextState = createDeliveryPackageDraft(nextState, {
+      projectId,
+      uploadedByUserId: actorUserId,
+      type: "range",
+      declaredEpisodeFrom: 3,
+      declaredEpisodeTo: 4,
+      title: "资产定版验收：已发布演示交稿包",
+      sourceFileName: "asset-lock-demo.docx",
+      episodes: [
+        {
+          episodeNo: 3,
+          title: "第 3 集",
+          content: "第 3 集\n矿井入口段落更新，新增北井升降笼、红色安全灯和李砚旧伤妆。"
+        },
+        {
+          episodeNo: 4,
+          title: "第 4 集",
+          content: "第 4 集\n旧矿区手绘图成为关键道具，制作侧需要确认资产尺寸和复用范围。"
+        }
+      ],
+      confirmedEpisodeNos: [3, 4]
+    });
+    deliveryPackageId = nextState.deliveryPackages.at(-1)?.id ?? "";
+    nextState = submitDeliveryPackageForReview(nextState, deliveryPackageId, actorUserId);
+    nextState = publishDeliveryPackage(nextState, deliveryPackageId, actorUserId);
+  }
+
+  const existingNames = new Set((nextState.assetLockRecords ?? []).map((record) => `${record.deliveryPackageId}:${record.assetName}`));
+  const demoRecords = [
+    {
+      assetName: "李砚旧伤妆",
+      assetType: "character" as const,
+      changeType: "modified" as const,
+      episodeNos: [3],
+      risk: "attention" as const,
+      writerNote: "演示记录：编剧侧确认旧伤妆是否准确对应已发布剧本。",
+      productionNote: "演示记录：制作侧确认妆造是否需要进入资产库。"
+    },
+    {
+      assetName: "北井升降笼",
+      assetType: "scene" as const,
+      changeType: "new" as const,
+      episodeNos: [3, 4],
+      risk: "normal" as const,
+      writerNote: "演示记录：确认场景是否覆盖第 3、4 集。",
+      productionNote: "演示记录：确认是否作为可复用场景资产。"
+    },
+    {
+      assetName: "旧矿区手绘图",
+      assetType: "prop" as const,
+      changeType: "modified" as const,
+      episodeNos: [4],
+      risk: "high" as const,
+      writerNote: "演示记录：确认图上新增线索是否准确。",
+      productionNote: "演示记录：请制作侧补齐尺寸和画面参考。"
+    }
+  ];
+
+  for (const record of demoRecords) {
+    if (existingNames.has(`${deliveryPackageId}:${record.assetName}`)) {
+      continue;
+    }
+
+    nextState = createAssetLockRecord(nextState, {
+      projectId,
+      deliveryPackageId,
+      createdByUserId: actorUserId,
+      ...record
+    });
+  }
+
+  return nextState;
 }
 
 function selectAssetLockRecords(state: WorkspaceState, projectId?: string) {

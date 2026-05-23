@@ -156,6 +156,21 @@ describe("asset lock record route", () => {
     });
   });
 
+  it("prepares demo records for acceptance testing when no published package exists", async () => {
+    const response = await POST(
+      jsonRequest({
+        action: "prepare_demo",
+        projectId: "project-jincheng",
+        actorUserId: "user-owner"
+      })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.records.length).toBeGreaterThan(0);
+    expect(payload.summary.total).toBeGreaterThan(0);
+  });
+
   it("returns validation and mutation errors with 400 status", async () => {
     const invalidJson = await POST(new Request("http://localhost/api/asset-lock-records", { method: "POST", body: "{" }));
     const invalidBody = await POST(jsonRequest({ action: "create" }));

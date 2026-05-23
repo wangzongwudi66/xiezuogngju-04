@@ -67,6 +67,26 @@ describe("asset lock record service", () => {
     });
   });
 
+  it("prepares demo delivery package and asset records for acceptance testing", async () => {
+    const result = await mutateAssetLockRecord({
+      action: "prepare_demo",
+      projectId: "project-jincheng",
+      actorUserId: "user-owner"
+    });
+    const workspace = await getDeliveryImportWorkspace();
+
+    expect(result.summary.total).toBeGreaterThan(0);
+    expect(result.records.length).toBeGreaterThan(0);
+    expect(workspace.state.deliveryPackages).toContainEqual(
+      expect.objectContaining({
+        projectId: "project-jincheng",
+        status: "published",
+        title: "资产定版验收：已发布演示交稿包"
+      })
+    );
+    expect(workspace.state.assetLockRecords?.length).toBeGreaterThan(0);
+  });
+
   it("ignores client-controlled state fields on create", async () => {
     const deliveryPackageId = await createDraft();
     const result = await mutateAssetLockRecord({

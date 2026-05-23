@@ -9,6 +9,7 @@ export type AssetLockRecordListResponse = {
 export type AssetLockRecordMutationInput = AssetLockRecordMutationRequest;
 
 export type AssetLockCreateDraft = Omit<Extract<AssetLockRecordMutationRequest, { action: "create" }>, "action" | "projectId" | "createdByUserId">;
+export type AssetLockPrepareDemoInput = Omit<Extract<AssetLockRecordMutationRequest, { action: "prepare_demo" }>, "action">;
 
 export type { AssetLockRecordSummary };
 
@@ -36,6 +37,13 @@ export async function mutateAssetLockRecord(input: AssetLockRecordMutationInput)
   }
 
   return (await response.json()) as AssetLockRecordListResponse;
+}
+
+export async function prepareAssetLockDemo(input: AssetLockPrepareDemoInput): Promise<AssetLockRecordListResponse> {
+  return mutateAssetLockRecord({
+    action: "prepare_demo",
+    ...input
+  });
 }
 
 export function formatAssetLockError(error: unknown) {
