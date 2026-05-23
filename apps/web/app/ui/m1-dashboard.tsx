@@ -555,7 +555,9 @@ export function M1Dashboard() {
   const deliveryPackageDetails = projectDeliveryPackages
     .map((deliveryPackage) => selectDeliveryPackageDetail(state, deliveryPackage.id))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const projectAssetLockRecords = assetLockRecords.filter((record) => record.projectId === selectedProject.id);
+  const projectAssetLockRecords = mergeById(state.assetLockRecords ?? [], assetLockRecords).filter(
+    (record) => record.projectId === selectedProject.id
+  );
   const pendingDeliveryPackages = deliveryPackageDetails.filter((deliveryPackage) => deliveryPackage.status === "pending_review");
   const recentPublishedDeliveryPackages = deliveryPackageDetails
     .filter((deliveryPackage) => deliveryPackage.status === "published")
@@ -777,6 +779,7 @@ export function M1Dashboard() {
       assetLockRecords: mergeById(current.assetLockRecords ?? [], snapshot.state.assetLockRecords ?? []),
       notifications: mergeById(current.notifications, snapshot.state.notifications)
     }));
+    setAssetLockRecords((current) => mergeById(current, snapshot.state.assetLockRecords ?? []));
   }
 
   async function refreshDeliveryWorkspaceFromServer() {
