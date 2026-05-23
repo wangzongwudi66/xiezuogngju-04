@@ -101,6 +101,13 @@ describe("asset lock record route", () => {
         lockedByUserId: "user-owner"
       })
     );
+    const lockedWriterResponse = await POST(
+      jsonRequest({
+        action: "writer_confirm",
+        assetLockRecordId: recordId,
+        confirmedByUserId: "user-head-writer"
+      })
+    );
 
     await expect(writerResponse.json()).resolves.toMatchObject({
       record: {
@@ -120,6 +127,11 @@ describe("asset lock record route", () => {
         status: "locked",
         finalLockedByUserId: "user-owner"
       }
+    });
+    expect(lockedWriterResponse.status).toBe(400);
+    await expect(lockedWriterResponse.json()).resolves.toMatchObject({
+      error: "asset_lock_record_mutation_failed",
+      message: "资产已定版，不能修改资产核对记录"
     });
 
     const needsInfoId = (await (await POST(jsonRequest(buildCreateBody(deliveryPackageId, "Needs Info Asset")))).json()).record.id;

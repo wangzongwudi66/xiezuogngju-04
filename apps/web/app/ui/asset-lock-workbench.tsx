@@ -189,7 +189,7 @@ export function AssetLockWorkbench({
 
   useEffect(() => {
     setSelectedAssetId((current) => (items.some((item) => item.id === current) ? current : items[0]?.id ?? ""));
-    setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
+    setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id && item.reviewStatus !== "locked")));
   }, [items]);
 
   useEffect(() => {
@@ -503,6 +503,7 @@ export function AssetLockWorkbench({
               <input
                 aria-label={`选择 ${item.assetName}`}
                 checked={selectedIds.includes(item.id)}
+                disabled={item.reviewStatus === "locked"}
                 onChange={(event) => {
                   event.stopPropagation();
                   setSelectedIds((current) =>
@@ -584,9 +585,15 @@ export function AssetLockWorkbench({
             <div className="asset-detail-actions">
               <button
                 className="primary-button"
-                disabled={isBusy || !roleActions.canWriterConfirm}
+                disabled={isBusy || selectedAssetIsLocked || !roleActions.canWriterConfirm}
                 onClick={() => runAssetOperation("正在提交编剧侧确认。", () => onWriterConfirm(selectedAsset.id))}
-                title={roleActions.canWriterConfirm ? "确认编剧侧已经核对该资产记录。" : "当前角色不能提交编剧侧确认。"}
+                title={
+                  selectedAssetIsLocked
+                    ? "这条资产记录已定版，不能继续修改。"
+                    : roleActions.canWriterConfirm
+                      ? "确认编剧侧已经核对该资产记录。"
+                      : "当前角色不能提交编剧侧确认。"
+                }
                 type="button"
               >
                 <Check size={15} />
@@ -594,9 +601,15 @@ export function AssetLockWorkbench({
               </button>
               <button
                 className="primary-button"
-                disabled={isBusy || !roleActions.canProductionConfirm}
+                disabled={isBusy || selectedAssetIsLocked || !roleActions.canProductionConfirm}
                 onClick={() => runAssetOperation("正在提交制作侧确认。", () => onProductionConfirm(selectedAsset.id))}
-                title={roleActions.canProductionConfirm ? "确认制作侧已经核对该资产记录。" : "当前角色不能提交制作侧确认。"}
+                title={
+                  selectedAssetIsLocked
+                    ? "这条资产记录已定版，不能继续修改。"
+                    : roleActions.canProductionConfirm
+                      ? "确认制作侧已经核对该资产记录。"
+                      : "当前角色不能提交制作侧确认。"
+                }
                 type="button"
               >
                 <ClipboardCheck size={15} />
@@ -605,8 +618,9 @@ export function AssetLockWorkbench({
               {roleActions.canCoordinate ? (
                 <button
                   className="secondary-button"
-                  disabled={isBusy}
+                  disabled={isBusy || selectedAssetIsLocked}
                   onClick={() => runAssetOperation("正在标记需补资料。", () => onMarkNeedsInfo(selectedAsset.id, "请补充资产参考、可见范围或制作侧所需资料。"))}
+                  title={selectedAssetIsLocked ? "这条资产记录已定版，不能继续修改。" : "退回补充资产核对资料。"}
                   type="button"
                 >
                   <RotateCcw size={15} />
@@ -616,8 +630,9 @@ export function AssetLockWorkbench({
               {roleActions.canCoordinate ? (
                 <button
                   className="secondary-button"
-                  disabled={isBusy}
+                  disabled={isBusy || selectedAssetIsLocked}
                   onClick={() => runAssetOperation("正在标记争议项。", () => onMarkDispute(selectedAsset.id, "编剧侧与制作侧对资产变更存在争议，请统筹协调。"))}
+                  title={selectedAssetIsLocked ? "这条资产记录已定版，不能继续修改。" : "标记为资产争议项。"}
                   type="button"
                 >
                   <AlertTriangle size={15} />

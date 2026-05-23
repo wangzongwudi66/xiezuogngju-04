@@ -195,6 +195,15 @@ describe("asset lock record service", () => {
     expect(result.record.finalLockedByUserId).toBeUndefined();
   });
 
+  it("rejects duplicate asset names within one delivery package", async () => {
+    const deliveryPackageId = await createDraft();
+    await createAssetRecord(deliveryPackageId);
+
+    await expect(createAssetRecord(deliveryPackageId, "  Mine   Lift  ")).rejects.toThrow(
+      "同一交稿包内已存在同名资产核对记录"
+    );
+  });
+
   it("rejects cross-project packages, draft packages, and episode numbers outside the package", async () => {
     const draftDeliveryPackageId = await createDraft({ publish: false });
     const publishedDeliveryPackageId = await createDraft();
@@ -325,6 +334,21 @@ describe("asset lock record service", () => {
       finalLockedByUserId: "user-owner"
     });
     expect(locked.record.finalLockedAt).toBeTruthy();
+
+    await expect(
+      mutateAssetLockRecord({
+        action: "writer_confirm",
+        assetLockRecordId: record.id,
+        confirmedByUserId: "user-head-writer"
+      })
+    ).rejects.toThrow("资产已定版，不能修改资产核对记录");
+    await expect(
+      mutateAssetLockRecord({
+        action: "final_lock",
+        assetLockRecordId: record.id,
+        lockedByUserId: "user-owner"
+      })
+    ).rejects.toThrow("资产已定版，不能重复定版");
   });
 
   it("does not final lock records that still need information or are disputed", async () => {

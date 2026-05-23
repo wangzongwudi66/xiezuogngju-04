@@ -96,6 +96,7 @@ describe("asset lock workbench data helpers", () => {
     expect(formatAssetLockError(new Error("asset_lock_records_request_failed"))).toBe("资产定版记录加载失败，请稍后重试。");
     expect(formatAssetLockError(new Error("交稿包状态必须是 published"))).toBe("只能基于已发布交稿包生成资产核对记录。请先完成交稿发布。");
     expect(formatAssetLockError(new Error("编剧和制作确认完成后才能定版"))).toBe("仍有未完成确认、争议或需补资料项，暂不能最终定版。");
+    expect(formatAssetLockError(new Error("资产已定版，不能修改资产核对记录"))).toBe("这条资产已定版，不能继续修改。");
     expect(formatAssetLockError(new Error("asset_lock_record_not_found"))).not.toContain("asset_lock_record_not_found");
   });
 

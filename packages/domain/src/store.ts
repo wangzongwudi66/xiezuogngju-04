@@ -559,6 +559,17 @@ export function createAssetLockRecord(state: WorkspaceState, input: AssetLockRec
     throw new Error("资产名称不能为空");
   }
 
+  const assetNameKey = normalizeAssetNameKey(assetName);
+  const hasDuplicateAssetName = getAssetLockRecords(state).some(
+    (record) =>
+      record.deliveryPackageId === input.deliveryPackageId &&
+      normalizeAssetNameKey(record.assetName) === assetNameKey
+  );
+
+  if (hasDuplicateAssetName) {
+    throw new Error("同一交稿包内已存在同名资产核对记录");
+  }
+
   const createdAt = timestamp();
   const record: AssetLockRecord = {
     id: createId("asset-lock", `${deliveryPackage.id}-${assetName}`),
@@ -590,6 +601,7 @@ export function confirmAssetLockRecordByWriter(
   input: AssetLockRecordWriterConfirmationInput
 ): WorkspaceState {
   const record = requireAssetLockRecord(state, input.assetLockRecordId);
+  assertAssetLockRecordMutable(record);
   assertProjectRole(state, record.projectId, input.confirmedByUserId, ["owner", "coordinator", "head_writer", "writer"], "编剧确认资产核对记录");
   const updated = {
     ...record,
@@ -613,6 +625,7 @@ export function confirmAssetLockRecordByProduction(
   input: AssetLockRecordProductionConfirmationInput
 ): WorkspaceState {
   const record = requireAssetLockRecord(state, input.assetLockRecordId);
+  assertAssetLockRecordMutable(record);
   assertProjectRole(state, record.projectId, input.confirmedByUserId, ["owner", "coordinator", "creator"], "制作确认资产核对记录");
   const updated = {
     ...record,
@@ -636,6 +649,7 @@ export function markAssetLockRecordNeedsInfo(
   input: AssetLockRecordNeedsInfoInput
 ): WorkspaceState {
   const record = requireAssetLockRecord(state, input.assetLockRecordId);
+  assertAssetLockRecordMutable(record);
   assertProjectRole(state, record.projectId, input.markedByUserId, ["owner", "coordinator", "head_writer", "writer", "creator"], "标记资产补充信息");
   const missingInfo = input.missingInfo.trim();
 
@@ -645,8 +659,8 @@ export function markAssetLockRecordNeedsInfo(
 
   return replaceAssetLockRecord(state, {
     ...record,
-    writerConfirmation: record.writerConfirmation === "confirmed" ? record.writerConfirmation : "returned",
-    productionConfirmation: record.productionConfirmation === "confirmed" ? record.productionConfirmation : "returned",
+    writerConfirmation: "returned",
+    productionConfirmation: "returned",
     status: "needs_info",
     missingInfo,
     disputeReason: undefined,
@@ -656,6 +670,7 @@ export function markAssetLockRecordNeedsInfo(
 
 export function markAssetLockRecordDisputed(state: WorkspaceState, input: AssetLockRecordDisputeInput): WorkspaceState {
   const record = requireAssetLockRecord(state, input.assetLockRecordId);
+  assertAssetLockRecordMutable(record);
   assertProjectRole(state, record.projectId, input.markedByUserId, ["owner", "coordinator", "head_writer", "writer", "creator"], "标记资产争议");
   const disputeReason = input.disputeReason.trim();
 
@@ -665,6 +680,8 @@ export function markAssetLockRecordDisputed(state: WorkspaceState, input: AssetL
 
   return replaceAssetLockRecord(state, {
     ...record,
+    writerConfirmation: "returned",
+    productionConfirmation: "returned",
     status: "disputed",
     risk: "high",
     disputeReason,
@@ -675,6 +692,10 @@ export function markAssetLockRecordDisputed(state: WorkspaceState, input: AssetL
 export function finalLockAssetRecord(state: WorkspaceState, input: AssetLockRecordFinalLockInput): WorkspaceState {
   const record = requireAssetLockRecord(state, input.assetLockRecordId);
   assertProjectRole(state, record.projectId, input.lockedByUserId, ["owner", "coordinator"], "定版资产核对记录");
+
+  if (record.status === "locked") {
+    throw new Error("资产已定版，不能重复定版");
+  }
 
   if (record.writerConfirmation !== "confirmed" || record.productionConfirmation !== "confirmed") {
     throw new Error("编剧和制作确认完成后才能定版");
@@ -1100,6 +1121,16 @@ function replaceAssetLockRecord(state: WorkspaceState, record: AssetLockRecord):
     ...state,
     assetLockRecords: getAssetLockRecords(state).map((item) => (item.id === record.id ? record : item))
   };
+}
+
+function normalizeAssetNameKey(assetName: string) {
+  return assetName.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function assertAssetLockRecordMutable(record: AssetLockRecord) {
+  if (record.status === "locked") {
+    throw new Error("资产已定版，不能修改资产核对记录");
+  }
 }
 
 function getAssetAttachments(state: WorkspaceState) {

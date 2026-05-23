@@ -12,6 +12,7 @@ import {
   finalLockAssetRecord,
   listAssetAttachmentsForRecord,
   loginAsUser,
+  markAssetLockRecordDisputed,
   markAssetLockRecordNeedsInfo,
   markNotificationRead,
   publishDeliveryPackage,
@@ -442,6 +443,22 @@ describe("asset lock workflow", () => {
     });
   });
 
+  it("rejects duplicate asset names within the same delivery package", () => {
+    const { deliveryPackageId, state } = createAssetRecord();
+
+    expect(() =>
+      createAssetLockRecord(state, {
+        projectId: "project-jincheng",
+        deliveryPackageId,
+        episodeNos: [4],
+        assetName: "  北井升降笼  ",
+        assetType: "scene",
+        changeType: "modified",
+        createdByUserId: "user-head-writer"
+      })
+    ).toThrow("同一交稿包内已存在同名资产核对记录");
+  });
+
   it("rejects asset lock records before the delivery package is published", () => {
     const draft = createDeliveryPackageDraft(seedWorkspace, {
       projectId: "project-jincheng",
@@ -507,6 +524,50 @@ describe("asset lock workflow", () => {
     expect(updated?.missingInfo).toBe("缺少升降笼正面结构参考。");
   });
 
+  it("returns confirmations when a confirmed asset lock record needs info or is disputed again", () => {
+    const { record, state } = createAssetRecord();
+    const writerConfirmed = confirmAssetLockRecordByWriter(state, {
+      assetLockRecordId: record?.id ?? "",
+      confirmedByUserId: "user-head-writer"
+    });
+    const productionConfirmed = confirmAssetLockRecordByProduction(writerConfirmed, {
+      assetLockRecordId: record?.id ?? "",
+      confirmedByUserId: "user-creator-a"
+    });
+    const needsInfo = markAssetLockRecordNeedsInfo(productionConfirmed, {
+      assetLockRecordId: record?.id ?? "",
+      markedByUserId: "user-owner",
+      missingInfo: "需要补充最终尺寸。"
+    });
+    const needsInfoRecord = needsInfo.assetLockRecords?.find((item) => item.id === record?.id);
+    const reconfirmed = confirmAssetLockRecordByWriter(needsInfo, {
+      assetLockRecordId: record?.id ?? "",
+      confirmedByUserId: "user-head-writer"
+    });
+    const disputed = markAssetLockRecordDisputed(productionConfirmed, {
+      assetLockRecordId: record?.id ?? "",
+      markedByUserId: "user-owner",
+      disputeReason: "资产范围仍需统筹确认。"
+    });
+    const disputedRecord = disputed.assetLockRecords?.find((item) => item.id === record?.id);
+
+    expect(needsInfoRecord).toMatchObject({
+      status: "needs_info",
+      writerConfirmation: "returned",
+      productionConfirmation: "returned"
+    });
+    expect(reconfirmed.assetLockRecords?.find((item) => item.id === record?.id)).toMatchObject({
+      status: "draft",
+      writerConfirmation: "confirmed",
+      productionConfirmation: "returned"
+    });
+    expect(disputedRecord).toMatchObject({
+      status: "disputed",
+      writerConfirmation: "returned",
+      productionConfirmation: "returned"
+    });
+  });
+
   it("blocks final lock before all confirmations are completed", () => {
     const { record, state } = createAssetRecord();
 
@@ -537,6 +598,56 @@ describe("asset lock workflow", () => {
     expect(updated?.status).toBe("locked");
     expect(updated?.finalLockedByUserId).toBe("user-owner");
     expect(updated?.finalLockedAt).toBeTruthy();
+  });
+
+  it("prevents locked asset records from being modified or locked again", () => {
+    const { record, state } = createAssetRecord();
+    const writerConfirmed = confirmAssetLockRecordByWriter(state, {
+      assetLockRecordId: record?.id ?? "",
+      confirmedByUserId: "user-head-writer"
+    });
+    const productionConfirmed = confirmAssetLockRecordByProduction(writerConfirmed, {
+      assetLockRecordId: record?.id ?? "",
+      confirmedByUserId: "user-creator-a"
+    });
+    const locked = finalLockAssetRecord(productionConfirmed, {
+      assetLockRecordId: record?.id ?? "",
+      lockedByUserId: "user-owner"
+    });
+
+    expect(() =>
+      confirmAssetLockRecordByWriter(locked, {
+        assetLockRecordId: record?.id ?? "",
+        confirmedByUserId: "user-head-writer"
+      })
+    ).toThrow("资产已定版，不能修改资产核对记录");
+    expect(() =>
+      confirmAssetLockRecordByProduction(locked, {
+        assetLockRecordId: record?.id ?? "",
+        confirmedByUserId: "user-creator-a"
+      })
+    ).toThrow("资产已定版，不能修改资产核对记录");
+    expect(() =>
+      markAssetLockRecordNeedsInfo(locked, {
+        assetLockRecordId: record?.id ?? "",
+        markedByUserId: "user-owner",
+        missingInfo: "需要补充资料。"
+      })
+    ).toThrow("资产已定版，不能修改资产核对记录");
+    expect(() =>
+      markAssetLockRecordDisputed(locked, {
+        assetLockRecordId: record?.id ?? "",
+        markedByUserId: "user-owner",
+        disputeReason: "重复争议。"
+      })
+    ).toThrow("资产已定版，不能修改资产核对记录");
+    expect(() =>
+      finalLockAssetRecord(locked, {
+        assetLockRecordId: record?.id ?? "",
+        lockedByUserId: "user-owner"
+      })
+    ).toThrow("资产已定版，不能重复定版");
+    expect(locked.assetLockRecords?.find((item) => item.id === record?.id)?.status).toBe("locked");
   });
 
   it("creates asset attachment metadata from an existing asset lock record", () => {

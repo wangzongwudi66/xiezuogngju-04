@@ -280,7 +280,7 @@ function generateAssetLockRecordsFromPackage(
   const existingNames = new Set(
     (state.assetLockRecords ?? [])
       .filter((record) => record.deliveryPackageId === input.deliveryPackageId)
-      .map((record) => record.assetName)
+      .map((record) => normalizeAssetLockNameKey(record.assetName))
   );
   const candidates = extractAssetLockCandidatesFromDeliveryEpisodes({
     projectId: input.projectId,
@@ -315,15 +315,21 @@ function generateAssetLockRecordsFromPackage(
   let nextState = state;
 
   for (const candidate of candidatesToCreate) {
-    if (existingNames.has(candidate.assetName)) {
+    const assetNameKey = normalizeAssetLockNameKey(candidate.assetName);
+
+    if (existingNames.has(assetNameKey)) {
       continue;
     }
 
     nextState = createAssetLockRecord(nextState, candidate);
-    existingNames.add(candidate.assetName);
+    existingNames.add(assetNameKey);
   }
 
   return nextState;
+}
+
+function normalizeAssetLockNameKey(assetName: string) {
+  return assetName.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
 function selectAssetLockRecords(state: WorkspaceState, projectId?: string) {

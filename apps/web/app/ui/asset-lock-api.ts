@@ -65,6 +65,10 @@ export function formatAssetLockError(error: unknown) {
     return "没有找到这条资产定版记录，请刷新后重试。";
   }
 
+  if (message.includes("资产已定版")) {
+    return "这条资产已定版，不能继续修改。";
+  }
+
   if (message.includes("交稿包状态必须是 published") || message.includes("只能基于已发布交稿包创建资产定版记录")) {
     return "只能基于已发布交稿包生成资产核对记录。请先完成交稿发布。";
   }
