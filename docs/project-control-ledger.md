@@ -10,20 +10,16 @@ Read it first before making scheduling, branch, or merge decisions.
 - Give result-oriented guidance: current status, next action, whether to pause, rework, submit, merge, or verify.
 - Main conversation owns project rhythm, review, branch management, and commit/merge decisions.
 - Sub-conversations receive scoped tasks. They do not commit or push unless explicitly told.
+- Do not push unless the user explicitly asks.
+- Keep this ledger updated before and after each major phase to avoid context loss.
 
 ## Main Branch Status
 
 - Branch: `main`
 - Remote tracking: `xiezuogongju-02/main`
-- Current local `main` is ahead of remote by 4 commits.
-- Do not push unless the user explicitly asks.
-
-Main local commits not pushed:
-
-1. `c741fb4 Complete project-scoped delivery workflow prototype`
-2. `467d072 Persist uploaded delivery Word files`
-3. `ae3a19c Add delivery import retry backend`
-4. `d2a6db7 Add delivery import retry UI`
+- Local `main` is ahead of remote by 15 commits as of 2026-05-24.
+- Latest local `main` commit before the next-stage branch: `05d018b Clean up delivery import test copy`.
+- `codex/asset-lock-workbench` has been fast-forward merged into `main`.
 
 Main currently includes:
 
@@ -33,75 +29,96 @@ Main currently includes:
 - Word/text import creates delivery drafts.
 - Server-side delivery draft persistence.
 - Delivery package confirmation, submit, publish, reject server-side flow.
-- Uploaded original `.docx` file persistence.
-- `fileId` on delivery import jobs.
-- Backend retry for saved Word imports.
-- Frontend retry button in import records.
-- Coordinator/writer role view fixes.
-- Hydration mismatch fix.
+- Uploaded original `.docx` file persistence with `fileId`.
+- Backend and frontend retry for saved Word imports.
+- Asset lock workbench in the main project flow.
+- Domain-backed `AssetLockRecord` and `AssetAttachment`.
+- `/api/asset-lock-records` for list/create/mutate/prepare demo/generate from package.
+- `/api/asset-lock-attachments` for upload/list.
+- Asset candidate extraction from published delivery package episodes.
+- Asset lock frontend with records, confirmation, needs-info, dispute, final lock, attachments, and locked upload blocking.
 
-## Active Feature Branch
-
-- Branch: `codex/asset-lock-workbench`
-- Created from latest `main` at `d2a6db7`.
-- Purpose: dedicated prototype for the asset review and final lock workflow.
-- Current asset prototype is committed at `3471924 Add asset lock workbench prototype`.
-- Current worktree should be clean before starting the next stage.
-
-Committed asset workbench files:
-
-- `apps/web/app/ui/asset-lock-workbench.tsx`
-- `apps/web/app/ui/asset-lock-workbench-data.ts`
-- `apps/web/app/ui/asset-lock-workbench.test.ts`
-- `apps/web/app/ui/m1-dashboard.tsx`
-- `apps/web/app/ui/m1-dashboard.test.ts`
-- `apps/web/app/globals.css`
-- `docs/project-control-ledger.md`
-
-Asset branch completed so far:
-
-- Added "资产定版" / asset lock entry.
-- Added coordinator home entry for asset review and lock.
-- Added writer/production side entry next to delivery center.
-- Added asset lock workbench with:
-  - Asset change overview.
-  - Writer confirmation status.
-  - Production confirmation status.
-  - Dispute / missing-info counts.
-  - Final lock readiness.
-  - Filters by episode, asset type, status, owner, and risk.
-  - Asset change list.
-  - Single asset detail panel.
-  - Writer note, production note, source paragraph, discussion records.
-  - Batch writer confirmation.
-  - Mark needs info.
-  - Production confirmation.
-  - Coordinator final lock action.
-- Added domain-backed asset lock records in `WorkspaceState.assetLockRecords`.
-- Added `/api/asset-lock-records` for list, create, writer confirm, production confirm, needs info, dispute, and final lock.
-- Replaced mock-only workbench flow with API-backed records and server mutation refresh.
-- Kept mock/demo mapping only as a minimal create/demo helper and display adapter.
-- Added an acceptance-test demo action so asset lock can prepare a published demo delivery package and generate records when server workspace has no usable package.
-- Asset helper, domain, API, and frontend behavior have tests.
-
-Latest verification on asset branch:
+Latest main verification:
 
 ```powershell
 npm.cmd run verify
 ```
 
-Previous full verify passed after `36393f5 Connect asset lock workflow to API`.
-After the acceptance demo fix, targeted verification passed:
+Passed after merging asset lock workbench:
 
-- `npm.cmd run typecheck -w apps/web`
-- `npm.cmd run test -w apps/web -- app/api/asset-lock-records app/ui/asset-lock-workbench.test.ts`
-- 3 web test files, 29 tests passed.
+- web: 12 test files / 96 tests passed.
+- domain: 5 test files / 44 tests passed.
+- `next build` passed.
 
-Next step for asset branch:
+## Active Feature Branch
 
-1. Continue into asset workflow model planning and implementation.
-2. Keep backend/data-model work scoped to the asset lock stage.
-3. Do not merge into `main` until the next stage is reviewed and committed.
+- Branch: `codex/asset-decision-timeline`
+- Created from local `main` at `05d018b`.
+- Purpose: prototype the next core module, "资产决策剪辑轨道".
+- Current stage: planning and design baseline.
+- Do not push or merge until reviewed.
+
+## Asset Lock Workbench Completion
+
+Completed and merged into `main`:
+
+- `3471924 Add asset lock workbench prototype`
+- `36393f5 Connect asset lock workflow to API`
+- `c7192cc Add asset lock acceptance demo setup`
+- `3982c23 Generate asset lock records from delivery content`
+- `45eef39 Add asset lock attachment backend`
+- `a8ed680 Connect asset lock attachments UI`
+- `400b285 Polish asset lock workbench layout`
+- `34ee098 Fix asset lock record hydration from server snapshot`
+- `763de20 Harden asset attachment UI state handling`
+- `f75b22c Clarify asset attachment UI copy`
+- `05d018b Clean up delivery import test copy`
+
+Known asset lock risks intentionally deferred:
+
+- Prototype actor identity still comes from request body (`actorUserId`, `uploadedByUserId`).
+- Real multi-user deployment needs a separate session/auth phase.
+- Attachment download, preview, and delete routes are not implemented yet.
+- The current asset candidate extraction is conservative keyword logic, not AI parsing.
+
+## Next Core Module: Asset Decision Timeline
+
+Working name: **资产决策剪辑轨道**.
+
+This is not just an asset list. It should become a core work area for viewing and deciding asset lifecycle changes across a full series timeline.
+
+Core goals:
+
+- Show finalized script-driven asset lifecycle across the whole episode timeline.
+- Show where each asset appears, persists, changes state, or disappears.
+- Compare current version against previous version with ghost clips.
+- Let writers and creators confirm, discuss, and decide asset changes.
+- Let creators quickly see assets affecting their assigned episodes.
+
+First-version scope:
+
+- Local prototype data is acceptable.
+- No real database expansion.
+- No AI automatic asset parsing.
+- No real image asset library requirement.
+- Build a clear timeline UI first, then decide what domain/API to formalize.
+
+Must-have first-version experience:
+
+- A horizontal episode timeline, e.g. episode 1-60.
+- Track layers by asset type: character, scene, prop, effect, status.
+- Asset state segments as clips spanning episode ranges.
+- A current-version clip and a lighter previous-version ghost clip.
+- Change markers for new, removed, range changed, status changed, and source paragraph changed.
+- Decision-aware aggregation when many assets crowd the same range.
+- A left-side decision queue: due today, affects my episodes, waiting on others, script changes, conflicts.
+- A right-side detail panel with decision explanation, asset detail, script comparison, and discussion.
+- Creator view defaults to assigned episode window and relevant decisions.
+- Writer/coordinator view can inspect the full series.
+
+See detailed design baseline:
+
+- `docs/asset-decision-timeline.md`
 
 ## Sub-Conversation Status
 
@@ -110,99 +127,64 @@ Next step for asset branch:
 - Completed coordinator role UI rework.
 - Completed member role vs episode assignment model rework.
 - Completed asset lock domain model implementation.
-- Added `AssetLockRecord`, asset lock enum types, and domain actions for create, writer confirm, production confirm, needs info, dispute, and final lock.
 - Completed conservative asset candidate extraction domain helper.
-- Added `AssetLockRecordCandidate` and `extractAssetLockCandidatesFromDeliveryEpisodes`.
-- Candidate extraction uses keyword rules for character, scene, prop, vehicle, and effect candidates.
 - Completed asset attachment domain metadata.
-- Added `AssetAttachment`, `AssetAttachmentType`, `AssetAttachmentStatus`, `WorkspaceState.assetAttachments?`, and metadata create/list/soft-delete functions.
-- Attachment metadata rules: derive project/package from record, reject locked records, require project membership, increment per-record version, and restrict deletion to uploader/owner/coordinator.
-- Verified with `npm.cmd run test -w packages/domain`, `npm.cmd run typecheck -w apps/web`, and `npm.cmd run test -w apps/web`.
-- Status: paused.
+- Status: available for next task.
 
-### 分支2
+### 并行B
 
-- Completed import/parse UX rework.
-- Completed import/parse reliability rework.
-- Completed frontend import retry entry.
-- Completed asset lock workbench UX/message pass after API integration.
-- Improved empty states, role-specific action labels, processing states, final-lock blocking hints, and business error messages.
-- Completed static UI/visual audit.
-- UI backlog: reduce `ShieldCheck`/`FileText` icon overload, normalize font hierarchy/button weights, reduce asset lock density, de-emphasize delivery demo entry, and later add lightweight empty-state visuals.
-- Structural UI changes should wait until attachment upload entry lands.
-- Status: paused.
-
-### 分支1
-
-- Completed role home and navigation structure rework.
-- Completed project switching and current project context rework.
-- Fixed hydration mismatch.
-- Completed asset lock workbench frontend API integration.
-- Added frontend API helper, server-backed asset lock records, mutation handlers, and tests.
-- Completed asset lock attachment frontend integration.
-- Added `/api/asset-lock-attachments` frontend helper, active attachment list in the asset detail panel, upload form, upload/list error mapping, and tests.
-- Status: paused.
+- Completed test reviews for Word persistence and import retry.
+- Completed asset lock API/workflow review.
+- Completed attachment design review.
+- Completed final asset lock merge review; conclusion was "needs minor fixes", now addressed.
+- Status: available for next read-only product/test review.
 
 ### 并行C
 
 - Completed original Word file persistence.
 - Completed backend delivery import retry.
-- Completed `/api/asset-lock-records` backend service and route.
-- Added service/route tests for list, create, writer confirm, production confirm, needs info, dispute, and final lock.
-- Completed backend hardening after 并行D review.
-- Added tests for ignored client status fields, cross-project rejection, invalid episodeNos, unauthorized actors, draft-package rejection, legacy snapshots without `assetLockRecords`, and GET-all behavior.
+- Completed `/api/asset-lock-records`.
 - Completed candidate-generation API integration.
-- Added `generate_from_package` action and changed `prepare_demo` to generate from actual published package episodes before falling back to demo records.
-- Completed `/api/asset-lock-attachments` backend upload/list implementation.
-- Added attachment file storage under `AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR` / `.local-data/asset-lock-attachments`, MIME+extension validation, 20MB limit, opaque `asset-att-*` file ids, path boundary checks, and metadata cleanup on failure.
-- Status: paused.
-
-### 并行B
-
-- Completed test review for original file persistence.
-- Completed test review for import retry.
-- Completed read-only review for asset lock API and workflow boundaries.
-- Recommended `/api/asset-lock-records` as a separate API.
-- Recommended storing asset lock records in `WorkspaceState.assetLockRecords`, reusing the current workspace persistence file.
-- Completed read-only design for asset lock attachments.
-- Recommended separate `AssetAttachment` metadata in `WorkspaceState.assetAttachments?`.
-- Recommended independent `/api/asset-lock-attachments` for multipart uploads, with files saved under `AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR` / `.local-data/asset-lock-attachments`.
-- Attachment work is queued after candidate-generation API stabilization.
-- Status: paused.
+- Completed `/api/asset-lock-attachments`.
+- Status: available for next implementation task.
 
 ### 并行D
 
-- Completed Turbopack/NFT warning investigation and fix guidance.
-- Completed safety/storage review for original Word file persistence.
-- Completed read-only review for asset lock domain/API.
-- Conclusion: needs minor backend hardening before final integration.
-- Key concerns: actor identity is request-body trusted in prototype mode; clarify draft vs published delivery package creation rule; add tests for cross-project, unauthorized actors, ignored client status fields, and old snapshots without `assetLockRecords`.
-- Completed asset attachment security/storage review.
-- Attachment API must use opaque `asset-att-*` file ids, `AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR`, `.local-data/asset-lock-attachments`, directory boundary checks, `/* turbopackIgnore: true */` on fs calls, 20MB max file size, and MIME+extension whitelist.
-- Attachment API must not return `filePath`, `.local-data`, env directories, or absolute paths.
-- Metadata/file consistency is a blocker: validation must happen before writes; if metadata write fails after file write, clean up the written file.
-- Completed UI parallel-safety review.
-- UI work can safely parallelize only as scoped `.asset-*` CSS micro-polish in `globals.css`; avoid `m1-dashboard.tsx`, `AssetLockWorkbench` props, detail panel, actions, selected record logic, and attachment entry areas until attachment mainline lands.
-- Status: paused.
+- Completed Turbopack/NFT warning guidance.
+- Completed asset lock safety/storage review.
+- Completed attachment security/storage review.
+- Completed UI parallel-safety and final asset lock UI review; minor copy fix addressed.
+- Status: available for next UI/interaction review.
 
-### Lagrange
+### 分支1
 
-- Completed `delivery-packages` backend state mutation API.
-- Status: paused.
+- Completed role home/navigation structure rework.
+- Completed project switching and hydration fixes.
+- Completed asset lock API frontend integration.
+- Completed attachment upload/list frontend integration.
+- Status: available for next frontend implementation task.
 
-### Ampere
+### 分支2
 
-- Completed frontend integration for delivery package state mutations.
-- Status: paused.
+- Completed import/parse UX work.
+- Completed asset lock UX/message pass.
+- Completed static UI/visual audit.
+- Status: available for CSS/visual polish work after main prototype structure lands.
+
+### 分支3
+
+- Provided the design direction for "资产决策剪辑轨道".
+- Key decision: use a timeline/editing-track mental model, with decision queue and right-side detail panel.
+- Status: continue as product/design sparring branch if needed.
 
 ## Current Do Not Do List
 
-- Do not push `main` unless the user explicitly asks.
-- Do not merge `codex/asset-lock-workbench` into `main` until manual review passes.
-- Do not let multiple sub-conversations edit `m1-dashboard.tsx` at the same time.
+- Do not push unless the user explicitly asks.
 - Do not expand into real database work yet.
-- Do not build original Word download/audit UI unless it becomes a new stage.
-- Do not create a separate asset JSON persistence file; keep asset records inside `WorkspaceState`.
+- Do not start real session/auth unless explicitly chosen as a phase.
+- Do not build AI automatic asset parsing in the first timeline prototype.
+- Do not let multiple sub-conversations edit the same high-conflict files at the same time.
+- Avoid broad rewrites of `m1-dashboard.tsx` until the timeline prototype surface is chosen.
 
 ## Recovery Steps After Context Compression
 
@@ -211,13 +193,16 @@ Run:
 ```powershell
 git status --short --branch
 git log --oneline --decorate --graph --all -12
+Get-Content docs/project-control-ledger.md -Raw
+Get-Content docs/asset-decision-timeline.md -Raw
 ```
 
 Then:
 
-- If current branch is `codex/asset-lock-workbench`, continue asset workbench review/refinement/commit.
-- If current branch is `main`, confirm whether to switch back to `codex/asset-lock-workbench`.
-- Before committing any feature stage, run:
+- If current branch is `codex/asset-decision-timeline`, continue the timeline design/prototype stage.
+- If current branch is `main`, confirm whether to switch back to `codex/asset-decision-timeline`.
+- Before committing any implementation stage, run targeted tests.
+- Before merge decisions, run:
 
 ```powershell
 npm.cmd run verify
@@ -225,16 +210,11 @@ npm.cmd run verify
 
 ## Immediate Next Decision
 
-Start the next asset stage with parallel support:
+Start the asset decision timeline stage.
 
-- Main conversation: own branch rhythm, integration, verification, and commits.
-- One implementation sub-conversation can build the asset workflow/domain model.
-- One review sub-conversation can review product flow, edge cases, and tests.
-- Avoid concurrent edits to `m1-dashboard.tsx`.
+Recommended first actions:
 
-Recommended next stage:
-
-1. Verify and commit attachment frontend integration.
-2. Commit asset lock CSS micro-polish separately if accepted.
-3. Run browser acceptance for asset lock records plus attachment upload/list.
-4. Do not push or merge until the user asks.
+1. Commit the design baseline and ledger update on `codex/asset-decision-timeline`.
+2. Ask 并行B for first-version scope review and risk trimming.
+3. Ask 并行D for timeline UI/interaction critique.
+4. Start a local prototype plan for data shape and static UI, avoiding API/domain overcommit until the UI model is validated.
