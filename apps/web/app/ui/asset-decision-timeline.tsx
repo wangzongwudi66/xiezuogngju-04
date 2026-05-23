@@ -46,9 +46,10 @@ export function AssetDecisionTimelinePrototype({
       }),
     [actorRole, actorUserId, projectId]
   );
-  const [activeQueueTag, setActiveQueueTag] = useState<AssetTimelineQueueTag>("affects_my_episodes");
+  const defaultQueueTag: AssetTimelineQueueTag = viewModel.creatorAssignedWindow ? "affects_my_episodes" : "due_today";
+  const [activeQueueTag, setActiveQueueTag] = useState<AssetTimelineQueueTag>(defaultQueueTag);
   const [selectedClipId, setSelectedClipId] = useState(viewModel.selectedClipId ?? "");
-  const [selectedGroupKind, setSelectedGroupKind] = useState<AssetDecisionGroupSummary["kind"] | null>("needs_creator_confirm");
+  const [selectedGroupKind, setSelectedGroupKind] = useState<AssetDecisionGroupSummary["kind"] | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(true);
   const episodeNos = getEpisodeWindowNos(viewModel.episodeWindow);
   const filteredQueue = filterDecisionItemsByQueue(viewModel.decisionQueue, activeQueueTag);
@@ -95,6 +96,8 @@ export function AssetDecisionTimelinePrototype({
     if (nextQueue[0]?.clipId) {
       setSelectedClipId(nextQueue[0].clipId);
     }
+
+    setDrawerOpen(true);
   }
 
   return (

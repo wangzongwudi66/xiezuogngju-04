@@ -56,7 +56,6 @@ Passed after merging asset lock workbench:
 - Created from local `main` at `05d018b`.
 - Purpose: prototype the next core module, "资产决策剪辑轨道".
 - Current stage: static UI prototype committed and asset-lock mutation hardening cherry-picked onto the branch.
-- Current HEAD: `1daa727 Harden asset lock record mutations`.
 - Do not push or merge until reviewed.
 
 ## Asset Lock Workbench Completion
@@ -129,6 +128,7 @@ Committed prototype work:
 - `50a3f46 Update ledger for asset timeline prototype`
 - `24773e5 Refine asset decision timeline prototype`
 - `1daa727 Harden asset lock record mutations`
+- `a5c7d15 Update timeline handoff ledger`
 
 Prototype files:
 
@@ -154,6 +154,8 @@ Current committed timeline refinement after 并行D review:
 - Keeps creator view scoped but prevents episode-window collapse by using the `6-15` work window and highlighting assigned `7-13`.
 - Keeps creator-visible conflicts in the queue when they affect assigned episodes.
 - Makes the right detail drawer overlay at narrower desktop widths to avoid squeezing the central track.
+- Defaults creator view to "影响我的集" and coordinator/writer views to "今日必须确认".
+- Reopens the right detail drawer when the user selects a decision queue.
 - Targeted verification passed before full verify:
   - `npm.cmd run typecheck -w apps/web`
   - `npm.cmd run test -w apps/web -- asset-decision-timeline`
@@ -165,7 +167,8 @@ Current committed timeline refinement after 并行D review:
   - Next build passed without Turbopack/NFT warnings.
   - `http://localhost:3000` returned 200 locally.
 - Browser acceptance status:
-  - Dev server starts at `http://127.0.0.1:3000`.
+  - Dev server is reachable at `http://localhost:3000`.
+  - `http://127.0.0.1:3000` also returns 200, but Next dev warns about HMR cross-origin access unless `allowedDevOrigins` is configured.
   - Current thread could not access the in-app Browser node runtime, so only HTTP/static/source-level validation has been performed so far.
   - Visual click-through acceptance is still needed before merge.
 
