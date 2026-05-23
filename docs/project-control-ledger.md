@@ -55,7 +55,8 @@ Passed after merging asset lock workbench:
 - Branch: `codex/asset-decision-timeline`
 - Created from local `main` at `05d018b`.
 - Purpose: prototype the next core module, "资产决策剪辑轨道".
-- Current stage: static UI prototype committed.
+- Current stage: static UI prototype committed and asset-lock mutation hardening cherry-picked onto the branch.
+- Current HEAD: `1daa727 Harden asset lock record mutations`.
 - Do not push or merge until reviewed.
 
 ## Asset Lock Workbench Completion
@@ -126,6 +127,8 @@ Committed prototype work:
 - `c70d4c3 Refine asset timeline prototype scope`
 - `a2270c6 Add asset decision timeline prototype`
 - `50a3f46 Update ledger for asset timeline prototype`
+- `24773e5 Refine asset decision timeline prototype`
+- `1daa727 Harden asset lock record mutations`
 
 Prototype files:
 
@@ -143,7 +146,7 @@ Prototype behavior:
 - Shows layered asset tracks, clips, ghost comparison markers, decision aggregation, left decision queue, and right detail drawer.
 - Does not add API/domain persistence.
 
-Current uncommitted timeline refinement after 并行D review:
+Current committed timeline refinement after 并行D review:
 
 - Fixes ghost comparison rendering so previous-version ranges are lane-level grid items, not absolute children inside current clips.
 - Makes decision aggregation selectable and uses the right detail drawer to explain the selected group.
@@ -157,10 +160,21 @@ Current uncommitted timeline refinement after 并行D review:
   - `npm.cmd run test -w apps/web` passed with 13 test files / 101 tests.
 - Full verification passed:
   - `npm.cmd run verify`
-  - web tests: 13 test files / 101 tests passed.
-  - domain tests: 5 test files / 44 tests passed.
+  - web tests: 13 test files / 102 tests passed.
+  - domain tests: 5 test files / 47 tests passed.
   - Next build passed without Turbopack/NFT warnings.
   - `http://localhost:3000` returned 200 locally.
+- Browser acceptance status:
+  - Dev server starts at `http://127.0.0.1:3000`.
+  - Current thread could not access the in-app Browser node runtime, so only HTTP/static/source-level validation has been performed so far.
+  - Visual click-through acceptance is still needed before merge.
+
+Asset lock mutation hardening added on top of the timeline branch:
+
+- Reject duplicate asset lock names within the same delivery package after whitespace/case normalization.
+- Reject writer confirm, production confirm, needs-info, dispute, or repeat final-lock mutations after an asset record is locked.
+- Return both writer and production confirmations to `returned` when a confirmed record is marked needs-info or disputed again.
+- Disable locked records in the asset lock UI and map locked-record errors to user-facing copy.
 
 ## Sub-Conversation Status
 
@@ -243,6 +257,17 @@ Current uncommitted timeline refinement after 并行D review:
 - Do not let multiple sub-conversations edit the same high-conflict files at the same time.
 - Avoid broad rewrites of `m1-dashboard.tsx` until the timeline prototype surface is chosen.
 
+## Replacement Sub-Conversation Plan
+
+The previous sub-conversations are no longer available. If parallel review is needed, reopen only these four:
+
+- Branch A: product acceptance for the asset decision timeline, including creator/writer/coordinator flow and must-fix vs deferrable issues.
+- Branch B: UI and interaction acceptance, focused on horizontal timeline dominance, ghost clip readability, decision aggregation, drawer behavior, and narrow viewport risks.
+- Branch C: code and test review for `asset-decision-timeline-data.ts`, its tests, the timeline component, and the `m1-dashboard.tsx` entry point.
+- Branch D: architecture boundary review for whether/when timeline fields should move from UI mock data into domain/API.
+
+Sub-conversations should not commit or push. Main conversation owns branch rhythm, integration, verification, and merge decisions.
+
 ## Recovery Steps After Context Compression
 
 Run:
@@ -267,12 +292,12 @@ npm.cmd run verify
 
 ## Immediate Next Decision
 
-Start the asset decision timeline stage.
+Continue asset decision timeline acceptance.
 
 Recommended first actions:
 
-1. Commit the design baseline and ledger update on `codex/asset-decision-timeline`.
-2. Use 并行B guidance to keep first version as static UI prototype plus minimal view model.
-3. Use 并行D guidance to keep the horizontal track dominant and use right detail as overlay/drawer.
-4. Use 并行A guidance to keep timeline types in `apps/web/app/ui/asset-decision-timeline-data.ts` for the first prototype.
-5. Run review and browser acceptance on the committed static prototype before adding API/domain behavior.
+1. Run visual click-through acceptance for `资产轨道` as creator, coordinator, and writer when browser tooling is available.
+2. Apply only small UI/readability fixes needed for first-version acceptance.
+3. Keep timeline types in `apps/web/app/ui/asset-decision-timeline-data.ts` until product/UI validation is complete.
+4. Do not add database, real auth/session, AI parsing, or new timeline APIs yet.
+5. After A/B/C/D review feedback, decide whether to merge `codex/asset-decision-timeline` into `main`.
