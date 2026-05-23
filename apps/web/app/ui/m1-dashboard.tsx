@@ -26,6 +26,7 @@ import {
   LogOut,
   Package,
   Pencil,
+  PanelTop,
   Save,
   Search,
   Send,
@@ -98,6 +99,7 @@ import {
 import { clearM2WorkspacePersistence, readM2WorkspacePersistence, writeM2WorkspacePersistence } from "./workspace-persistence";
 import type { DeliveryImportJob } from "./workspace-persistence";
 import { AssetLockWorkbench } from "./asset-lock-workbench";
+import { AssetDecisionTimelinePrototype } from "./asset-decision-timeline";
 
 const roleLabels: Record<ProjectRole, string> = {
   owner: "项目所有者",
@@ -157,6 +159,7 @@ type NavigationItem = {
 const baseShortcutItems: NavigationItem[] = [
   { label: "集数分配", icon: ClipboardList },
   { label: "素材库", icon: Image },
+  { label: "资产轨道", icon: PanelTop },
   { label: "资产定版", icon: ShieldCheck },
   { label: "模型与模板", icon: BookOpen },
   { label: "交稿中心", icon: FileText },
@@ -531,7 +534,7 @@ export function M1Dashboard() {
   const assignmentSummary = buildAssignmentSummary(visibleEpisodes);
   const shortcutItems = isSelectedProjectMember ? buildShortcutItems(permissions, primaryRole) : [];
   const navigationItems = buildNavigationItems(isSelectedProjectMember ? permissions : null, primaryRole, isSelectedProjectMember);
-  const allowedModules = new Set([...shortcutItems.map((item) => item.label), ...navigationItems.map((item) => item.label), "集工作台", "资产定版"]);
+  const allowedModules = new Set([...shortcutItems.map((item) => item.label), ...navigationItems.map((item) => item.label), "集工作台", "资产定版", "资产轨道"]);
   const effectiveActiveModule = allowedModules.has(activeModule) ? activeModule : "项目总览";
   const isProjectHome = effectiveActiveModule === "项目总览";
 
@@ -1345,6 +1348,7 @@ export function M1Dashboard() {
               handleWriterConfirmAssetLock={handleWriterConfirmAssetLock}
               handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
               handleUpdateConfirmedEpisode={handleUpdateConfirmedEpisode}
+              projectId={selectedProject.id}
               projectName={selectedProject.name}
               recentUpdates={recentUpdates}
               rejectionReason={rejectionReason}
@@ -1965,6 +1969,7 @@ function ModuleWorkbench({
   handleWriterConfirmAssetLock,
   handleSubmitDeliveryForReview,
   handleUpdateConfirmedEpisode,
+  projectId,
   projectName,
   recentUpdates,
   refreshAssetLockRecordsFromServer,
@@ -2016,6 +2021,7 @@ function ModuleWorkbench({
   handleWriterConfirmAssetLock: (assetLockRecordId: string) => Promise<void>;
   handleSubmitDeliveryForReview: (deliveryPackageId: string) => void;
   handleUpdateConfirmedEpisode: (deliveryPackageId: string, episodeNo: number, checked: boolean) => void;
+  projectId: string;
   projectName: string;
   recentUpdates: ReturnType<typeof buildRecentUpdates>;
   refreshAssetLockRecordsFromServer: () => Promise<void>;
@@ -2203,6 +2209,26 @@ function ModuleWorkbench({
         projectName={projectName}
         records={assetLockRecords}
         serverSummary={assetLockSummary}
+      />
+    );
+  }
+
+  if (activeModule === "资产轨道") {
+    if (!canAccessDelivery) {
+      return (
+        <section className="panel module-panel">
+          <PanelTitle title="资产决策剪辑轨道" eyebrow={projectName} />
+          <p className="empty-state">你还不是“{projectName}”的项目成员，不能查看本项目资产轨道。</p>
+        </section>
+      );
+    }
+
+    return (
+      <AssetDecisionTimelinePrototype
+        actorRole={actorRole}
+        actorUserId={actorUserId}
+        projectId={projectId}
+        projectName={projectName}
       />
     );
   }
@@ -3247,6 +3273,7 @@ function buildNavigationItems(
   }
 
   if (permissions.canReviewAssets || canUseDeliveryCenter) {
+    items.push({ icon: PanelTop, label: "资产轨道" });
     items.push({ icon: ShieldCheck, label: "资产定版" });
   }
 
@@ -3281,7 +3308,7 @@ function buildShortcutItems(permissions: ReturnType<typeof selectPermissions>, p
       return canUseDeliveryCenter;
     }
 
-    if (item.label === "资产定版") {
+    if (item.label === "资产定版" || item.label === "资产轨道") {
       return permissions.canReviewAssets || canUseDeliveryCenter;
     }
 
