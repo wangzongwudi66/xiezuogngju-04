@@ -1796,8 +1796,13 @@ select:focus-visible {
 
 .asset-lock-workbench {
   display: grid;
-  gap: 14px;
+  gap: 16px;
   background: #fbfcfe;
+}
+
+.asset-lock-workbench .primary-button,
+.asset-lock-workbench .secondary-button {
+  font-weight: 800;
 }
 
 .asset-lock-top,
@@ -1939,10 +1944,18 @@ select:focus-visible {
 }
 
 .asset-lock-actions {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  row-gap: 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: #fff;
   padding: 10px;
+}
+
+.asset-lock-actions > span {
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
 .asset-lock-gate-note {
@@ -1968,8 +1981,8 @@ select:focus-visible {
 
 .asset-lock-layout {
   display: grid;
-  grid-template-columns: 220px minmax(420px, 1fr) minmax(320px, 0.86fr);
-  gap: 12px;
+  grid-template-columns: 216px minmax(430px, 1fr) minmax(332px, 0.9fr);
+  gap: 14px;
   align-items: start;
 }
 
@@ -1978,7 +1991,17 @@ select:focus-visible {
 .asset-detail-panel {
   display: grid;
   gap: 10px;
+  min-width: 0;
   padding: 12px;
+}
+
+.asset-detail-panel {
+  position: sticky;
+  top: 74px;
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .asset-filter-head strong {
@@ -2002,10 +2025,10 @@ select:focus-visible {
 
 .asset-row {
   display: grid;
-  grid-template-columns: 18px minmax(180px, 1fr) 58px 98px minmax(92px, 0.35fr);
+  grid-template-columns: 18px minmax(0, 1fr) minmax(52px, max-content) minmax(86px, max-content) minmax(74px, 0.26fr);
   gap: 10px;
   align-items: center;
-  min-height: 62px;
+  min-height: 66px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-soft);
@@ -2038,9 +2061,21 @@ select:focus-visible {
   height: 16px;
 }
 
+.asset-row > div {
+  min-width: 0;
+}
+
 .asset-row strong {
   overflow: hidden;
   font-size: 13px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-row span,
+.asset-owner strong {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2049,13 +2084,17 @@ select:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  max-width: 100%;
+  min-width: 0;
   min-height: 26px;
   border-radius: 999px;
   background: #eef4ff;
   color: var(--blue);
-  padding: 0 9px;
+  padding: 0 8px;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -2086,15 +2125,19 @@ select:focus-visible {
 }
 
 .asset-owner {
+  min-width: 0;
   text-align: right;
 }
 
 .risk-dot {
   display: inline-flex;
+  max-width: 100%;
   width: max-content;
   margin-left: auto;
   border-radius: 999px;
   padding: 2px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .risk-dot.normal {
@@ -2120,11 +2163,12 @@ select:focus-visible {
 .confirmation-box,
 .asset-before-after div,
 .asset-detail-block,
-.discussion-box {
+.discussion-box,
+.asset-attachment-panel {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-soft);
-  padding: 10px;
+  padding: 11px;
 }
 
 .confirmation-box.confirmed {
@@ -2153,6 +2197,73 @@ select:focus-visible {
   gap: 8px;
 }
 
+.asset-attachment-panel,
+.asset-attachment-list,
+.asset-attachment-form {
+  display: grid;
+  gap: 8px;
+}
+
+.asset-attachment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.asset-attachment-head div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.asset-attachment-head span,
+.asset-attachment-empty,
+.asset-attachment-selected,
+.asset-attachment-list span,
+.asset-attachment-list p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.asset-attachment-list article {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 9px;
+}
+
+.asset-attachment-list strong {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-attachment-form {
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  padding-top: 8px;
+}
+
+.asset-detail-block,
+.discussion-box,
+.asset-before-after div,
+.asset-attachment-panel {
+  min-width: 0;
+}
+
+.asset-detail-block p,
+.discussion-box p,
+.asset-before-after p,
+.asset-attachment-list p {
+  overflow-wrap: anywhere;
+}
+
 .discussion-box p {
   border-top: 1px solid rgba(15, 23, 42, 0.08);
   padding-top: 8px;
@@ -2162,6 +2273,11 @@ select:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.asset-detail-actions .primary-button,
+.asset-detail-actions .secondary-button {
+  flex: 1 1 132px;
 }
 
 .inline-warning,
@@ -2185,6 +2301,17 @@ select:focus-visible {
   border: 1px solid var(--border);
   background: #fff;
   color: var(--muted);
+}
+
+.asset-lock-workbench .inline-warning,
+.asset-lock-workbench .inline-help {
+  border-left-width: 4px;
+  font-weight: 700;
+}
+
+.asset-lock-workbench .inline-help {
+  background: #f8fbff;
+  color: #4f6175;
 }
 
 .assignment-summary-list,
@@ -2523,6 +2650,25 @@ input[type="checkbox"] {
   .ops-drawer {
     grid-column: auto;
   }
+
+  .asset-lock-overview {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+
+  .asset-lock-status {
+    grid-column: 1 / -1;
+  }
+
+  .asset-lock-layout {
+    grid-template-columns: minmax(190px, 0.42fr) minmax(360px, 1fr);
+    gap: 12px;
+  }
+
+  .asset-detail-panel {
+    grid-column: 1 / -1;
+    position: static;
+    max-height: none;
+  }
 }
 
 @media (max-width: 760px) {
@@ -2548,6 +2694,21 @@ input[type="checkbox"] {
 
   .asset-row {
     grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .asset-lock-actions {
+    align-items: stretch;
+  }
+
+  .asset-lock-actions > span,
+  .asset-lock-actions .primary-button,
+  .asset-lock-actions .secondary-button {
+    width: 100%;
+  }
+
+  .asset-detail-actions .primary-button,
+  .asset-detail-actions .secondary-button {
+    flex-basis: 100%;
   }
 
   .asset-row .asset-tag,
