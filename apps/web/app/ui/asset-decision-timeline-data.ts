@@ -538,12 +538,14 @@ export function buildMockAssetDecisionTimelineViewModel(input: {
     ...decision,
     projectId: input.projectId
   }));
+  const hasExplicitCreatorScope = input.assignedEpisodeNos !== undefined;
   const assignedEpisodeNos = normalizeEpisodeNos(input.assignedEpisodeNos);
-  const creatorEpisodeNos = assignedEpisodeNos.length > 0 ? assignedEpisodeNos : [7, 8, 9, 10, 11, 12, 13];
+  const creatorEpisodeNos = hasExplicitCreatorScope ? assignedEpisodeNos : [7, 8, 9, 10, 11, 12, 13];
   const creatorEpisodeFrom = creatorEpisodeNos[0] ?? 7;
   const creatorEpisodeTo = creatorEpisodeNos[creatorEpisodeNos.length - 1] ?? 13;
   const episodeWindow = isCreator ? buildCreatorEpisodeWindow(creatorEpisodeNos) : { from: 6, to: 15 };
   const creatorAssignedWindow: CreatorAssignedEpisodeWindow | undefined = isCreator
+    && creatorEpisodeNos.length > 0
     ? {
         projectId: input.projectId,
         userId: input.viewerUserId,
@@ -558,6 +560,15 @@ export function buildMockAssetDecisionTimelineViewModel(input: {
     ...clip,
     isDimmedByRoleScope: isCreator && !clip.currentSegment.episodeNos.some((episodeNo) => creatorEpisodeSet.has(episodeNo))
   }));
+  const decisionQueue = isCreator
+    ? scopedDecisions.filter((item) => {
+        const isAssignedToViewer = !item.assignedToUserId || item.assignedToUserId === input.viewerUserId;
+        const affectsCreatorEpisodes = item.episodeNos.some((episodeNo) => creatorEpisodeSet.has(episodeNo));
+
+        return item.queueTags.includes("affects_my_episodes") && isAssignedToViewer && affectsCreatorEpisodes;
+      })
+    : scopedDecisions;
+  const selectedClipId = decisionQueue.find((item) => item.clipId)?.clipId ?? (isCreator && creatorEpisodeNos.length === 0 ? undefined : "clip-scar");
 
   return {
     projectId: input.projectId,
@@ -567,13 +578,9 @@ export function buildMockAssetDecisionTimelineViewModel(input: {
     episodeWindow,
     creatorAssignedWindow,
     tracks: buildTracks(input.projectId, scopedClips),
-    decisionQueue: isCreator
-      ? scopedDecisions.filter(
-          (item) => item.queueTags.includes("affects_my_episodes") && item.episodeNos.some((episodeNo) => creatorEpisodeSet.has(episodeNo))
-        )
-      : scopedDecisions,
+    decisionQueue,
     sourceExcerpts: scopedSourceExcerpts,
-    selectedClipId: "clip-scar",
+    selectedClipId,
     permissions: {
       canViewFullSeries: input.viewerRole === "owner" || input.viewerRole === "coordinator" || input.viewerRole === "head_writer",
       canEditSegments: input.viewerRole === "head_writer" || input.viewerRole === "writer",
@@ -619,10 +626,18 @@ export function buildTracks(projectId: string, timelineClips: AssetTimelineClip[
 }
 
 export function getEpisodeWindowNos(window: { from: number; to: number }) {
+  if (window.to < window.from) {
+    return [];
+  }
+
   return Array.from({ length: window.to - window.from + 1 }, (_, index) => window.from + index);
 }
 
 export function mapClipToEpisodeGrid(clip: Pick<AssetTimelineClip, "episodeFrom" | "episodeTo">, window: { from: number; to: number }) {
+  if (clip.episodeTo < clip.episodeFrom || window.to < window.from) {
+    return null;
+  }
+
   const start = Math.max(clip.episodeFrom, window.from);
   const end = Math.min(clip.episodeTo, window.to);
 

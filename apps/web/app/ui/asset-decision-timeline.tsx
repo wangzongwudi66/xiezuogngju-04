@@ -137,6 +137,12 @@ export function AssetDecisionTimelinePrototype({
     setDrawerOpen(true);
   }
 
+  const queueScopeDescription = viewModel.creatorAssignedWindow
+    ? `当前默认聚焦第 ${viewModel.creatorAssignedWindow.episodeFrom}-${viewModel.creatorAssignedWindow.episodeTo} 集。`
+    : actorRole === "creator"
+      ? "当前账号暂无分配集数，暂不显示创作者待处理决策。"
+      : "统筹/编剧可查看当前工作窗口内的全部决策压力。";
+
   return (
     <section className="decision-timeline-shell">
       <div className="decision-timeline-topbar">
@@ -181,7 +187,7 @@ export function AssetDecisionTimelinePrototype({
               </button>
             ))}
           </div>
-          <p>{viewModel.creatorAssignedWindow ? `当前默认聚焦第 ${viewModel.creatorAssignedWindow.episodeFrom}-${viewModel.creatorAssignedWindow.episodeTo} 集。` : "统筹/编剧可查看当前工作窗口内的全部决策压力。"}</p>
+          <p>{queueScopeDescription}</p>
         </aside>
 
         <main className="decision-track-stage">
@@ -207,66 +213,71 @@ export function AssetDecisionTimelinePrototype({
             ))}
           </div>
 
-          <div className="decision-episode-ruler" style={{ "--episode-count": episodeNos.length } as CSSProperties}>
-            {episodeNos.map((episodeNo) => (
-              <span className={viewModel.creatorAssignedWindow?.episodeNos.includes(episodeNo) ? "assigned" : ""} key={episodeNo}>
-                第 {episodeNo} 集
-              </span>
-            ))}
-          </div>
+          <div className="decision-track-scroll">
+            <div className="decision-ruler-row">
+              <div className="decision-ruler-spacer" aria-hidden="true" />
+              <div className="decision-episode-ruler" style={{ "--episode-count": episodeNos.length } as CSSProperties}>
+                {episodeNos.map((episodeNo) => (
+                  <span className={viewModel.creatorAssignedWindow?.episodeNos.includes(episodeNo) ? "assigned" : ""} key={episodeNo}>
+                    第 {episodeNo} 集
+                  </span>
+                ))}
+              </div>
+            </div>
 
-          <div className="decision-track-board">
-            {visibleTracks.map((track) => (
-              <section className="decision-track-row" key={track.id}>
-                <div className="decision-track-label">
-                  <Layers3 size={15} />
-                  <strong>{track.label}</strong>
-                </div>
-                <div className="decision-track-lane" style={{ "--episode-count": episodeNos.length } as CSSProperties}>
-                  <div className="decision-ghost-layer" aria-hidden="true">
+            <div className="decision-track-board">
+              {visibleTracks.map((track) => (
+                <section className="decision-track-row" key={track.id}>
+                  <div className="decision-track-label">
+                    <Layers3 size={15} />
+                    <strong>{track.label}</strong>
+                  </div>
+                  <div className="decision-track-lane" style={{ "--episode-count": episodeNos.length } as CSSProperties}>
+                    <div className="decision-ghost-layer" aria-hidden="true">
+                      {track.clips.map((clip) => {
+                        const currentPosition = mapClipToEpisodeGrid(clip, viewModel.episodeWindow);
+                        return currentPosition && clip.ghost ? (
+                          <GhostClip
+                            clip={clip}
+                            fallbackGridColumn={currentPosition.gridColumn}
+                            key={`${clip.id}-ghost`}
+                            window={viewModel.episodeWindow}
+                          />
+                        ) : null;
+                      })}
+                    </div>
                     {track.clips.map((clip) => {
-                      const currentPosition = mapClipToEpisodeGrid(clip, viewModel.episodeWindow);
-                      return currentPosition && clip.ghost ? (
-                        <GhostClip
-                          clip={clip}
-                          fallbackGridColumn={currentPosition.gridColumn}
-                          key={`${clip.id}-ghost`}
-                          window={viewModel.episodeWindow}
-                        />
-                      ) : null;
+                      const position = mapClipToEpisodeGrid(clip, viewModel.episodeWindow);
+
+                      if (!position) {
+                        return null;
+                      }
+
+                      return (
+                        <button
+                          className={`decision-clip ${clip.assetType} ${clip.currentSegment.risk} ${getClipChangeMarkers(clip)} ${clip.id === selectedClipId ? "selected" : ""} ${
+                            focusedClipIds.size > 0 && !focusedClipIds.has(clip.id) ? "muted" : ""
+                          }`}
+                          key={clip.id}
+                          onClick={() => selectClip(clip)}
+                          style={{ gridColumn: position.gridColumn }}
+                          type="button"
+                        >
+                          {clip.ghost?.changeMarkers.slice(0, 2).map((marker) => (
+                            <em className={`decision-change-chip ${marker}`} key={marker}>{changeMarkerLabels[marker]}</em>
+                          ))}
+                          <span>{clip.assetName}</span>
+                          <strong>{clip.currentSegment.stateLabel}</strong>
+                          <small>
+                            第 {clip.episodeFrom}-{clip.episodeTo} 集 · {timelineRiskLabels[clip.currentSegment.risk]}
+                          </small>
+                        </button>
+                      );
                     })}
                   </div>
-                  {track.clips.map((clip) => {
-                    const position = mapClipToEpisodeGrid(clip, viewModel.episodeWindow);
-
-                    if (!position) {
-                      return null;
-                    }
-
-                    return (
-                      <button
-                        className={`decision-clip ${clip.assetType} ${clip.currentSegment.risk} ${getClipChangeMarkers(clip)} ${clip.id === selectedClipId ? "selected" : ""} ${
-                          focusedClipIds.size > 0 && !focusedClipIds.has(clip.id) ? "muted" : ""
-                        }`}
-                        key={clip.id}
-                        onClick={() => selectClip(clip)}
-                        style={{ gridColumn: position.gridColumn }}
-                        type="button"
-                      >
-                        {clip.ghost?.changeMarkers.slice(0, 2).map((marker) => (
-                          <em className={`decision-change-chip ${marker}`} key={marker}>{changeMarkerLabels[marker]}</em>
-                        ))}
-                        <span>{clip.assetName}</span>
-                        <strong>{clip.currentSegment.stateLabel}</strong>
-                        <small>
-                          第 {clip.episodeFrom}-{clip.episodeTo} 集 · {timelineRiskLabels[clip.currentSegment.risk]}
-                        </small>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
+                </section>
+              ))}
+            </div>
           </div>
         </main>
 

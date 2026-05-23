@@ -38,6 +38,33 @@ describe("asset decision timeline data helpers", () => {
     expect(viewModel.sourceExcerpts.every((excerpt) => excerpt.projectId === "project-tide")).toBe(true);
   });
 
+  it("does not create fake creator work when the dashboard sends an empty assignment", () => {
+    const viewModel = buildMockAssetDecisionTimelineViewModel({
+      assignedEpisodeNos: [],
+      projectId: "project-jincheng",
+      viewerRole: "creator",
+      viewerUserId: "user-creator-a"
+    });
+
+    expect(viewModel.creatorAssignedWindow).toBeUndefined();
+    expect(viewModel.decisionQueue).toEqual([]);
+    expect(viewModel.selectedClipId).toBeUndefined();
+    expect(viewModel.tracks.flatMap((track) => track.clips).every((clip) => clip.isDimmedByRoleScope)).toBe(true);
+  });
+
+  it("does not show one creator another creator's assigned decisions", () => {
+    const viewModel = buildMockAssetDecisionTimelineViewModel({
+      assignedEpisodeNos: [7, 8, 9, 10, 11, 12, 13],
+      projectId: "project-jincheng",
+      viewerRole: "creator",
+      viewerUserId: "user-creator-b"
+    });
+    const decisionIds = viewModel.decisionQueue.map((item) => item.id);
+
+    expect(decisionIds).toEqual(["decision-scar-writer", "decision-dust-conflict"]);
+    expect(viewModel.decisionQueue.every((item) => item.assignedToUserId !== "user-creator-a")).toBe(true);
+  });
+
   it("maps timeline clips to the visible episode grid", () => {
     expect(mapClipToEpisodeGrid({ episodeFrom: 8, episodeTo: 13 }, { from: 7, to: 13 })).toEqual({
       gridColumn: "2 / 8",
@@ -61,6 +88,8 @@ describe("asset decision timeline data helpers", () => {
     });
     expect(mapClipToEpisodeGrid({ episodeFrom: 1, episodeTo: 3 }, { from: 7, to: 13 })).toBeNull();
     expect(mapClipToEpisodeGrid({ episodeFrom: 14, episodeTo: 16 }, { from: 7, to: 13 })).toBeNull();
+    expect(mapClipToEpisodeGrid({ episodeFrom: 9, episodeTo: 8 }, { from: 7, to: 13 })).toBeNull();
+    expect(mapClipToEpisodeGrid({ episodeFrom: 8, episodeTo: 9 }, { from: 13, to: 7 })).toBeNull();
   });
 
   it("filters queue decisions and summarizes by decision meaning", () => {
@@ -71,6 +100,7 @@ describe("asset decision timeline data helpers", () => {
     });
 
     expect(getEpisodeWindowNos(viewModel.episodeWindow)).toEqual([6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    expect(getEpisodeWindowNos({ from: 12, to: 10 })).toEqual([]);
     expect(filterDecisionItemsByQueue(viewModel.decisionQueue, "conflicts")).toHaveLength(1);
     expect(summarizeDecisionGroups(viewModel.decisionQueue)).toEqual(
       expect.arrayContaining([

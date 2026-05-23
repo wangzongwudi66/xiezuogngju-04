@@ -166,6 +166,21 @@ Current committed timeline refinement after 并行D review:
   - Detail drawer now includes asset facts, decision status/owner metadata, and lightweight communication records.
   - Layout CSS gives the center track priority, uses overlay detail at narrower desktop widths, and keeps mobile horizontal scroll inside the track board.
   - Added helper tests for assigned creator scope, project id projection, grid clipping, and removed-asset marker coverage.
+- Second-round Branch A/B/C review on 2026-05-24:
+  - Branch A: product flow is acceptable for a static readable prototype; no new product P1 code items, but browser role click-through is still needed before merge.
+  - Branch B: remaining P1 is narrow/mobile horizontal scroll sync between the episode ruler and track board; overlay drawer obstruction at 1366px and ghost aria text can be improved later.
+  - Branch C: remaining blocker-level risk is creator scope reliability: empty dashboard assignment must not create fake creator work, and creator-specific decisions must be filtered by `viewerUserId`.
+  - Branch D architecture guidance still stands: keep the timeline view model in the UI mock layer; do not expand into domain/API yet.
+- Follow-up fixes after second-round review:
+  - Episode ruler and track rows now share one horizontal scroll container so narrow/mobile scrolling keeps episode numbers aligned with clips.
+  - Creator scope keeps demo fallback only when `assignedEpisodeNos` is omitted by the standalone prototype; an explicit empty assignment from M1 creates no assigned window and no fake creator queue.
+  - Creator queue now filters user-assigned items by `assignedToUserId`, while still allowing unassigned/writer/coordinator items that affect the creator's episodes.
+  - Added tests for empty creator assignments, cross-creator decision leakage, invalid clip/window grid bounds, and empty episode windows.
+- Verification after second-round follow-up:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline m1-dashboard` passed: 2 files / 20 tests.
+  - `npm.cmd run typecheck -w apps/web` passed.
+  - `npm.cmd run verify` passed: web 13 files / 106 tests, domain 5 files / 47 tests, Next build passed.
+  - Browser plugin control was not available in this thread; visual click-through is still required before merge.
 - Targeted verification passed before full verify:
   - `npm.cmd run typecheck -w apps/web`
   - `npm.cmd run test -w apps/web -- asset-decision-timeline`
@@ -274,9 +289,9 @@ Asset lock mutation hardening added on top of the timeline branch:
 
 The previous sub-conversations are no longer available. If parallel review is needed, reopen only these four:
 
-- Branch A: product acceptance for the asset decision timeline, including creator/writer/coordinator flow and must-fix vs deferrable issues. Returned: static prototype meets lower bound but needed product-flow fixes; first-pass issues above are addressed.
-- Branch B: UI and interaction acceptance, focused on horizontal timeline dominance, ghost clip readability, decision aggregation, drawer behavior, and narrow viewport risks. Returned: P1 layout/drawer/mobile concerns; first-pass CSS and drawer behavior fixes are applied.
-- Branch C: code and test review for `asset-decision-timeline-data.ts`, its tests, the timeline component, and the `m1-dashboard.tsx` entry point. Returned: creator access/scope and helper test gaps; first-pass access and tests are applied.
+- Branch A: product acceptance for the asset decision timeline, including creator/writer/coordinator flow and must-fix vs deferrable issues. Returned twice: static prototype now meets the lower bound; no new product P1 after first-pass fixes. Still requires browser role click-through before merge.
+- Branch B: UI and interaction acceptance, focused on horizontal timeline dominance, ghost clip readability, decision aggregation, drawer behavior, and narrow viewport risks. Returned twice: first-pass layout/drawer issues were improved; second-round P1 ruler/board scroll sync is now fixed in main. Drawer overlay at 1366px and ghost aria text remain deferrable.
+- Branch C: code and test review for `asset-decision-timeline-data.ts`, its tests, the timeline component, and the `m1-dashboard.tsx` entry point. Returned twice: creator entry is fixed; second-round creator empty-assignment fallback and cross-creator assigned-decision leakage are now fixed with tests.
 - Branch D: architecture boundary review for whether/when timeline fields should move from UI mock data into domain/API. Returned: do not move the whole timeline into domain/API yet; keep view model in UI mock until UI/product validation passes.
 
 Sub-conversations should not commit or push. Main conversation owns branch rhythm, integration, verification, and merge decisions.
