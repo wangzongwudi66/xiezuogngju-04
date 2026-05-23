@@ -96,8 +96,8 @@ describe("delivery import job service", () => {
       "word/document.xml",
       [
         '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>',
-        paragraph("绗?1 闆?寮€鍦?"),
-        paragraph("姝ｆ枃"),
+        paragraph("第 1 集 开场"),
+        paragraph("正文"),
         "</w:body></w:document>"
       ].join("")
     );
