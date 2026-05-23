@@ -161,6 +161,22 @@ function parseMutationRequest(body: unknown): AssetLockRecordMutationRequest | n
         actorUserId
       };
     }
+    case "generate_from_package": {
+      const projectId = readString(body.projectId);
+      const deliveryPackageId = readString(body.deliveryPackageId);
+      const actorUserId = readString(body.actorUserId);
+
+      if (!projectId || !deliveryPackageId || !actorUserId) {
+        return null;
+      }
+
+      return {
+        action: body.action,
+        projectId,
+        deliveryPackageId,
+        actorUserId
+      };
+    }
     default:
       return null;
   }

@@ -111,6 +111,9 @@ Next step for asset branch:
 - Completed member role vs episode assignment model rework.
 - Completed asset lock domain model implementation.
 - Added `AssetLockRecord`, asset lock enum types, and domain actions for create, writer confirm, production confirm, needs info, dispute, and final lock.
+- Completed conservative asset candidate extraction domain helper.
+- Added `AssetLockRecordCandidate` and `extractAssetLockCandidatesFromDeliveryEpisodes`.
+- Candidate extraction uses keyword rules for character, scene, prop, vehicle, and effect candidates.
 - Verified with `npm.cmd run test -w packages/domain`, `npm.cmd run typecheck -w apps/web`, and `npm.cmd run test -w apps/web`.
 - Status: paused.
 
@@ -140,6 +143,8 @@ Next step for asset branch:
 - Added service/route tests for list, create, writer confirm, production confirm, needs info, dispute, and final lock.
 - Completed backend hardening after 并行D review.
 - Added tests for ignored client status fields, cross-project rejection, invalid episodeNos, unauthorized actors, draft-package rejection, legacy snapshots without `assetLockRecords`, and GET-all behavior.
+- Completed candidate-generation API integration.
+- Added `generate_from_package` action and changed `prepare_demo` to generate from actual published package episodes before falling back to demo records.
 - Status: paused.
 
 ### 并行B
@@ -149,6 +154,10 @@ Next step for asset branch:
 - Completed read-only review for asset lock API and workflow boundaries.
 - Recommended `/api/asset-lock-records` as a separate API.
 - Recommended storing asset lock records in `WorkspaceState.assetLockRecords`, reusing the current workspace persistence file.
+- Completed read-only design for asset lock attachments.
+- Recommended separate `AssetAttachment` metadata in `WorkspaceState.assetAttachments?`.
+- Recommended independent `/api/asset-lock-attachments` for multipart uploads, with files saved under `AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR` / `.local-data/asset-lock-attachments`.
+- Attachment work is queued after candidate-generation API stabilization.
 - Status: paused.
 
 ### 并行D
@@ -209,6 +218,6 @@ Start the next asset stage with parallel support:
 
 Recommended next stage:
 
-1. Commit the asset lock acceptance demo fix after full verification.
-2. Do not push or merge until the user asks.
-3. Start parallel planning for the next stage after the fix is committed.
+1. Run full verify and commit candidate-generation integration.
+2. Then start asset attachment implementation as the next backend/frontend stage.
+3. Do not push or merge until the user asks.

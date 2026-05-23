@@ -245,6 +245,10 @@ export interface AssetLockRecordInput {
   productionNote?: string;
 }
 
+export interface AssetLockRecordCandidate extends AssetLockRecordInput {
+  matchedKeywords: string[];
+}
+
 export interface AssetLockRecordWriterConfirmationInput {
   assetLockRecordId: string;
   confirmedByUserId: string;

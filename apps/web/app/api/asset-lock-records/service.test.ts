@@ -81,10 +81,91 @@ describe("asset lock record service", () => {
       expect.objectContaining({
         projectId: "project-jincheng",
         status: "published",
-        title: "资产定版验收：已发布演示交稿包"
+        sourceFileName: "asset-lock-demo.docx"
       })
     );
     expect(workspace.state.assetLockRecords?.length).toBeGreaterThan(0);
+  });
+
+  it("generates asset records from a published delivery package", async () => {
+    const deliveryPackageId = await createCandidateDraft();
+    const result = await mutateAssetLockRecord({
+      action: "generate_from_package",
+      projectId: "project-jincheng",
+      deliveryPackageId,
+      actorUserId: "user-head-writer"
+    });
+
+    expect(result.records.length).toBeGreaterThan(1);
+    expect(result.records.every((record) => record.deliveryPackageId === deliveryPackageId)).toBe(true);
+    expect(result.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          assetType: "scene",
+          episodeNos: [1]
+        }),
+        expect.objectContaining({
+          assetType: "prop"
+        })
+      ])
+    );
+  });
+
+  it("does not duplicate records when generating from the same package repeatedly", async () => {
+    const deliveryPackageId = await createCandidateDraft();
+    const first = await mutateAssetLockRecord({
+      action: "generate_from_package",
+      projectId: "project-jincheng",
+      deliveryPackageId,
+      actorUserId: "user-head-writer"
+    });
+    const second = await mutateAssetLockRecord({
+      action: "generate_from_package",
+      projectId: "project-jincheng",
+      deliveryPackageId,
+      actorUserId: "user-head-writer"
+    });
+
+    expect(second.records).toHaveLength(first.records.length);
+    expect(new Set(second.records.map((record) => record.assetName)).size).toBe(second.records.length);
+  });
+
+  it("rejects generate_from_package for draft packages", async () => {
+    const deliveryPackageId = await createCandidateDraft({ publish: false });
+
+    await expect(
+      mutateAssetLockRecord({
+        action: "generate_from_package",
+        projectId: "project-jincheng",
+        deliveryPackageId,
+        actorUserId: "user-head-writer"
+      })
+    ).rejects.toThrow("published");
+  });
+
+  it("rejects generate_from_package when no candidates are found", async () => {
+    const deliveryPackageId = await createDraft();
+
+    await expect(
+      mutateAssetLockRecord({
+        action: "generate_from_package",
+        projectId: "project-jincheng",
+        deliveryPackageId,
+        actorUserId: "user-head-writer"
+      })
+    ).rejects.toThrow("asset_lock_candidates_empty");
+  });
+
+  it("prepares demo records from an existing published package using its real episodes", async () => {
+    const deliveryPackageId = await createCandidateDraft();
+    const result = await mutateAssetLockRecord({
+      action: "prepare_demo",
+      projectId: "project-jincheng",
+      actorUserId: "user-head-writer"
+    });
+
+    expect(result.records.every((record) => record.deliveryPackageId === deliveryPackageId)).toBe(true);
+    expect(result.records.flatMap((record) => record.episodeNos).every((episodeNo) => episodeNo === 1 || episodeNo === 2)).toBe(true);
   });
 
   it("ignores client-controlled state fields on create", async () => {
@@ -381,6 +462,41 @@ async function createDraft(input: { publish?: boolean } = {}) {
     uploadedByUserId: "user-head-writer",
     declaredRangeText: "1-2",
     rawText: "\u7b2c 1 \u96c6 \u5f00\u573a\n\u6b63\u6587\u4e00\n\u7b2c 2 \u96c6 \u8ffd\u8e2a\n\u6b63\u6587\u4e8c"
+  });
+
+  expect(result.ok).toBe(true);
+  if (!result.ok || !result.job.deliveryPackageId) {
+    throw new Error("delivery package draft was not created");
+  }
+
+  const deliveryPackageId = result.job.deliveryPackageId;
+
+  if (input.publish === false) {
+    return deliveryPackageId;
+  }
+
+  await mutateDeliveryPackage({
+    action: "submit",
+    deliveryPackageId,
+    actorUserId: "user-head-writer"
+  });
+  await mutateDeliveryPackage({
+    action: "publish",
+    deliveryPackageId,
+    actorUserId: "user-owner"
+  });
+
+  return deliveryPackageId;
+}
+
+async function createCandidateDraft(input: { publish?: boolean } = {}) {
+  const result = await createDeliveryImportJob({
+    source: "text",
+    projectId: "project-jincheng",
+    uploadedByUserId: "user-head-writer",
+    declaredRangeText: "1-2",
+    rawText:
+      "\u7b2c 1 \u96c6\n\u9435\u7926\u4e95\u5165\u53e3\u65b0\u589e\u5347\u964d\u7b3c\uff0c\u4f17\u4eba\u7b2c\u4e00\u6b21\u8fdb\u5165\u5317\u4e95\u3002\n\u7b2c 2 \u96c6\n\u7ea2\u8272\u5b89\u5168\u706f\u6cbf\u7528\uff0c\u5730\u56fe\u5c55\u5f00\uff0c\u7c89\u5c18\u7206\u95ea\u4f5c\u4e3a\u584c\u65b9\u524d\u5146\u3002"
   });
 
   expect(result.ok).toBe(true);

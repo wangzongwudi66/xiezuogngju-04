@@ -171,6 +171,23 @@ describe("asset lock record route", () => {
     expect(payload.summary.total).toBeGreaterThan(0);
   });
 
+  it("generates asset lock records from a published package", async () => {
+    const deliveryPackageId = await createCandidateDraft();
+    const response = await POST(
+      jsonRequest({
+        action: "generate_from_package",
+        projectId: "project-jincheng",
+        deliveryPackageId,
+        actorUserId: "user-head-writer"
+      })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.records.length).toBeGreaterThan(1);
+    expect(payload.records.every((record: { deliveryPackageId: string }) => record.deliveryPackageId === deliveryPackageId)).toBe(true);
+  });
+
   it("returns validation and mutation errors with 400 status", async () => {
     const invalidJson = await POST(new Request("http://localhost/api/asset-lock-records", { method: "POST", body: "{" }));
     const invalidBody = await POST(jsonRequest({ action: "create" }));
@@ -212,6 +229,37 @@ async function createDraft() {
     uploadedByUserId: "user-head-writer",
     declaredRangeText: "1-2",
     rawText: "\u7b2c 1 \u96c6 \u5f00\u573a\n\u6b63\u6587\u4e00\n\u7b2c 2 \u96c6 \u8ffd\u8e2a\n\u6b63\u6587\u4e8c"
+  });
+
+  expect(result.ok).toBe(true);
+  if (!result.ok || !result.job.deliveryPackageId) {
+    throw new Error("delivery package draft was not created");
+  }
+
+  const deliveryPackageId = result.job.deliveryPackageId;
+
+  await mutateDeliveryPackage({
+    action: "submit",
+    deliveryPackageId,
+    actorUserId: "user-head-writer"
+  });
+  await mutateDeliveryPackage({
+    action: "publish",
+    deliveryPackageId,
+    actorUserId: "user-owner"
+  });
+
+  return deliveryPackageId;
+}
+
+async function createCandidateDraft() {
+  const result = await createDeliveryImportJob({
+    source: "text",
+    projectId: "project-jincheng",
+    uploadedByUserId: "user-head-writer",
+    declaredRangeText: "1-2",
+    rawText:
+      "\u7b2c 1 \u96c6\n\u9435\u7926\u4e95\u5165\u53e3\u65b0\u589e\u5347\u964d\u7b3c\uff0c\u4f17\u4eba\u7b2c\u4e00\u6b21\u8fdb\u5165\u5317\u4e95\u3002\n\u7b2c 2 \u96c6\n\u7ea2\u8272\u5b89\u5168\u706f\u6cbf\u7528\uff0c\u5730\u56fe\u5c55\u5f00\uff0c\u7c89\u5c18\u7206\u95ea\u4f5c\u4e3a\u584c\u65b9\u524d\u5146\u3002"
   });
 
   expect(result.ok).toBe(true);

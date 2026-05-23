@@ -1,8 +1,9 @@
-import {
+﻿import {
   confirmAssetLockRecordByProduction,
   confirmAssetLockRecordByWriter,
-  createDeliveryPackageDraft,
   createAssetLockRecord,
+  createDeliveryPackageDraft,
+  extractAssetLockCandidatesFromDeliveryEpisodes,
   finalLockAssetRecord,
   markAssetLockRecordDisputed,
   markAssetLockRecordNeedsInfo,
@@ -64,6 +65,12 @@ export type AssetLockRecordMutationRequest =
   | {
       action: "prepare_demo";
       projectId: string;
+      actorUserId: string;
+    }
+  | {
+      action: "generate_from_package";
+      projectId: string;
+      deliveryPackageId: string;
       actorUserId: string;
     };
 
@@ -152,6 +159,13 @@ function applyAssetLockRecordMutation(state: WorkspaceState, input: AssetLockRec
       });
     case "prepare_demo":
       return prepareAssetLockDemoRecords(state, input.projectId, input.actorUserId);
+    case "generate_from_package":
+      return generateAssetLockRecordsFromPackage(state, {
+        projectId: input.projectId,
+        deliveryPackageId: input.deliveryPackageId,
+        actorUserId: input.actorUserId,
+        allowFallback: false
+      });
   }
 }
 
@@ -170,6 +184,18 @@ function findMutatedRecord(state: WorkspaceState, input: AssetLockRecordMutation
 
   if (input.action === "prepare_demo") {
     const record = records.find((item) => item.projectId === input.projectId);
+
+    if (!record) {
+      throw new Error("asset_lock_record_not_created");
+    }
+
+    return record;
+  }
+
+  if (input.action === "generate_from_package") {
+    const record = records.find(
+      (item) => item.projectId === input.projectId && item.deliveryPackageId === input.deliveryPackageId
+    );
 
     if (!record) {
       throw new Error("asset_lock_record_not_created");
@@ -201,18 +227,20 @@ function prepareAssetLockDemoRecords(state: WorkspaceState, projectId: string, a
       type: "range",
       declaredEpisodeFrom: 3,
       declaredEpisodeTo: 4,
-      title: "资产定版验收：已发布演示交稿包",
+      title: "Asset lock demo delivery package",
       sourceFileName: "asset-lock-demo.docx",
       episodes: [
         {
           episodeNo: 3,
-          title: "第 3 集",
-          content: "第 3 集\n矿井入口段落更新，新增北井升降笼、红色安全灯和李砚旧伤妆。"
+          title: "Episode 3",
+          content:
+            "\u7b2c 3 \u96c6\n\u9435\u7926\u4e95\u5165\u53e3\u65b0\u589e\u5347\u964d\u7b3c\uff0c\u7ea2\u8272\u5b89\u5168\u706f\u7b2c\u4e00\u6b21\u542f\u7528\u3002"
         },
         {
           episodeNo: 4,
-          title: "第 4 集",
-          content: "第 4 集\n旧矿区手绘图成为关键道具，制作侧需要确认资产尺寸和复用范围。"
+          title: "Episode 4",
+          content:
+            "\u7b2c 4 \u96c6\n\u5730\u56fe\u5c55\u5f00\uff0c\u7c89\u5c18\u7206\u95ea\u4f5c\u4e3a\u584c\u65b9\u524d\u5146\uff0c\u5236\u4f5c\u4fa7\u9700\u8981\u786e\u8ba4\u8d44\u4ea7\u5c3a\u5bf8\u548c\u590d\u7528\u8303\u56f4\u3002"
         }
       ],
       confirmedEpisodeNos: [3, 4]
@@ -222,48 +250,77 @@ function prepareAssetLockDemoRecords(state: WorkspaceState, projectId: string, a
     nextState = publishDeliveryPackage(nextState, deliveryPackageId, actorUserId);
   }
 
-  const existingNames = new Set((nextState.assetLockRecords ?? []).map((record) => `${record.deliveryPackageId}:${record.assetName}`));
-  const demoRecords = [
-    {
-      assetName: "李砚旧伤妆",
-      assetType: "character" as const,
-      changeType: "modified" as const,
-      episodeNos: [3],
-      risk: "attention" as const,
-      writerNote: "演示记录：编剧侧确认旧伤妆是否准确对应已发布剧本。",
-      productionNote: "演示记录：制作侧确认妆造是否需要进入资产库。"
-    },
-    {
-      assetName: "北井升降笼",
-      assetType: "scene" as const,
-      changeType: "new" as const,
-      episodeNos: [3, 4],
-      risk: "normal" as const,
-      writerNote: "演示记录：确认场景是否覆盖第 3、4 集。",
-      productionNote: "演示记录：确认是否作为可复用场景资产。"
-    },
-    {
-      assetName: "旧矿区手绘图",
-      assetType: "prop" as const,
-      changeType: "modified" as const,
-      episodeNos: [4],
-      risk: "high" as const,
-      writerNote: "演示记录：确认图上新增线索是否准确。",
-      productionNote: "演示记录：请制作侧补齐尺寸和画面参考。"
-    }
-  ];
+  return generateAssetLockRecordsFromPackage(nextState, {
+    projectId,
+    deliveryPackageId,
+    actorUserId,
+    allowFallback: true
+  });
+}
 
-  for (const record of demoRecords) {
-    if (existingNames.has(`${deliveryPackageId}:${record.assetName}`)) {
+function generateAssetLockRecordsFromPackage(
+  state: WorkspaceState,
+  input: { actorUserId: string; allowFallback: boolean; deliveryPackageId: string; projectId: string }
+) {
+  const deliveryPackage = state.deliveryPackages.find((item) => item.id === input.deliveryPackageId);
+
+  if (!deliveryPackage) {
+    throw new Error("delivery_package_not_found");
+  }
+
+  if (deliveryPackage.projectId !== input.projectId) {
+    throw new Error("asset_lock_record_package_project_mismatch");
+  }
+
+  if (deliveryPackage.status !== "published") {
+    throw new Error("asset_lock_record_requires_published_package");
+  }
+
+  const episodes = state.deliveryPackageEpisodes.filter((episode) => episode.deliveryPackageId === input.deliveryPackageId);
+  const existingNames = new Set(
+    (state.assetLockRecords ?? [])
+      .filter((record) => record.deliveryPackageId === input.deliveryPackageId)
+      .map((record) => record.assetName)
+  );
+  const candidates = extractAssetLockCandidatesFromDeliveryEpisodes({
+    projectId: input.projectId,
+    deliveryPackageId: input.deliveryPackageId,
+    createdByUserId: input.actorUserId,
+    episodes
+  });
+  const candidatesToCreate =
+    candidates.length > 0
+      ? candidates
+      : input.allowFallback
+        ? [
+            {
+              projectId: input.projectId,
+              deliveryPackageId: input.deliveryPackageId,
+              episodeNos: episodes.map((episode) => episode.episodeNo),
+              assetName: "Manual review asset candidate",
+              assetType: "prop" as const,
+              changeType: "modified" as const,
+              createdByUserId: input.actorUserId,
+              risk: "attention" as const,
+              writerNote: "No asset keywords were extracted. Writer should confirm whether this package contains asset changes.",
+              productionNote: "No asset keywords were extracted. Production should confirm whether assets need to be added or changed."
+            }
+          ]
+        : [];
+
+  if (candidatesToCreate.length === 0) {
+    throw new Error("asset_lock_candidates_empty");
+  }
+
+  let nextState = state;
+
+  for (const candidate of candidatesToCreate) {
+    if (existingNames.has(candidate.assetName)) {
       continue;
     }
 
-    nextState = createAssetLockRecord(nextState, {
-      projectId,
-      deliveryPackageId,
-      createdByUserId: actorUserId,
-      ...record
-    });
+    nextState = createAssetLockRecord(nextState, candidate);
+    existingNames.add(candidate.assetName);
   }
 
   return nextState;
