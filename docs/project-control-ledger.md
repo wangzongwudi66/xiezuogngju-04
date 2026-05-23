@@ -347,6 +347,34 @@ Branch D prompt:
 请输出：1）是否建议现在进入 domain/API；2）是否建议合并前继续修代码；3）合并策略建议；4）合并后下一阶段最合理任务。只读，不要修改代码。
 ```
 
+## 2026-05-24 Final Acceptance Follow-Up
+
+Branch A/B/C/D returned on top of `3c44892`:
+
+- Branch A: no product-flow P0/P1; static readable prototype is acceptable for the first-version lower bound. P2 items are ordinary writer scope wording, zero-count queue behavior, and removed asset not entering aggregation.
+- Branch B: found one visual P1: `390x844` still had full-page horizontal overflow (`documentElement.scrollWidth=613`, `clientWidth=390`). Also noted 1366px drawer overlay can cover the selected clip after click.
+- Branch C: found two UI correctness blockers: empty creator scope data was correct but rendered clips did not consume `isDimmedByRoleScope`, and local React state could persist across actor/project/assignment changes.
+- Branch D: no architecture blocker; do not move timeline into domain/API before product/UI validation. Fast-forward merge is preferred after final verification and visual click-through.
+
+Main-conversation fixes after these reports:
+
+- `AssetDecisionTimelinePrototype` now resets effective queue/selected clip/group/drawer state when project, actor, assignment scope, default queue, or view-model selected clip changes.
+- The render path now guards against stale state during the render immediately after scope changes, so an empty creator scope cannot briefly show an old open drawer.
+- Clip class generation now consumes `clip.isDimmedByRoleScope`, adding a scoped muted visual state for empty/out-of-scope creator timelines.
+- Zero-count queue filters are disabled and the queue list renders an empty state instead of opening a stale detail panel.
+- Ordinary writer/non-full-series roles now show `当前工作窗口` instead of creator-specific `只看影响我的集`.
+- At `max-width: 1366px`, the detail drawer is now a static full-width second row instead of an absolute overlay over the timeline.
+- At `max-width: 760px`, shell/grid/stage/drawer widths are constrained and the wide timeline is contained in `.decision-track-scroll`; mobile second marker chips are hidden to reduce narrow clip crowding.
+- Added `asset-decision-timeline-view.ts` for JSX-free UI helper tests and `asset-decision-timeline.test.ts` covering scoped muted class generation and reset-key changes.
+
+Verification after fixes:
+
+- `npm.cmd run test -w apps/web -- asset-decision-timeline m1-dashboard` passed: 3 files / 22 tests.
+- `npm.cmd run typecheck -w apps/web` passed.
+- `npm.cmd run verify` passed: web 14 files / 108 tests, domain 5 files / 47 tests, Next build passed.
+- `http://localhost:3000` returned 200.
+- In-app Browser control still lacks the required Node REPL tool in this thread, so Branch B should re-run the 390/1366 visual measurements or the user should manually confirm in the open browser before merge.
+
 ## Recovery Steps After Context Compression
 
 Run:
@@ -371,12 +399,12 @@ npm.cmd run verify
 
 ## Immediate Next Decision
 
-Continue asset decision timeline acceptance.
+Continue asset decision timeline acceptance after the final follow-up fixes.
 
 Recommended first actions:
 
-1. Run visual click-through acceptance for `资产轨道` as creator, coordinator, and writer when browser tooling is available.
-2. Re-review whether Branch A/B/C P1/P2 issues are sufficiently addressed after the latest first-pass fixes.
+1. Re-run Branch B visual checks, especially `390x844` full-page overflow and `1366x768` drawer-open behavior.
+2. If Branch B has no remaining P1, run final `npm.cmd run verify` if new changes were made after the last pass.
 3. Keep timeline types in `apps/web/app/ui/asset-decision-timeline-data.ts` until product/UI validation is complete.
 4. Do not add database, real auth/session, AI parsing, or new timeline APIs yet.
 5. If visual acceptance passes, decide whether to merge `codex/asset-decision-timeline` into `main`.

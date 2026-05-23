@@ -2,7 +2,7 @@
 
 import { AlertTriangle, ChevronRight, Clock3, Layers3, PanelRightOpen, Sparkles } from "lucide-react";
 import type { CSSProperties } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ProjectRole } from "@aigc/domain";
 import {
   buildMockAssetDecisionTimelineViewModel,
@@ -23,6 +23,7 @@ import type {
   AssetTimelineClip,
   AssetTimelineQueueTag
 } from "./asset-decision-timeline-data";
+import { buildTimelineResetKey, getClipChangeMarkers, getDecisionClipClassName } from "./asset-decision-timeline-view";
 
 const queueOrder: AssetTimelineQueueTag[] = ["due_today", "affects_my_episodes", "conflicts", "script_changes", "waiting_others"];
 const changeMarkerLabels: Record<string, string> = {
@@ -73,23 +74,48 @@ export function AssetDecisionTimelinePrototype({
     [actorRole, actorUserId, assignedEpisodeNos, projectId]
   );
   const defaultQueueTag: AssetTimelineQueueTag = viewModel.creatorAssignedWindow ? "affects_my_episodes" : "due_today";
+  const timelineResetKey = buildTimelineResetKey({
+    actorRole,
+    actorUserId,
+    assignedEpisodeNos,
+    defaultQueueTag,
+    projectId,
+    selectedClipId: viewModel.selectedClipId
+  });
   const [activeQueueTag, setActiveQueueTag] = useState<AssetTimelineQueueTag>(defaultQueueTag);
   const [selectedClipId, setSelectedClipId] = useState(viewModel.selectedClipId ?? "");
   const [selectedGroupKind, setSelectedGroupKind] = useState<AssetDecisionGroupSummary["kind"] | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [stateScopeKey, setStateScopeKey] = useState(timelineResetKey);
+
+  useEffect(() => {
+    setStateScopeKey(timelineResetKey);
+    setActiveQueueTag(defaultQueueTag);
+    setSelectedClipId(viewModel.selectedClipId ?? "");
+    setSelectedGroupKind(null);
+    setDrawerOpen(false);
+  }, [defaultQueueTag, timelineResetKey, viewModel.selectedClipId]);
+
+  const isStateCurrent = stateScopeKey === timelineResetKey;
+  const effectiveActiveQueueTag = isStateCurrent ? activeQueueTag : defaultQueueTag;
+  const effectiveSelectedClipId = isStateCurrent ? selectedClipId : viewModel.selectedClipId ?? "";
+  const effectiveSelectedGroupKind = isStateCurrent ? selectedGroupKind : null;
+  const effectiveDrawerOpen = isStateCurrent ? drawerOpen : false;
   const episodeNos = getEpisodeWindowNos(viewModel.episodeWindow);
-  const filteredQueue = filterDecisionItemsByQueue(viewModel.decisionQueue, activeQueueTag);
+  const filteredQueue = filterDecisionItemsByQueue(viewModel.decisionQueue, effectiveActiveQueueTag);
   const decisionGroups = summarizeDecisionGroups(viewModel.decisionQueue);
   const visibleTracks = viewModel.tracks.filter((track) => track.clips.length > 0);
-  const selectedGroup = decisionGroups.find((group) => group.kind === selectedGroupKind);
-  const selectedClip = selectedGroup ? undefined : viewModel.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId);
+  const selectedGroup = decisionGroups.find((group) => group.kind === effectiveSelectedGroupKind);
+  const selectedClip = selectedGroup
+    ? undefined
+    : viewModel.tracks.flatMap((track) => track.clips).find((clip) => clip.id === effectiveSelectedClipId);
   const selectedDecisions = selectedGroup
     ? findDecisionGroupItems(viewModel, selectedGroup.decisionItemIds)
     : selectedClip
       ? findClipDecisionItems(viewModel, selectedClip.id)
       : filteredQueue.slice(0, 1);
   const focusedClipIds = new Set(
-    (selectedGroup ? selectedDecisions : filteredQueue).map((item) => item.clipId).filter(Boolean)
+    (selectedGroup ? selectedDecisions : filteredQueue).map((item) => item.clipId).filter((clipId): clipId is string => Boolean(clipId))
   );
   const selectedSourceExcerpts = findSourceExcerpts(
     viewModel,
@@ -99,6 +125,7 @@ export function AssetDecisionTimelinePrototype({
   );
 
   function selectClip(clip: AssetTimelineClip) {
+    setStateScopeKey(timelineResetKey);
     setSelectedClipId(clip.id);
     setSelectedGroupKind(null);
     setDrawerOpen(true);
@@ -106,6 +133,7 @@ export function AssetDecisionTimelinePrototype({
 
   function selectGroup(group: AssetDecisionGroupSummary) {
     const groupItems = findDecisionGroupItems(viewModel, group.decisionItemIds);
+    setStateScopeKey(timelineResetKey);
     setSelectedGroupKind(group.kind);
 
     if (groupItems[0]?.clipId) {
@@ -117,17 +145,22 @@ export function AssetDecisionTimelinePrototype({
 
   function selectQueue(tag: AssetTimelineQueueTag) {
     const nextQueue = filterDecisionItemsByQueue(viewModel.decisionQueue, tag);
+    setStateScopeKey(timelineResetKey);
     setActiveQueueTag(tag);
     setSelectedGroupKind(null);
 
     if (nextQueue[0]?.clipId) {
       setSelectedClipId(nextQueue[0].clipId);
+      setDrawerOpen(true);
+      return;
     }
 
-    setDrawerOpen(true);
+    setSelectedClipId("");
+    setDrawerOpen(false);
   }
 
   function selectDecision(decision: AssetDecisionItem) {
+    setStateScopeKey(timelineResetKey);
     setSelectedGroupKind(null);
 
     if (decision.clipId) {
@@ -142,6 +175,11 @@ export function AssetDecisionTimelinePrototype({
     : actorRole === "creator"
       ? "当前账号暂无分配集数，暂不显示创作者待处理决策。"
       : "统筹/编剧可查看当前工作窗口内的全部决策压力。";
+  const scopeControlLabel = viewModel.permissions.canViewFullSeries
+    ? "全剧视角"
+    : actorRole === "creator"
+      ? "只看影响我的集"
+      : "当前工作窗口";
 
   return (
     <section className="decision-timeline-shell">
@@ -153,7 +191,7 @@ export function AssetDecisionTimelinePrototype({
         <div className="decision-timeline-controls" aria-label="资产轨道视图控制">
           <button className="active" type="button">第 {viewModel.episodeWindow.from}-{viewModel.episodeWindow.to} 集工作视窗</button>
           <button type="button">当前版 vs 上一版</button>
-          <button type="button">{viewModel.permissions.canViewFullSeries ? "全剧视角" : "只看影响我的集"}</button>
+          <button type="button">{scopeControlLabel}</button>
         </div>
       </div>
 
@@ -167,7 +205,8 @@ export function AssetDecisionTimelinePrototype({
             const count = filterDecisionItemsByQueue(viewModel.decisionQueue, tag).length;
             return (
               <button
-                className={tag === activeQueueTag ? "active" : ""}
+                className={tag === effectiveActiveQueueTag ? "active" : ""}
+                disabled={count === 0}
                 key={tag}
                 onClick={() => selectQueue(tag)}
                 type="button"
@@ -178,14 +217,18 @@ export function AssetDecisionTimelinePrototype({
             );
           })}
           <div className="decision-queue-items">
-            {filteredQueue.slice(0, 4).map((decision) => (
-              <button key={decision.id} onClick={() => selectDecision(decision)} type="button">
-                <span>{decision.title}</span>
-                <small>
-                  第 {formatEpisodeRange(decision.episodeNos)} 集 · {timelineRiskLabels[decision.risk]}
-                </small>
-              </button>
-            ))}
+            {filteredQueue.length > 0 ? (
+              filteredQueue.slice(0, 4).map((decision) => (
+                <button key={decision.id} onClick={() => selectDecision(decision)} type="button">
+                  <span>{decision.title}</span>
+                  <small>
+                    第 {formatEpisodeRange(decision.episodeNos)} 集 · {timelineRiskLabels[decision.risk]}
+                  </small>
+                </button>
+              ))
+            ) : (
+              <span className="decision-queue-empty">当前没有决策项</span>
+            )}
           </div>
           <p>{queueScopeDescription}</p>
         </aside>
@@ -255,9 +298,7 @@ export function AssetDecisionTimelinePrototype({
 
                       return (
                         <button
-                          className={`decision-clip ${clip.assetType} ${clip.currentSegment.risk} ${getClipChangeMarkers(clip)} ${clip.id === selectedClipId ? "selected" : ""} ${
-                            focusedClipIds.size > 0 && !focusedClipIds.has(clip.id) ? "muted" : ""
-                          }`}
+                          className={getDecisionClipClassName({ clip, focusedClipIds, selectedClipId: effectiveSelectedClipId })}
                           key={clip.id}
                           onClick={() => selectClip(clip)}
                           style={{ gridColumn: position.gridColumn }}
@@ -281,12 +322,15 @@ export function AssetDecisionTimelinePrototype({
           </div>
         </main>
 
-        {drawerOpen ? (
+        {effectiveDrawerOpen ? (
           <AssetTimelineDetailDrawer
             clip={selectedClip}
             group={selectedGroup}
             decisions={selectedDecisions}
-            onClose={() => setDrawerOpen(false)}
+            onClose={() => {
+              setStateScopeKey(timelineResetKey);
+              setDrawerOpen(false);
+            }}
             sourceExcerpts={selectedSourceExcerpts}
           />
         ) : (
@@ -308,10 +352,6 @@ function formatEpisodeRange(episodeNos: number[]) {
   return episodeNos[0] === episodeNos[episodeNos.length - 1]
     ? `${episodeNos[0]}`
     : `${episodeNos[0]}-${episodeNos[episodeNos.length - 1]}`;
-}
-
-function getClipChangeMarkers(clip: AssetTimelineClip) {
-  return clip.ghost?.changeMarkers.join(" ") ?? "";
 }
 
 function GhostClip({

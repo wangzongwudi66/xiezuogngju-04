@@ -1907,6 +1907,11 @@ select:focus-visible {
   border-radius: var(--radius);
 }
 
+.decision-queue-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .decision-queue-panel button strong {
   color: var(--blue);
 }
@@ -1928,6 +1933,16 @@ select:focus-visible {
 .decision-queue-items small {
   color: var(--muted);
   font-size: 11px;
+  font-weight: 800;
+}
+
+.decision-queue-empty {
+  border: 1px dashed rgba(15, 23, 42, 0.16);
+  border-radius: var(--radius);
+  background: rgba(248, 250, 252, 0.9);
+  color: var(--muted);
+  padding: 9px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -2178,6 +2193,11 @@ select:focus-visible {
 
 .decision-clip.muted {
   opacity: 0.42;
+}
+
+.decision-clip.scope-muted {
+  filter: grayscale(0.45);
+  opacity: 0.28;
 }
 
 .decision-clip span,
@@ -3250,12 +3270,10 @@ input[type="checkbox"] {
   }
 
   .decision-detail-drawer {
-    position: absolute;
-    z-index: 5;
-    top: 0;
-    right: 0;
-    width: min(390px, calc(100vw - 320px));
-    max-height: min(70vh, calc(100vh - 150px));
+    grid-column: 1 / -1;
+    position: static;
+    width: auto;
+    max-height: none;
     border-color: rgba(52, 120, 246, 0.2);
   }
 
@@ -3311,6 +3329,30 @@ input[type="checkbox"] {
     grid-template-columns: 1fr;
   }
 
+  .asset-lock-workbench,
+  .decision-timeline-shell,
+  .decision-timeline-topbar,
+  .decision-timeline-grid,
+  .decision-track-stage,
+  .decision-track-summary,
+  .decision-track-legend,
+  .decision-queue-panel,
+  .decision-detail-drawer {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .decision-track-scroll {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+    overscroll-behavior-x: contain;
+  }
+
   .decision-track-scroll,
   .decision-track-board {
     max-height: none;
@@ -3333,13 +3375,19 @@ input[type="checkbox"] {
 
   .decision-ruler-row,
   .decision-track-row {
-    grid-template-columns: 92px minmax(560px, 1fr);
+    width: max-content;
+    min-width: 100%;
+    grid-template-columns: 84px minmax(500px, 1fr);
   }
 
   .decision-episode-ruler,
   .decision-track-lane,
   .decision-ghost-layer {
-    grid-template-columns: repeat(var(--episode-count), minmax(58px, 1fr));
+    grid-template-columns: repeat(var(--episode-count), minmax(50px, 1fr));
+  }
+
+  .decision-change-chip:nth-of-type(2) {
+    display: none;
   }
 
   .asset-row .asset-tag,
