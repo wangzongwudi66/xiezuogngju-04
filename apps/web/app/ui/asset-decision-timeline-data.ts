@@ -113,6 +113,17 @@ export interface AssetDecisionItem {
   updatedAt: string;
 }
 
+export interface AssetDecisionGroupSummary {
+  kind: Extract<AssetDecisionKind, "needs_writer_decision" | "needs_creator_confirm" | "conflict" | "ready_to_execute">;
+  label: string;
+  count: number;
+  decisionItemIds: string[];
+  episodeNos: number[];
+  risk: AssetRiskLevel;
+  currentSummary: string;
+  previousSummary?: string;
+}
+
 export interface RoleScopedAssetTimelineViewModel {
   projectId: string;
   viewerUserId: string;
@@ -320,7 +331,7 @@ const decisions: AssetDecisionItem[] = [
     title: "粉尘爆闪有剧透风险",
     description: "编剧担心爆闪过早暗示事故，制作侧认为镜头节奏依赖该效果。",
     episodeNos: [12, 13],
-    queueTags: ["conflicts", "script_changes"],
+    queueTags: ["conflicts", "script_changes", "affects_my_episodes"],
     assignedToRole: "coordinator",
     sourceExcerptIds: ["excerpt-dust-ep12"],
     currentSummary: "当前版：粉尘闪过两秒并带断裂声。",
@@ -483,7 +494,7 @@ export function buildMockAssetDecisionTimelineViewModel(input: {
     viewerUserId: input.viewerUserId,
     viewerRole: input.viewerRole,
     viewMode: "work_window",
-    episodeWindow: isCreator ? { from: 7, to: 13 } : { from: 6, to: 15 },
+    episodeWindow: { from: 6, to: 15 },
     creatorAssignedWindow,
     tracks: buildTracks(input.projectId, scopedClips),
     decisionQueue: isCreator
@@ -540,29 +551,56 @@ export function filterDecisionItemsByQueue(items: AssetDecisionItem[], queueTag:
   return items.filter((item) => item.queueTags.includes(queueTag));
 }
 
-export function summarizeDecisionGroups(items: AssetDecisionItem[]) {
-  return [
+export function summarizeDecisionGroups(items: AssetDecisionItem[]): AssetDecisionGroupSummary[] {
+  const groups = [
     {
       kind: "needs_writer_decision" as const,
       label: "需编剧定口径",
-      count: items.filter((item) => item.kind === "needs_writer_decision").length
+      items: items.filter((item) => item.kind === "needs_writer_decision")
     },
     {
       kind: "needs_creator_confirm" as const,
       label: "需创作者确认",
-      count: items.filter((item) => item.kind === "needs_creator_confirm").length
+      items: items.filter((item) => item.kind === "needs_creator_confirm")
     },
     {
       kind: "conflict" as const,
       label: "资产冲突",
-      count: items.filter((item) => item.kind === "conflict").length
+      items: items.filter((item) => item.kind === "conflict")
     },
     {
       kind: "ready_to_execute" as const,
       label: "可直接执行",
-      count: items.filter((item) => item.kind === "ready_to_execute").length
+      items: items.filter((item) => item.kind === "ready_to_execute")
     }
-  ].filter((group) => group.count > 0);
+  ];
+
+  return groups
+    .map((group) => {
+      const episodeNos = Array.from(new Set(group.items.flatMap((item) => item.episodeNos))).sort((a, b) => a - b);
+      const risk: AssetRiskLevel = group.items.some((item) => item.risk === "high")
+        ? "high"
+        : group.items.some((item) => item.risk === "attention")
+          ? "attention"
+          : "normal";
+
+      return {
+        kind: group.kind,
+        label: group.label,
+        count: group.items.length,
+        decisionItemIds: group.items.map((item) => item.id),
+        episodeNos,
+        risk,
+        currentSummary: group.items.map((item) => item.currentSummary).join("；"),
+        previousSummary: group.items.map((item) => item.previousSummary).filter(Boolean).join("；") || undefined
+      };
+    })
+    .filter((group) => group.count > 0);
+}
+
+export function findDecisionGroupItems(viewModel: RoleScopedAssetTimelineViewModel, decisionItemIds: string[]) {
+  const ids = new Set(decisionItemIds);
+  return viewModel.decisionQueue.filter((item) => ids.has(item.id));
 }
 
 export function findClipDecisionItems(viewModel: RoleScopedAssetTimelineViewModel, clipId: string) {

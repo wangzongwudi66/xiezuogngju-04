@@ -125,6 +125,7 @@ Committed prototype work:
 - `3667022 Document asset decision timeline stage`
 - `c70d4c3 Refine asset timeline prototype scope`
 - `a2270c6 Add asset decision timeline prototype`
+- `50a3f46 Update ledger for asset timeline prototype`
 
 Prototype files:
 
@@ -138,9 +139,28 @@ Prototype behavior:
 
 - Adds "资产轨道" entry.
 - Uses local UI mock view model only.
-- Shows a 10-15-ish episode work window.
+- Shows a 10-episode work window with the creator assigned episodes highlighted inside it.
 - Shows layered asset tracks, clips, ghost comparison markers, decision aggregation, left decision queue, and right detail drawer.
 - Does not add API/domain persistence.
+
+Current uncommitted timeline refinement after 并行D review:
+
+- Fixes ghost comparison rendering so previous-version ranges are lane-level grid items, not absolute children inside current clips.
+- Makes decision aggregation selectable and uses the right detail drawer to explain the selected group.
+- Adds current-version and previous-version summaries to the detail drawer.
+- Keeps creator view scoped but prevents episode-window collapse by using the `6-15` work window and highlighting assigned `7-13`.
+- Keeps creator-visible conflicts in the queue when they affect assigned episodes.
+- Makes the right detail drawer overlay at narrower desktop widths to avoid squeezing the central track.
+- Targeted verification passed before full verify:
+  - `npm.cmd run typecheck -w apps/web`
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline`
+  - `npm.cmd run test -w apps/web` passed with 13 test files / 101 tests.
+- Full verification passed:
+  - `npm.cmd run verify`
+  - web tests: 13 test files / 101 tests passed.
+  - domain tests: 5 test files / 44 tests passed.
+  - Next build passed without Turbopack/NFT warnings.
+  - `http://localhost:3000` returned 200 locally.
 
 ## Sub-Conversation Status
 

@@ -1863,7 +1863,8 @@ select:focus-visible {
 }
 
 .decision-timeline-controls button.active,
-.decision-queue-panel button.active {
+.decision-queue-panel button.active,
+.decision-aggregate.selected {
   border-color: rgba(52, 120, 246, 0.35);
   background: var(--blue-soft);
   color: var(--blue);
@@ -1942,6 +1943,10 @@ select:focus-visible {
   color: var(--orange);
 }
 
+.decision-aggregate.selected {
+  box-shadow: 0 0 0 3px rgba(52, 120, 246, 0.12);
+}
+
 .decision-episode-ruler,
 .decision-track-lane {
   display: grid;
@@ -2001,6 +2006,7 @@ select:focus-visible {
 
 .decision-track-lane {
   position: relative;
+  isolation: isolate;
   min-height: 74px;
   border: 1px solid #dbe5f0;
   border-radius: var(--radius);
@@ -2011,9 +2017,18 @@ select:focus-visible {
   padding: 8px;
 }
 
+.decision-ghost-layer {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  grid-template-columns: repeat(var(--episode-count), minmax(72px, 1fr));
+  pointer-events: none;
+}
+
 .decision-clip {
   position: relative;
-  z-index: 1;
+  z-index: 2;
+  grid-row: 1;
   display: grid;
   min-width: 0;
   min-height: 58px;
@@ -2027,6 +2042,20 @@ select:focus-visible {
   padding: 8px 10px;
   text-align: left;
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.decision-change-chip {
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  z-index: 2;
+  border-radius: 999px;
+  background: rgba(31, 164, 99, 0.12);
+  color: var(--green);
+  padding: 2px 7px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
 }
 
 .decision-clip.character {
@@ -2082,22 +2111,46 @@ select:focus-visible {
 }
 
 .decision-ghost {
-  position: absolute;
-  inset: auto 8px 5px 8px;
-  height: 7px;
+  align-self: end;
+  z-index: 1;
+  height: 9px;
+  margin: 0 9px 3px;
   border: 1px dashed rgba(15, 23, 42, 0.28);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.5);
 }
 
-.decision-ghost.new,
-.decision-ghost.out {
-  height: auto;
-  border: 0;
-  background: transparent;
+.decision-ghost.range_changed {
+  border-color: rgba(240, 122, 36, 0.44);
+  background: rgba(240, 122, 36, 0.1);
+}
+
+.decision-ghost.state_changed,
+.decision-ghost.source_changed {
+  box-shadow: inset 0 0 0 1px rgba(52, 120, 246, 0.12);
+}
+
+.decision-ghost.new {
+  border-color: rgba(31, 164, 99, 0.3);
+  background: rgba(31, 164, 99, 0.08);
+}
+
+.decision-ghost.note {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  margin: 0 8px 2px;
+  border: 1px dashed rgba(15, 23, 42, 0.18);
+  background: rgba(255, 255, 255, 0.72);
   color: rgba(15, 23, 42, 0.52);
   font-size: 10px;
   font-weight: 800;
+}
+
+.decision-ghost.out {
+  border-color: rgba(15, 23, 42, 0.14);
+  color: rgba(15, 23, 42, 0.46);
 }
 
 .decision-detail-drawer {
@@ -3063,6 +3116,30 @@ input[type="checkbox"] {
   }
 }
 
+@media (max-width: 1366px) {
+  .decision-timeline-grid {
+    padding-right: 0;
+  }
+
+  .decision-queue-panel {
+    flex-basis: 228px;
+  }
+
+  .decision-detail-drawer {
+    position: absolute;
+    z-index: 5;
+    top: 0;
+    right: 0;
+    width: min(390px, calc(100vw - 320px));
+    max-height: min(70vh, calc(100vh - 150px));
+    border-color: rgba(52, 120, 246, 0.2);
+  }
+
+  .decision-track-stage {
+    min-width: 0;
+  }
+}
+
 @media (max-width: 760px) {
   .auth-shell,
   .replica-grid {
@@ -3113,6 +3190,8 @@ input[type="checkbox"] {
   }
 
   .decision-detail-drawer {
+    position: static;
+    width: auto;
     max-height: none;
   }
 

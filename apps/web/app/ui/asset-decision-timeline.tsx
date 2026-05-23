@@ -8,6 +8,7 @@ import {
   buildMockAssetDecisionTimelineViewModel,
   filterDecisionItemsByQueue,
   findClipDecisionItems,
+  findDecisionGroupItems,
   findSourceExcerpts,
   getEpisodeWindowNos,
   mapClipToEpisodeGrid,
@@ -16,7 +17,12 @@ import {
   timelineQueueLabels,
   timelineRiskLabels
 } from "./asset-decision-timeline-data";
-import type { AssetDecisionItem, AssetTimelineClip, AssetTimelineQueueTag } from "./asset-decision-timeline-data";
+import type {
+  AssetDecisionGroupSummary,
+  AssetDecisionItem,
+  AssetTimelineClip,
+  AssetTimelineQueueTag
+} from "./asset-decision-timeline-data";
 
 const queueOrder: AssetTimelineQueueTag[] = ["due_today", "affects_my_episodes", "conflicts", "script_changes", "waiting_others"];
 
@@ -42,25 +48,49 @@ export function AssetDecisionTimelinePrototype({
   );
   const [activeQueueTag, setActiveQueueTag] = useState<AssetTimelineQueueTag>("affects_my_episodes");
   const [selectedClipId, setSelectedClipId] = useState(viewModel.selectedClipId ?? "");
+  const [selectedGroupKind, setSelectedGroupKind] = useState<AssetDecisionGroupSummary["kind"] | null>("needs_creator_confirm");
   const [drawerOpen, setDrawerOpen] = useState(true);
   const episodeNos = getEpisodeWindowNos(viewModel.episodeWindow);
   const filteredQueue = filterDecisionItemsByQueue(viewModel.decisionQueue, activeQueueTag);
-  const focusedClipIds = new Set(filteredQueue.map((item) => item.clipId).filter(Boolean));
-  const selectedClip = viewModel.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId);
-  const selectedDecisions = selectedClip ? findClipDecisionItems(viewModel, selectedClip.id) : filteredQueue.slice(0, 1);
-  const selectedSourceExcerpts = selectedClip
-    ? findSourceExcerpts(viewModel, selectedClip.currentSegment.sourceExcerptIds)
-    : findSourceExcerpts(viewModel, selectedDecisions.flatMap((item) => item.sourceExcerptIds));
   const decisionGroups = summarizeDecisionGroups(viewModel.decisionQueue);
+  const selectedGroup = decisionGroups.find((group) => group.kind === selectedGroupKind);
+  const selectedClip = selectedGroup ? undefined : viewModel.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId);
+  const selectedDecisions = selectedGroup
+    ? findDecisionGroupItems(viewModel, selectedGroup.decisionItemIds)
+    : selectedClip
+      ? findClipDecisionItems(viewModel, selectedClip.id)
+      : filteredQueue.slice(0, 1);
+  const focusedClipIds = new Set(
+    (selectedGroup ? selectedDecisions : filteredQueue).map((item) => item.clipId).filter(Boolean)
+  );
+  const selectedSourceExcerpts = findSourceExcerpts(
+    viewModel,
+    selectedGroup || !selectedClip
+      ? selectedDecisions.flatMap((item) => item.sourceExcerptIds)
+      : selectedClip.currentSegment.sourceExcerptIds
+  );
 
   function selectClip(clip: AssetTimelineClip) {
     setSelectedClipId(clip.id);
+    setSelectedGroupKind(null);
+    setDrawerOpen(true);
+  }
+
+  function selectGroup(group: AssetDecisionGroupSummary) {
+    const groupItems = findDecisionGroupItems(viewModel, group.decisionItemIds);
+    setSelectedGroupKind(group.kind);
+
+    if (groupItems[0]?.clipId) {
+      setSelectedClipId(groupItems[0].clipId);
+    }
+
     setDrawerOpen(true);
   }
 
   function selectQueue(tag: AssetTimelineQueueTag) {
     const nextQueue = filterDecisionItemsByQueue(viewModel.decisionQueue, tag);
     setActiveQueueTag(tag);
+    setSelectedGroupKind(null);
 
     if (nextQueue[0]?.clipId) {
       setSelectedClipId(nextQueue[0].clipId);
@@ -108,8 +138,9 @@ export function AssetDecisionTimelinePrototype({
           <div className="decision-track-summary">
             {decisionGroups.map((group) => (
               <button
-                className={`decision-aggregate ${group.kind}`}
+                className={`decision-aggregate ${group.kind} ${selectedGroup?.kind === group.kind ? "selected" : ""}`}
                 key={group.kind}
+                onClick={() => selectGroup(group)}
                 type="button"
               >
                 <span>{group.label}</span>
@@ -134,6 +165,19 @@ export function AssetDecisionTimelinePrototype({
                   <strong>{track.label}</strong>
                 </div>
                 <div className="decision-track-lane" style={{ "--episode-count": episodeNos.length } as CSSProperties}>
+                  <div className="decision-ghost-layer" aria-hidden="true">
+                    {track.clips.map((clip) => {
+                      const currentPosition = mapClipToEpisodeGrid(clip, viewModel.episodeWindow);
+                      return currentPosition && clip.ghost ? (
+                        <GhostClip
+                          clip={clip}
+                          fallbackGridColumn={currentPosition.gridColumn}
+                          key={`${clip.id}-ghost`}
+                          window={viewModel.episodeWindow}
+                        />
+                      ) : null;
+                    })}
+                  </div>
                   {track.clips.map((clip) => {
                     const position = mapClipToEpisodeGrid(clip, viewModel.episodeWindow);
 
@@ -151,7 +195,7 @@ export function AssetDecisionTimelinePrototype({
                         style={{ gridColumn: position.gridColumn }}
                         type="button"
                       >
-                        {clip.ghost ? <GhostClip clip={clip} window={viewModel.episodeWindow} /> : null}
+                        {clip.ghost?.changeMarkers.includes("new") ? <em className="decision-change-chip">新增</em> : null}
                         <span>{clip.assetName}</span>
                         <strong>{clip.currentSegment.stateLabel}</strong>
                         <small>
@@ -169,6 +213,7 @@ export function AssetDecisionTimelinePrototype({
         {drawerOpen ? (
           <AssetTimelineDetailDrawer
             clip={selectedClip}
+            group={selectedGroup}
             decisions={selectedDecisions}
             onClose={() => setDrawerOpen(false)}
             sourceExcerpts={selectedSourceExcerpts}
@@ -184,9 +229,23 @@ export function AssetDecisionTimelinePrototype({
   );
 }
 
-function GhostClip({ clip, window }: { clip: AssetTimelineClip; window: { from: number; to: number } }) {
+function GhostClip({
+  clip,
+  fallbackGridColumn,
+  window
+}: {
+  clip: AssetTimelineClip;
+  fallbackGridColumn: string;
+  window: { from: number; to: number };
+}) {
+  const markerClasses = clip.ghost?.changeMarkers.join(" ") ?? "";
+
   if (!clip.ghost?.previousEpisodeFrom || !clip.ghost.previousEpisodeTo) {
-    return <span className="decision-ghost new">上一版无对应资产</span>;
+    return (
+      <span className={`decision-ghost note new ${markerClasses}`} style={{ gridColumn: fallbackGridColumn }}>
+        上一版无对应资产
+      </span>
+    );
   }
 
   const ghostPosition = mapClipToEpisodeGrid(
@@ -198,13 +257,17 @@ function GhostClip({ clip, window }: { clip: AssetTimelineClip; window: { from: 
   );
 
   if (!ghostPosition) {
-    return <span className="decision-ghost out">上一版在窗口外</span>;
+    return (
+      <span className={`decision-ghost note out ${markerClasses}`} style={{ gridColumn: fallbackGridColumn }}>
+        上一版在窗口外
+      </span>
+    );
   }
 
   return (
     <span
-      className="decision-ghost"
-      style={{ "--ghost-column": ghostPosition.gridColumn } as CSSProperties}
+      className={`decision-ghost ${markerClasses}`}
+      style={{ gridColumn: ghostPosition.gridColumn }}
       title={clip.ghost.summary}
     />
   );
@@ -212,21 +275,26 @@ function GhostClip({ clip, window }: { clip: AssetTimelineClip; window: { from: 
 
 function AssetTimelineDetailDrawer({
   clip,
+  group,
   decisions,
   onClose,
   sourceExcerpts
 }: {
   clip?: AssetTimelineClip;
+  group?: AssetDecisionGroupSummary;
   decisions: AssetDecisionItem[];
   onClose: () => void;
   sourceExcerpts: ReturnType<typeof findSourceExcerpts>;
 }) {
+  const currentSummaries = group?.currentSummary ?? decisions.map((decision) => decision.currentSummary).join("；");
+  const previousSummaries = group?.previousSummary ?? decisions.map((decision) => decision.previousSummary).filter(Boolean).join("；");
+
   return (
     <aside className="decision-detail-drawer">
       <div className="decision-detail-head">
         <div>
-          <span>决策说明</span>
-          <h3>{clip?.assetName ?? decisions[0]?.title ?? "未选择资产"}</h3>
+          <span>{group ? "决策聚合" : "决策说明"}</span>
+          <h3>{group?.label ?? clip?.assetName ?? decisions[0]?.title ?? "未选择资产"}</h3>
         </div>
         <button className="text-link" onClick={onClose} type="button">
           收起
@@ -244,6 +312,25 @@ function AssetTimelineDetailDrawer({
           </div>
         </div>
       ) : null}
+
+      {group ? (
+        <div className="decision-detail-card hero">
+          <Sparkles size={16} />
+          <div>
+            <strong>
+              {group.count} 项 · 第 {group.episodeNos[0]}-{group.episodeNos[group.episodeNos.length - 1]} 集
+            </strong>
+            <p>{timelineRiskLabels[group.risk]}风险聚合，用于判断这组资产为什么需要处理。</p>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="decision-detail-card">
+        <strong>当前版摘要</strong>
+        <p>{currentSummaries || "当前选择项暂无当前版摘要。"}</p>
+        <strong>上一版摘要</strong>
+        <p>{previousSummaries || "上一版没有对应摘要或不在当前原型样例内。"}</p>
+      </div>
 
       <div className="decision-detail-card">
         <strong>需要处理的问题</strong>
