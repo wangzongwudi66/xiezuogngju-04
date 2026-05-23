@@ -666,11 +666,11 @@ function AssetAttachmentPanel({
           <FileUp size={15} />
           <strong>附件</strong>
         </div>
-        <span>{attachmentLoading ? "加载中" : `${attachments.length} 个 active`}</span>
+        <span>{attachmentLoading ? "加载中" : `${attachments.length} 个有效附件`}</span>
       </div>
 
       {attachments.length === 0 ? (
-        <p className="asset-attachment-empty">当前资产记录还没有 active 附件。</p>
+        <p className="asset-attachment-empty">当前资产记录还没有有效附件。</p>
       ) : (
         <div className="asset-attachment-list">
           {attachments.map((attachment) => (
@@ -689,6 +689,7 @@ function AssetAttachmentPanel({
 
       <div className="asset-attachment-form">
         {isLocked ? <p className="inline-help">这条资产记录已定版，不能新增附件。</p> : null}
+        {!isLocked ? <p className="inline-help">支持 JPG、PNG、WEBP、PDF，单个文件最大 20MB。</p> : null}
         <label>
           类型
           <select
