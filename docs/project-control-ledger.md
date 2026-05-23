@@ -296,6 +296,57 @@ The previous sub-conversations are no longer available. If parallel review is ne
 
 Sub-conversations should not commit or push. Main conversation owns branch rhythm, integration, verification, and merge decisions.
 
+## Next Parallel Acceptance Batch
+
+Use commit `50df2f1 Tighten asset timeline creator scope and scrolling` as the review baseline on branch `codex/asset-decision-timeline`.
+
+Conflict-control rule:
+
+- Branch A/B/C/D are read-only review branches for the next batch.
+- They must not edit, stage, commit, push, rebase, or merge.
+- Main conversation performs any code/docs changes after collecting reports.
+- If a sub-conversation finds a P0/P1 issue, it reports file/line references and a recommended minimal fix, but does not apply it.
+
+Branch A prompt:
+
+```text
+你是分支 A，只做只读产品流程验收。请切到/确认当前分支为 codex/asset-decision-timeline，基线提交为 50df2f1。不要改文件、不要提交、不要 push。
+
+任务：复审资产决策剪辑轨道是否已经达到“首版静态可读原型”的合并下限。重点检查 creator / writer / coordinator 三类角色流程：左侧队列是否能落到具体决策项，点击后是否能聚焦轨道与详情；详情是否足够支持静态流程讨论；全剧视角/剧本 diff 等未完成项是否可以后置。
+
+请输出：1）是否阻塞合并；2）P0/P1/P2 问题列表；3）可后置事项；4）建议主对话下一步。只读检查即可，最多运行相关测试，不要修改代码。
+```
+
+Branch B prompt:
+
+```text
+你是分支 B，只做只读 UI/交互/视觉验收。请切到/确认当前分支为 codex/asset-decision-timeline，基线提交为 50df2f1。不要改文件、不要提交、不要 push。
+
+任务：重点验收资产决策剪辑轨道的视觉可读性和交互。请尽量用浏览器查看 http://localhost:3000 的资产轨道入口，覆盖 1440x900、1366x768、760x900、390x844。重点看：时间尺与轨道横向滚动是否同步；轨道是否仍是第一视觉中心；点击队列/聚合/clip 后详情抽屉是否遮挡到不可接受；ghost/删除/变化 marker 是否可读；移动端是否整页横向溢出。
+
+请输出：1）是否有合并阻塞级视觉问题；2）按 P1/P2/P3 排序的问题；3）每个问题给出文件/大致位置和最小修复建议；4）已确认通过的视口/操作。只读，不要修改代码。
+```
+
+Branch C prompt:
+
+```text
+你是分支 C，只做只读代码与测试复审。请切到/确认当前分支为 codex/asset-decision-timeline，基线提交为 50df2f1。不要改文件、不要提交、不要 push。
+
+任务：复审本轮 creator scope 与滚动容器改动的正确性。重点文件：apps/web/app/ui/asset-decision-timeline-data.ts、asset-decision-timeline-data.test.ts、asset-decision-timeline.tsx、apps/web/app/globals.css、m1-dashboard.tsx。检查空 assignedEpisodeNos、creator B 不应看到 creator A 指派决策、viewerUserId 过滤、默认 selectedClipId、角色/项目切换后的 React state 是否可能不同步、测试是否覆盖关键边界。
+
+请运行：npm.cmd run test -w apps/web -- asset-decision-timeline m1-dashboard；可再运行 npm.cmd run typecheck -w apps/web。请输出：1）是否阻塞合并；2）具体 bug/测试缺口；3）建议主对话最小修复范围。只读，不要修改代码。
+```
+
+Branch D prompt:
+
+```text
+你是分支 D，只做只读架构与合并准备复审。请切到/确认当前分支为 codex/asset-decision-timeline，基线提交为 50df2f1。不要改文件、不要提交、不要 push。
+
+任务：判断资产决策剪辑轨道当前是否仍应停留在 UI mock 层，以及是否具备合并到 main 的工程条件。重点检查：是否误引入 domain/API 扩张；mock 字段是否仍可解释为 UI view model；与现有 asset-lock 领域/API 是否存在边界混淆；ledger 是否足够支持上下文恢复；合并前还需要哪些验证命令。
+
+请输出：1）是否建议现在进入 domain/API；2）是否建议合并前继续修代码；3）合并策略建议；4）合并后下一阶段最合理任务。只读，不要修改代码。
+```
+
 ## Recovery Steps After Context Compression
 
 Run:
