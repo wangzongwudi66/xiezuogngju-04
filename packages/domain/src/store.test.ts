@@ -5,10 +5,12 @@ import {
   assignEpisodes,
   confirmAssetLockRecordByProduction,
   confirmAssetLockRecordByWriter,
+  createAssetAttachmentMetadata,
   createDeliveryPackageDraft,
   createAssetLockRecord,
   createProject,
   finalLockAssetRecord,
+  listAssetAttachmentsForRecord,
   loginAsUser,
   markAssetLockRecordNeedsInfo,
   markNotificationRead,
@@ -25,6 +27,7 @@ import {
   selectProjectMembers,
   selectProjectOverview,
   selectUnreadNotifications,
+  softDeleteAssetAttachment,
   submitDeliveryPackageForReview,
   updateDeliveryPackageConfirmation,
   updateProject,
@@ -534,5 +537,173 @@ describe("asset lock workflow", () => {
     expect(updated?.status).toBe("locked");
     expect(updated?.finalLockedByUserId).toBe("user-owner");
     expect(updated?.finalLockedAt).toBeTruthy();
+  });
+
+  it("creates asset attachment metadata from an existing asset lock record", () => {
+    const { record, deliveryPackageId, state } = createAssetRecord();
+    const next = createAssetAttachmentMetadata(state, {
+      assetLockRecordId: record?.id ?? "",
+      fileId: "file-lift-reference",
+      fileName: "lift-reference.png",
+      mime: "image/png",
+      size: 2048,
+      attachmentType: "reference",
+      uploadedByUserId: "user-head-writer",
+      note: "reference board"
+    });
+    const attachment = next.assetAttachments?.at(-1);
+
+    expect(attachment).toMatchObject({
+      projectId: "project-jincheng",
+      assetLockRecordId: record?.id,
+      deliveryPackageId,
+      fileId: "file-lift-reference",
+      fileName: "lift-reference.png",
+      mime: "image/png",
+      size: 2048,
+      version: 1,
+      attachmentType: "reference",
+      uploadedByUserId: "user-head-writer",
+      note: "reference board",
+      status: "active"
+    });
+    expect(listAssetAttachmentsForRecord(next, record?.id ?? "")).toHaveLength(1);
+  });
+
+  it("increments asset attachment versions within the same asset lock record", () => {
+    const { record, state } = createAssetRecord();
+    const first = createAssetAttachmentMetadata(state, {
+      assetLockRecordId: record?.id ?? "",
+      fileId: "file-v1",
+      fileName: "lift-v1.png",
+      mime: "image/png",
+      size: 1024,
+      attachmentType: "production",
+      uploadedByUserId: "user-creator-a"
+    });
+    const second = createAssetAttachmentMetadata(first, {
+      assetLockRecordId: record?.id ?? "",
+      fileId: "file-v2",
+      fileName: "lift-v2.png",
+      mime: "image/png",
+      size: 2048,
+      attachmentType: "production",
+      uploadedByUserId: "user-creator-a"
+    });
+
+    expect(listAssetAttachmentsForRecord(second, record?.id ?? "").map((attachment) => attachment.version)).toEqual([
+      1,
+      2
+    ]);
+  });
+
+  it("blocks uploading asset attachments after the asset lock record is locked", () => {
+    const { record, state } = createAssetRecord();
+    const writerConfirmed = confirmAssetLockRecordByWriter(state, {
+      assetLockRecordId: record?.id ?? "",
+      confirmedByUserId: "user-head-writer"
+    });
+    const productionConfirmed = confirmAssetLockRecordByProduction(writerConfirmed, {
+      assetLockRecordId: record?.id ?? "",
+      confirmedByUserId: "user-creator-a"
+    });
+    const locked = finalLockAssetRecord(productionConfirmed, {
+      assetLockRecordId: record?.id ?? "",
+      lockedByUserId: "user-owner"
+    });
+
+    expect(() =>
+      createAssetAttachmentMetadata(locked, {
+        assetLockRecordId: record?.id ?? "",
+        fileId: "file-final",
+        fileName: "final.png",
+        mime: "image/png",
+        size: 4096,
+        attachmentType: "final",
+        uploadedByUserId: "user-owner"
+      })
+    ).toThrow("资产已定版，不能新增附件");
+  });
+
+  it("rejects asset attachment uploads from non-project members", () => {
+    const { record, state } = createAssetRecord();
+    const withOutsider = registerUser(state, {
+      name: "asset attachment outsider",
+      role: "creator"
+    });
+
+    expect(() =>
+      createAssetAttachmentMetadata(withOutsider, {
+        assetLockRecordId: record?.id ?? "",
+        fileId: "file-not-member",
+        fileName: "not-member.png",
+        mime: "image/png",
+        size: 1024,
+        attachmentType: "reference",
+        uploadedByUserId: withOutsider.currentUserId ?? ""
+      })
+    ).toThrow("上传资产附件需要先成为项目成员");
+
+    expect(() =>
+      createAssetAttachmentMetadata(state, {
+        assetLockRecordId: record?.id ?? "",
+        fileId: "file-missing-user",
+        fileName: "missing-user.png",
+        mime: "image/png",
+        size: 1024,
+        attachmentType: "reference",
+        uploadedByUserId: "missing-user"
+      })
+    ).toThrow("用户不存在");
+  });
+
+  it("allows only uploader or owner/coordinator to soft delete asset attachments", () => {
+    const { record, state } = createAssetRecord();
+    const withAttachment = createAssetAttachmentMetadata(state, {
+      assetLockRecordId: record?.id ?? "",
+      fileId: "file-delete",
+      fileName: "delete-me.png",
+      mime: "image/png",
+      size: 1024,
+      attachmentType: "reference",
+      uploadedByUserId: "user-head-writer"
+    });
+    const attachmentId = withAttachment.assetAttachments?.at(-1)?.id ?? "";
+
+    expect(() =>
+      softDeleteAssetAttachment(withAttachment, {
+        assetAttachmentId: attachmentId,
+        deletedByUserId: "user-creator-a"
+      })
+    ).toThrow("删除资产附件权限不足");
+
+    const deletedByUploader = softDeleteAssetAttachment(withAttachment, {
+      assetAttachmentId: attachmentId,
+      deletedByUserId: "user-head-writer"
+    });
+    const deleted = deletedByUploader.assetAttachments?.find((attachment) => attachment.id === attachmentId);
+
+    expect(deleted?.status).toBe("deleted");
+    expect(deleted?.deletedByUserId).toBe("user-head-writer");
+    expect(listAssetAttachmentsForRecord(deletedByUploader, record?.id ?? "")).toHaveLength(0);
+
+    const withSecondAttachment = createAssetAttachmentMetadata(state, {
+      assetLockRecordId: record?.id ?? "",
+      fileId: "file-delete-by-owner",
+      fileName: "delete-by-owner.png",
+      mime: "image/png",
+      size: 1024,
+      attachmentType: "reference",
+      uploadedByUserId: "user-head-writer"
+    });
+    const secondAttachmentId = withSecondAttachment.assetAttachments?.at(-1)?.id ?? "";
+    const deletedByCoordinator = softDeleteAssetAttachment(withSecondAttachment, {
+      assetAttachmentId: secondAttachmentId,
+      deletedByUserId: "user-owner"
+    });
+
+    expect(deletedByCoordinator.assetAttachments?.find((attachment) => attachment.id === secondAttachmentId)?.status).toBe(
+      "deleted"
+    );
   });
 });

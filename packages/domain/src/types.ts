@@ -14,6 +14,10 @@ export type AssetRiskLevel = "normal" | "attention" | "high";
 
 export type AssetType = "character" | "scene" | "prop" | "vehicle" | "effect";
 
+export type AssetAttachmentType = "reference" | "production" | "final";
+
+export type AssetAttachmentStatus = "active" | "deleted";
+
 export type ProjectRole =
   | "owner"
   | "coordinator"
@@ -122,6 +126,25 @@ export interface AssetLockRecord {
   updatedAt: string;
 }
 
+export interface AssetAttachment {
+  id: string;
+  projectId: string;
+  assetLockRecordId: string;
+  deliveryPackageId: string;
+  fileId: string;
+  fileName: string;
+  mime: string;
+  size: number;
+  version: number;
+  attachmentType: AssetAttachmentType;
+  uploadedByUserId: string;
+  uploadedAt: string;
+  note?: string;
+  status: AssetAttachmentStatus;
+  deletedByUserId?: string;
+  deletedAt?: string;
+}
+
 export interface DeliveryPackage {
   id: string;
   projectId: string;
@@ -193,6 +216,7 @@ export interface WorkspaceState {
   episodes: Episode[];
   assignments: EpisodeAssignment[];
   assetLockRecords?: AssetLockRecord[];
+  assetAttachments?: AssetAttachment[];
   deliveryPackages: DeliveryPackage[];
   deliveryPackageEpisodes: DeliveryPackageEpisode[];
   episodeRevisions: EpisodeRevision[];
@@ -276,6 +300,22 @@ export interface AssetLockRecordDisputeInput {
 export interface AssetLockRecordFinalLockInput {
   assetLockRecordId: string;
   lockedByUserId: string;
+}
+
+export interface AssetAttachmentMetadataInput {
+  assetLockRecordId: string;
+  fileId: string;
+  fileName: string;
+  mime: string;
+  size: number;
+  attachmentType: AssetAttachmentType;
+  uploadedByUserId: string;
+  note?: string;
+}
+
+export interface AssetAttachmentDeleteInput {
+  assetAttachmentId: string;
+  deletedByUserId: string;
 }
 
 export interface RegisterInput {

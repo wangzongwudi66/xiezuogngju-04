@@ -1,4 +1,7 @@
 import type {
+  AssetAttachment,
+  AssetAttachmentDeleteInput,
+  AssetAttachmentMetadataInput,
   AssetLockRecord,
   AssetLockRecordDisputeInput,
   AssetLockRecordFinalLockInput,
@@ -695,6 +698,102 @@ export function finalLockAssetRecord(state: WorkspaceState, input: AssetLockReco
   });
 }
 
+export function createAssetAttachmentMetadata(
+  state: WorkspaceState,
+  input: AssetAttachmentMetadataInput
+): WorkspaceState {
+  const record = requireAssetLockRecord(state, input.assetLockRecordId);
+  assertProjectMember(state, record.projectId, input.uploadedByUserId, "上传资产附件");
+
+  if (record.status === "locked") {
+    throw new Error("资产已定版，不能新增附件");
+  }
+
+  const fileId = input.fileId.trim();
+  const fileName = input.fileName.trim();
+  const mime = input.mime.trim();
+
+  if (!fileId) {
+    throw new Error("附件文件标识不能为空");
+  }
+
+  if (!fileName) {
+    throw new Error("附件文件名不能为空");
+  }
+
+  if (!mime) {
+    throw new Error("附件文件类型不能为空");
+  }
+
+  if (!Number.isFinite(input.size) || input.size <= 0) {
+    throw new Error("附件大小不合法");
+  }
+
+  const uploadedAt = timestamp();
+  const attachment: AssetAttachment = {
+    id: createId("asset-attachment", `${record.id}-${fileId}`),
+    projectId: record.projectId,
+    assetLockRecordId: record.id,
+    deliveryPackageId: record.deliveryPackageId,
+    fileId,
+    fileName,
+    mime,
+    size: input.size,
+    version: nextAssetAttachmentVersion(state, record.id),
+    attachmentType: input.attachmentType,
+    uploadedByUserId: input.uploadedByUserId,
+    uploadedAt,
+    note: input.note?.trim() || undefined,
+    status: "active"
+  };
+
+  return {
+    ...state,
+    assetAttachments: [...getAssetAttachments(state), attachment]
+  };
+}
+
+export function listAssetAttachmentsForRecord(state: WorkspaceState, assetLockRecordId: string) {
+  requireAssetLockRecord(state, assetLockRecordId);
+
+  return getAssetAttachments(state)
+    .filter((attachment) => attachment.assetLockRecordId === assetLockRecordId && attachment.status === "active")
+    .sort((a, b) => a.version - b.version || a.uploadedAt.localeCompare(b.uploadedAt));
+}
+
+export function softDeleteAssetAttachment(
+  state: WorkspaceState,
+  input: AssetAttachmentDeleteInput
+): WorkspaceState {
+  const attachment = requireAssetAttachment(state, input.assetAttachmentId);
+
+  if (attachment.status === "deleted") {
+    return state;
+  }
+
+  if (attachment.uploadedByUserId !== input.deletedByUserId) {
+    assertProjectRole(state, attachment.projectId, input.deletedByUserId, ["owner", "coordinator"], "删除资产附件");
+  } else {
+    assertProjectMember(state, attachment.projectId, input.deletedByUserId, "删除资产附件");
+  }
+
+  const deletedAt = timestamp();
+
+  return {
+    ...state,
+    assetAttachments: getAssetAttachments(state).map((item) =>
+      item.id === attachment.id
+        ? {
+            ...item,
+            status: "deleted",
+            deletedByUserId: input.deletedByUserId,
+            deletedAt
+          }
+        : item
+    )
+  };
+}
+
 export function markNotificationRead(state: WorkspaceState, notificationId: string): WorkspaceState {
   const readAt = timestamp();
 
@@ -1003,6 +1102,28 @@ function replaceAssetLockRecord(state: WorkspaceState, record: AssetLockRecord):
   };
 }
 
+function getAssetAttachments(state: WorkspaceState) {
+  return state.assetAttachments ?? [];
+}
+
+function requireAssetAttachment(state: WorkspaceState, assetAttachmentId: string) {
+  const attachment = getAssetAttachments(state).find((item) => item.id === assetAttachmentId);
+
+  if (!attachment) {
+    throw new Error("资产附件不存在");
+  }
+
+  return attachment;
+}
+
+function nextAssetAttachmentVersion(state: WorkspaceState, assetLockRecordId: string) {
+  return (
+    getAssetAttachments(state)
+      .filter((attachment) => attachment.assetLockRecordId === assetLockRecordId)
+      .reduce((max, attachment) => Math.max(max, attachment.version), 0) + 1
+  );
+}
+
 function assertDeliveryStatus(deliveryPackage: DeliveryPackage, status: DeliveryPackage["status"]) {
   if (deliveryPackage.status !== status) {
     throw new Error(`交稿包状态必须是 ${status}`);
@@ -1032,6 +1153,20 @@ function assertProjectRole(
 
   if (!roles.some((role) => allowedRoles.includes(role))) {
     throw new Error(`${actionName}权限不足`);
+  }
+}
+
+function assertProjectMember(state: WorkspaceState, projectId: string, userId: string, actionName: string) {
+  const user = state.users.find((item) => item.id === userId);
+
+  if (!user) {
+    throw new Error("用户不存在");
+  }
+
+  const isMember = state.members.some((member) => member.projectId === projectId && member.userId === userId);
+
+  if (!isMember) {
+    throw new Error(`${actionName}需要先成为项目成员`);
   }
 }
 

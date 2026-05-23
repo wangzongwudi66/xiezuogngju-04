@@ -114,6 +114,9 @@ Next step for asset branch:
 - Completed conservative asset candidate extraction domain helper.
 - Added `AssetLockRecordCandidate` and `extractAssetLockCandidatesFromDeliveryEpisodes`.
 - Candidate extraction uses keyword rules for character, scene, prop, vehicle, and effect candidates.
+- Completed asset attachment domain metadata.
+- Added `AssetAttachment`, `AssetAttachmentType`, `AssetAttachmentStatus`, `WorkspaceState.assetAttachments?`, and metadata create/list/soft-delete functions.
+- Attachment metadata rules: derive project/package from record, reject locked records, require project membership, increment per-record version, and restrict deletion to uploader/owner/coordinator.
 - Verified with `npm.cmd run test -w packages/domain`, `npm.cmd run typecheck -w apps/web`, and `npm.cmd run test -w apps/web`.
 - Status: paused.
 
@@ -124,6 +127,9 @@ Next step for asset branch:
 - Completed frontend import retry entry.
 - Completed asset lock workbench UX/message pass after API integration.
 - Improved empty states, role-specific action labels, processing states, final-lock blocking hints, and business error messages.
+- Completed static UI/visual audit.
+- UI backlog: reduce `ShieldCheck`/`FileText` icon overload, normalize font hierarchy/button weights, reduce asset lock density, de-emphasize delivery demo entry, and later add lightweight empty-state visuals.
+- Structural UI changes should wait until attachment upload entry lands.
 - Status: paused.
 
 ### 分支1
@@ -145,6 +151,8 @@ Next step for asset branch:
 - Added tests for ignored client status fields, cross-project rejection, invalid episodeNos, unauthorized actors, draft-package rejection, legacy snapshots without `assetLockRecords`, and GET-all behavior.
 - Completed candidate-generation API integration.
 - Added `generate_from_package` action and changed `prepare_demo` to generate from actual published package episodes before falling back to demo records.
+- Completed `/api/asset-lock-attachments` backend upload/list implementation.
+- Added attachment file storage under `AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR` / `.local-data/asset-lock-attachments`, MIME+extension validation, 20MB limit, opaque `asset-att-*` file ids, path boundary checks, and metadata cleanup on failure.
 - Status: paused.
 
 ### 并行B
@@ -167,6 +175,12 @@ Next step for asset branch:
 - Completed read-only review for asset lock domain/API.
 - Conclusion: needs minor backend hardening before final integration.
 - Key concerns: actor identity is request-body trusted in prototype mode; clarify draft vs published delivery package creation rule; add tests for cross-project, unauthorized actors, ignored client status fields, and old snapshots without `assetLockRecords`.
+- Completed asset attachment security/storage review.
+- Attachment API must use opaque `asset-att-*` file ids, `AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR`, `.local-data/asset-lock-attachments`, directory boundary checks, `/* turbopackIgnore: true */` on fs calls, 20MB max file size, and MIME+extension whitelist.
+- Attachment API must not return `filePath`, `.local-data`, env directories, or absolute paths.
+- Metadata/file consistency is a blocker: validation must happen before writes; if metadata write fails after file write, clean up the written file.
+- Completed UI parallel-safety review.
+- UI work can safely parallelize only as scoped `.asset-*` CSS micro-polish in `globals.css`; avoid `m1-dashboard.tsx`, `AssetLockWorkbench` props, detail panel, actions, selected record logic, and attachment entry areas until attachment mainline lands.
 - Status: paused.
 
 ### Lagrange
@@ -218,6 +232,7 @@ Start the next asset stage with parallel support:
 
 Recommended next stage:
 
-1. Run full verify and commit candidate-generation integration.
-2. Then start asset attachment implementation as the next backend/frontend stage.
-3. Do not push or merge until the user asks.
+1. Verify and commit attachment backend.
+2. Then ask 分支1 to add the frontend attachment upload/list entry.
+3. Keep UI CSS micro-polish as a separate commit.
+4. Do not push or merge until the user asks.

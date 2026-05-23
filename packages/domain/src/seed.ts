@@ -39,6 +39,7 @@ export const seedWorkspace: WorkspaceState = {
   ],
   memberPermissions: [],
   assetLockRecords: [],
+  assetAttachments: [],
   deliveryPackages: [],
   deliveryPackageEpisodes: [],
   episodeRevisions: [],
