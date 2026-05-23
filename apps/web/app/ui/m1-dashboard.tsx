@@ -81,6 +81,7 @@ import { fetchAssetLockRecords, formatAssetLockError, mutateAssetLockRecord, pre
 import type { AssetLockCreateDraft, AssetLockRecordSummary } from "./asset-lock-api";
 import { canRetryDeliveryImportJob, formatDeliveryImportError } from "./delivery-import-feedback";
 import {
+  canAccessAssetWorkflowRole,
   canAccessDeliveryRole,
   canCreateDeliveryRole,
   canReviewDeliveryRole,
@@ -518,6 +519,7 @@ export function M1Dashboard() {
   const canSubmitDelivery = canSubmitDeliveryRole(primaryRole);
   const isSelectedProjectMember = state.members.some((member) => member.projectId === selectedProject.id && member.userId === currentUser.id);
   const canAccessDelivery = isSelectedProjectMember && canAccessDeliveryRole(primaryRole);
+  const canAccessAssetWorkflow = isSelectedProjectMember && canAccessAssetWorkflowRole(primaryRole);
   const overview = selectProjectOverview(state, selectedProject.id);
   const projectMembers = selectProjectMembers(state, selectedProject.id);
   const myEpisodes = filterProjectItems(selectMyEpisodes(state, currentUser.id), selectedProject.id);
@@ -1325,7 +1327,9 @@ export function M1Dashboard() {
               assetLockMutating={assetLockMutating}
               assetLockRecords={projectAssetLockRecords}
               assetLockSummary={assetLockSummary}
+              assignedEpisodeNos={myEpisodes.map((episode) => episode.episodeNo)}
               assignmentSummary={assignmentSummary}
+              canAccessAssetWorkflow={canAccessAssetWorkflow}
               canAccessDelivery={canAccessDelivery}
               canCreateDelivery={canCreateDelivery}
               canReviewDelivery={canReviewDelivery}
@@ -1946,7 +1950,9 @@ function ModuleWorkbench({
   assetLockMutating,
   assetLockRecords,
   assetLockSummary,
+  assignedEpisodeNos,
   assignmentSummary,
+  canAccessAssetWorkflow,
   canAccessDelivery,
   canCreateDelivery,
   canReviewDelivery,
@@ -1998,7 +2004,9 @@ function ModuleWorkbench({
   assetLockMutating: boolean;
   assetLockRecords: AssetLockRecord[];
   assetLockSummary: AssetLockRecordSummary | null;
+  assignedEpisodeNos: number[];
   assignmentSummary: AssignmentSummaryItem[];
+  canAccessAssetWorkflow: boolean;
   canAccessDelivery: boolean;
   canCreateDelivery: boolean;
   canReviewDelivery: boolean;
@@ -2179,7 +2187,7 @@ function ModuleWorkbench({
   }
 
   if (activeModule === "资产定版") {
-    if (!canAccessDelivery) {
+    if (!canAccessAssetWorkflow) {
       return (
         <section className="panel module-panel">
           <PanelTitle title="资产核对与定版工作台" eyebrow={projectName} />
@@ -2214,7 +2222,7 @@ function ModuleWorkbench({
   }
 
   if (activeModule === "资产轨道") {
-    if (!canAccessDelivery) {
+    if (!canAccessAssetWorkflow) {
       return (
         <section className="panel module-panel">
           <PanelTitle title="资产决策剪辑轨道" eyebrow={projectName} />
@@ -2227,6 +2235,7 @@ function ModuleWorkbench({
       <AssetDecisionTimelinePrototype
         actorRole={actorRole}
         actorUserId={actorUserId}
+        assignedEpisodeNos={assignedEpisodeNos}
         projectId={projectId}
         projectName={projectName}
       />
@@ -3267,12 +3276,13 @@ function buildNavigationItems(
   );
 
   const canUseDeliveryCenter = canAccessDeliveryRole(primaryRole);
+  const canUseAssetWorkflow = canAccessAssetWorkflowRole(primaryRole);
 
   if (canUseDeliveryCenter) {
     items.push({ icon: FileText, label: "交稿中心" });
   }
 
-  if (permissions.canReviewAssets || canUseDeliveryCenter) {
+  if (permissions.canReviewAssets || canUseAssetWorkflow) {
     items.push({ icon: PanelTop, label: "资产轨道" });
     items.push({ icon: ShieldCheck, label: "资产定版" });
   }
@@ -3290,6 +3300,7 @@ function buildNavigationItems(
 
 function buildShortcutItems(permissions: ReturnType<typeof selectPermissions>, primaryRole: ProjectRole): NavigationItem[] {
   const canUseDeliveryCenter = canAccessDeliveryRole(primaryRole);
+  const canUseAssetWorkflow = canAccessAssetWorkflowRole(primaryRole);
 
   return baseShortcutItems.filter((item) => {
     if (item.label === "集数分配") {
@@ -3309,7 +3320,7 @@ function buildShortcutItems(permissions: ReturnType<typeof selectPermissions>, p
     }
 
     if (item.label === "资产定版" || item.label === "资产轨道") {
-      return permissions.canReviewAssets || canUseDeliveryCenter;
+      return permissions.canReviewAssets || canUseAssetWorkflow;
     }
 
     return true;

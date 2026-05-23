@@ -156,13 +156,23 @@ Current committed timeline refinement after 并行D review:
 - Makes the right detail drawer overlay at narrower desktop widths to avoid squeezing the central track.
 - Defaults creator view to "影响我的集" and coordinator/writer views to "今日必须确认".
 - Reopens the right detail drawer when the user selects a decision queue.
+- After replacement Branch A/B/C/D review, addressed first-pass acceptance fixes:
+  - Creator project members can now enter asset timeline / asset lock workflows without granting delivery-center access.
+  - Timeline uses dashboard-provided assigned episode numbers for creator scope when available.
+  - Right detail drawer is closed by default and opens from queue/group/clip selection, reducing first-screen track obstruction.
+  - Left queue now shows concrete decision items, not only category counts.
+  - Empty status track is hidden in the rendered prototype.
+  - Added a removed-asset sample and visible change-marker legend.
+  - Detail drawer now includes asset facts, decision status/owner metadata, and lightweight communication records.
+  - Layout CSS gives the center track priority, uses overlay detail at narrower desktop widths, and keeps mobile horizontal scroll inside the track board.
+  - Added helper tests for assigned creator scope, project id projection, grid clipping, and removed-asset marker coverage.
 - Targeted verification passed before full verify:
   - `npm.cmd run typecheck -w apps/web`
   - `npm.cmd run test -w apps/web -- asset-decision-timeline`
   - `npm.cmd run test -w apps/web` passed with 13 test files / 101 tests.
 - Full verification passed:
   - `npm.cmd run verify`
-  - web tests: 13 test files / 102 tests passed.
+  - web tests: 13 test files / 104 tests passed.
   - domain tests: 5 test files / 47 tests passed.
   - Next build passed without Turbopack/NFT warnings.
   - `http://localhost:3000` returned 200 locally.
@@ -264,10 +274,10 @@ Asset lock mutation hardening added on top of the timeline branch:
 
 The previous sub-conversations are no longer available. If parallel review is needed, reopen only these four:
 
-- Branch A: product acceptance for the asset decision timeline, including creator/writer/coordinator flow and must-fix vs deferrable issues.
-- Branch B: UI and interaction acceptance, focused on horizontal timeline dominance, ghost clip readability, decision aggregation, drawer behavior, and narrow viewport risks.
-- Branch C: code and test review for `asset-decision-timeline-data.ts`, its tests, the timeline component, and the `m1-dashboard.tsx` entry point.
-- Branch D: architecture boundary review for whether/when timeline fields should move from UI mock data into domain/API.
+- Branch A: product acceptance for the asset decision timeline, including creator/writer/coordinator flow and must-fix vs deferrable issues. Returned: static prototype meets lower bound but needed product-flow fixes; first-pass issues above are addressed.
+- Branch B: UI and interaction acceptance, focused on horizontal timeline dominance, ghost clip readability, decision aggregation, drawer behavior, and narrow viewport risks. Returned: P1 layout/drawer/mobile concerns; first-pass CSS and drawer behavior fixes are applied.
+- Branch C: code and test review for `asset-decision-timeline-data.ts`, its tests, the timeline component, and the `m1-dashboard.tsx` entry point. Returned: creator access/scope and helper test gaps; first-pass access and tests are applied.
+- Branch D: architecture boundary review for whether/when timeline fields should move from UI mock data into domain/API. Returned: do not move the whole timeline into domain/API yet; keep view model in UI mock until UI/product validation passes.
 
 Sub-conversations should not commit or push. Main conversation owns branch rhythm, integration, verification, and merge decisions.
 
@@ -300,7 +310,7 @@ Continue asset decision timeline acceptance.
 Recommended first actions:
 
 1. Run visual click-through acceptance for `资产轨道` as creator, coordinator, and writer when browser tooling is available.
-2. Apply only small UI/readability fixes needed for first-version acceptance.
+2. Re-review whether Branch A/B/C P1/P2 issues are sufficiently addressed after the latest first-pass fixes.
 3. Keep timeline types in `apps/web/app/ui/asset-decision-timeline-data.ts` until product/UI validation is complete.
 4. Do not add database, real auth/session, AI parsing, or new timeline APIs yet.
-5. After A/B/C/D review feedback, decide whether to merge `codex/asset-decision-timeline` into `main`.
+5. If visual acceptance passes, decide whether to merge `codex/asset-decision-timeline` into `main`.

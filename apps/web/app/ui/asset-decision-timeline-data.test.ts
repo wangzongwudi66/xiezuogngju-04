@@ -23,13 +23,44 @@ describe("asset decision timeline data helpers", () => {
     expect(viewModel.decisionQueue.some((item) => item.kind === "conflict")).toBe(true);
   });
 
+  it("uses assigned episodes when the dashboard provides a creator scope", () => {
+    const viewModel = buildMockAssetDecisionTimelineViewModel({
+      assignedEpisodeNos: [8, 1, 2, 3, 4, 5, 6, 7],
+      projectId: "project-tide",
+      viewerRole: "creator",
+      viewerUserId: "user-creator-a"
+    });
+
+    expect(viewModel.episodeWindow).toEqual({ from: 1, to: 10 });
+    expect(viewModel.creatorAssignedWindow?.episodeNos).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(viewModel.decisionQueue.every((item) => item.episodeNos.some((episodeNo) => episodeNo <= 8))).toBe(true);
+    expect(viewModel.decisionQueue.every((item) => item.projectId === "project-tide")).toBe(true);
+    expect(viewModel.sourceExcerpts.every((excerpt) => excerpt.projectId === "project-tide")).toBe(true);
+  });
+
   it("maps timeline clips to the visible episode grid", () => {
     expect(mapClipToEpisodeGrid({ episodeFrom: 8, episodeTo: 13 }, { from: 7, to: 13 })).toEqual({
       gridColumn: "2 / 8",
       visibleEpisodeFrom: 8,
       visibleEpisodeTo: 13
     });
+    expect(mapClipToEpisodeGrid({ episodeFrom: 5, episodeTo: 8 }, { from: 7, to: 13 })).toEqual({
+      gridColumn: "1 / 3",
+      visibleEpisodeFrom: 7,
+      visibleEpisodeTo: 8
+    });
+    expect(mapClipToEpisodeGrid({ episodeFrom: 12, episodeTo: 15 }, { from: 7, to: 13 })).toEqual({
+      gridColumn: "6 / 8",
+      visibleEpisodeFrom: 12,
+      visibleEpisodeTo: 13
+    });
+    expect(mapClipToEpisodeGrid({ episodeFrom: 7, episodeTo: 7 }, { from: 7, to: 13 })).toEqual({
+      gridColumn: "1 / 2",
+      visibleEpisodeFrom: 7,
+      visibleEpisodeTo: 7
+    });
     expect(mapClipToEpisodeGrid({ episodeFrom: 1, episodeTo: 3 }, { from: 7, to: 13 })).toBeNull();
+    expect(mapClipToEpisodeGrid({ episodeFrom: 14, episodeTo: 16 }, { from: 7, to: 13 })).toBeNull();
   });
 
   it("filters queue decisions and summarizes by decision meaning", () => {
@@ -88,5 +119,18 @@ describe("asset decision timeline data helpers", () => {
       visibleEpisodeFrom: 10,
       visibleEpisodeTo: 13
     });
+  });
+
+  it("keeps a removed-asset sample visible for change marker acceptance", () => {
+    const viewModel = buildMockAssetDecisionTimelineViewModel({
+      projectId: "project-jincheng",
+      viewerRole: "coordinator",
+      viewerUserId: "user-owner"
+    });
+    const removedClip = viewModel.tracks.flatMap((track) => track.clips).find((clip) => clip.id === "clip-fan");
+    const removedDecision = viewModel.decisionQueue.find((item) => item.id === "decision-fan-removed");
+
+    expect(removedClip?.ghost?.changeMarkers).toContain("removed");
+    expect(removedDecision?.kind).toBe("removed_asset");
   });
 });

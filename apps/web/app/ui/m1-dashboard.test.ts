@@ -3,6 +3,7 @@ import { registerUser, seedWorkspace, selectMyEpisodes } from "@aigc/domain";
 import { buildTodayTasks } from "./dashboard-tasks";
 import { canRetryDeliveryImportJob, formatDeliveryImportError } from "./delivery-import-feedback";
 import {
+  canAccessAssetWorkflowRole,
   canAccessDeliveryRole,
   canCreateDeliveryRole,
   canReviewDeliveryRole,
@@ -60,6 +61,10 @@ describe("coordinator delivery role view", () => {
     expect(canAccessDeliveryRole("writer")).toBe(true);
     expect(canCreateDeliveryRole("writer")).toBe(false);
     expect(canSubmitDeliveryRole("writer")).toBe(false);
+
+    expect(canAccessDeliveryRole("creator")).toBe(false);
+    expect(canAccessAssetWorkflowRole("creator")).toBe(true);
+    expect(canAccessAssetWorkflowRole("writer")).toBe(true);
   });
 
   it("allows reviewers to create import drafts even when they cannot submit as head writer", () => {

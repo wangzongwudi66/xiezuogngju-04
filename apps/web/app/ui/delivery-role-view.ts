@@ -16,6 +16,10 @@ export function canAccessDeliveryRole(primaryRole: ProjectRole) {
   return primaryRole === "writer" || primaryRole === "head_writer" || canReviewDeliveryRole(primaryRole);
 }
 
+export function canAccessAssetWorkflowRole(primaryRole: ProjectRole) {
+  return primaryRole === "creator" || canAccessDeliveryRole(primaryRole);
+}
+
 export function filterProjectItems<T extends { projectId: string }>(items: T[], projectId: string) {
   return items.filter((item) => item.projectId === projectId);
 }

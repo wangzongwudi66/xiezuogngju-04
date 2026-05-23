@@ -278,6 +278,19 @@ const segments: AssetStateSegment[] = [
     changeType: "new",
     risk: "high",
     sourceExcerptIds: ["excerpt-dust-ep12"]
+  },
+  {
+    id: "segment-fan-current",
+    assetLockRecordId: "asset-lock-fan",
+    assetName: "旧式通风机",
+    assetType: "prop",
+    stateLabel: "本版删除 / 不再制作",
+    episodeFrom: 14,
+    episodeTo: 15,
+    episodeNos: [14, 15],
+    changeType: "removed",
+    risk: "attention",
+    sourceExcerptIds: ["excerpt-dust-ep12"]
   }
 ];
 
@@ -337,6 +350,26 @@ const decisions: AssetDecisionItem[] = [
     currentSummary: "当前版：粉尘闪过两秒并带断裂声。",
     previousSummary: "上一版：普通塌方扬尘，没有爆闪。",
     risk: "high",
+    createdAt: "2026-05-24T00:00:00.000Z",
+    updatedAt: "2026-05-24T00:00:00.000Z"
+  },
+  {
+    id: "decision-fan-removed",
+    projectId: "project-jincheng",
+    assetLockRecordId: "asset-lock-fan",
+    clipId: "clip-fan",
+    kind: "removed_asset",
+    status: "acknowledged",
+    title: "旧式通风机从本版删除",
+    description: "上一版第 14-15 集保留旧式通风机，本版改为只用红色安全灯和粉尘反馈，不再单独制作该道具。",
+    episodeNos: [14, 15],
+    queueTags: ["script_changes"],
+    assignedToRole: "creator",
+    assignedToUserId: "user-creator-a",
+    sourceExcerptIds: ["excerpt-dust-ep12"],
+    currentSummary: "当前版：第 14-15 集不再出现旧式通风机。",
+    previousSummary: "上一版：第 14-15 集需要旧式通风机作为持续背景道具。",
+    risk: "attention",
     createdAt: "2026-05-24T00:00:00.000Z",
     updatedAt: "2026-05-24T00:00:00.000Z"
   },
@@ -465,28 +498,65 @@ const clips: AssetTimelineClip[] = [
     },
     decisionItemIds: ["decision-dust-conflict"],
     isInAssignedWindow: true
+  },
+  {
+    id: "clip-fan",
+    trackId: "track-prop",
+    assetLockRecordId: "asset-lock-fan",
+    assetName: "旧式通风机",
+    assetType: "prop",
+    episodeFrom: 14,
+    episodeTo: 15,
+    currentSegment: segments[5],
+    ghost: {
+      previousSegmentId: "segment-fan-previous",
+      previousDeliveryPackageId: "delivery-jc-previous",
+      previousEpisodeFrom: 14,
+      previousEpisodeTo: 15,
+      previousStateLabel: "持续背景道具",
+      previousSourceExcerptIds: ["excerpt-dust-ep12"],
+      changeMarkers: ["removed", "source_changed"],
+      summary: "上一版第 14-15 集保留旧式通风机，本版删除该道具，改由灯光和粉尘承担反馈。"
+    },
+    decisionItemIds: ["decision-fan-removed"],
+    isInAssignedWindow: false
   }
 ];
 
 export function buildMockAssetDecisionTimelineViewModel(input: {
   projectId: string;
+  assignedEpisodeNos?: number[];
   viewerRole: ProjectRole;
   viewerUserId: string;
 }): RoleScopedAssetTimelineViewModel {
   const isCreator = input.viewerRole === "creator";
+  const scopedSourceExcerpts = sourceExcerpts.map((excerpt) => ({
+    ...excerpt,
+    projectId: input.projectId
+  }));
+  const scopedDecisions = decisions.map((decision) => ({
+    ...decision,
+    projectId: input.projectId
+  }));
+  const assignedEpisodeNos = normalizeEpisodeNos(input.assignedEpisodeNos);
+  const creatorEpisodeNos = assignedEpisodeNos.length > 0 ? assignedEpisodeNos : [7, 8, 9, 10, 11, 12, 13];
+  const creatorEpisodeFrom = creatorEpisodeNos[0] ?? 7;
+  const creatorEpisodeTo = creatorEpisodeNos[creatorEpisodeNos.length - 1] ?? 13;
+  const episodeWindow = isCreator ? buildCreatorEpisodeWindow(creatorEpisodeNos) : { from: 6, to: 15 };
   const creatorAssignedWindow: CreatorAssignedEpisodeWindow | undefined = isCreator
     ? {
         projectId: input.projectId,
         userId: input.viewerUserId,
-        episodeFrom: 7,
-        episodeTo: 13,
-        episodeNos: [7, 8, 9, 10, 11, 12, 13],
+        episodeFrom: creatorEpisodeFrom,
+        episodeTo: creatorEpisodeTo,
+        episodeNos: creatorEpisodeNos,
         sourceAssignmentIds: ["assignment-demo-creator-window"]
       }
     : undefined;
+  const creatorEpisodeSet = new Set(creatorEpisodeNos);
   const scopedClips = clips.map((clip) => ({
     ...clip,
-    isDimmedByRoleScope: isCreator && !rangeIntersects(clip.episodeFrom, clip.episodeTo, 7, 13)
+    isDimmedByRoleScope: isCreator && !clip.currentSegment.episodeNos.some((episodeNo) => creatorEpisodeSet.has(episodeNo))
   }));
 
   return {
@@ -494,13 +564,15 @@ export function buildMockAssetDecisionTimelineViewModel(input: {
     viewerUserId: input.viewerUserId,
     viewerRole: input.viewerRole,
     viewMode: "work_window",
-    episodeWindow: { from: 6, to: 15 },
+    episodeWindow,
     creatorAssignedWindow,
     tracks: buildTracks(input.projectId, scopedClips),
     decisionQueue: isCreator
-      ? decisions.filter((item) => item.queueTags.includes("affects_my_episodes"))
-      : decisions,
-    sourceExcerpts,
+      ? scopedDecisions.filter(
+          (item) => item.queueTags.includes("affects_my_episodes") && item.episodeNos.some((episodeNo) => creatorEpisodeSet.has(episodeNo))
+        )
+      : scopedDecisions,
+    sourceExcerpts: scopedSourceExcerpts,
     selectedClipId: "clip-scar",
     permissions: {
       canViewFullSeries: input.viewerRole === "owner" || input.viewerRole === "coordinator" || input.viewerRole === "head_writer",
@@ -510,6 +582,24 @@ export function buildMockAssetDecisionTimelineViewModel(input: {
       canResolveConflict: input.viewerRole === "coordinator" || input.viewerRole === "owner"
     }
   };
+}
+
+function normalizeEpisodeNos(episodeNos: number[] | undefined) {
+  return Array.from(new Set(episodeNos ?? []))
+    .filter((episodeNo) => Number.isInteger(episodeNo) && episodeNo > 0)
+    .sort((a, b) => a - b);
+}
+
+function buildCreatorEpisodeWindow(episodeNos: number[]) {
+  const from = episodeNos[0] ?? 7;
+  const to = episodeNos[episodeNos.length - 1] ?? 13;
+  let windowFrom = Math.max(1, from - 1);
+
+  if (windowFrom + 9 < to) {
+    windowFrom = Math.max(1, to - 9);
+  }
+
+  return { from: windowFrom, to: windowFrom + 9 };
 }
 
 export function buildTracks(projectId: string, timelineClips: AssetTimelineClip[]): AssetTimelineTrack[] {

@@ -25,15 +25,40 @@ import type {
 } from "./asset-decision-timeline-data";
 
 const queueOrder: AssetTimelineQueueTag[] = ["due_today", "affects_my_episodes", "conflicts", "script_changes", "waiting_others"];
+const changeMarkerLabels: Record<string, string> = {
+  new: "新增",
+  removed: "删除",
+  range_changed: "范围变化",
+  state_changed: "状态变化",
+  source_changed: "来源变化"
+};
+const decisionStatusLabels: Record<AssetDecisionItem["status"], string> = {
+  todo: "待处理",
+  acknowledged: "已了解",
+  executable: "可执行",
+  needs_writer_decision: "待编剧定口径",
+  conflict: "冲突",
+  returned: "已退回",
+  resolved: "已解决"
+};
+const decisionRoleLabels: Partial<Record<ProjectRole, string>> = {
+  owner: "项目所有者",
+  coordinator: "统筹",
+  head_writer: "主编剧",
+  writer: "编剧",
+  creator: "创作者"
+};
 
 export function AssetDecisionTimelinePrototype({
   actorRole,
   actorUserId,
+  assignedEpisodeNos,
   projectId,
   projectName
 }: {
   actorRole: ProjectRole;
   actorUserId: string;
+  assignedEpisodeNos?: number[];
   projectId: string;
   projectName: string;
 }) {
@@ -41,19 +66,21 @@ export function AssetDecisionTimelinePrototype({
     () =>
       buildMockAssetDecisionTimelineViewModel({
         projectId,
+        assignedEpisodeNos,
         viewerRole: actorRole,
         viewerUserId: actorUserId
       }),
-    [actorRole, actorUserId, projectId]
+    [actorRole, actorUserId, assignedEpisodeNos, projectId]
   );
   const defaultQueueTag: AssetTimelineQueueTag = viewModel.creatorAssignedWindow ? "affects_my_episodes" : "due_today";
   const [activeQueueTag, setActiveQueueTag] = useState<AssetTimelineQueueTag>(defaultQueueTag);
   const [selectedClipId, setSelectedClipId] = useState(viewModel.selectedClipId ?? "");
   const [selectedGroupKind, setSelectedGroupKind] = useState<AssetDecisionGroupSummary["kind"] | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const episodeNos = getEpisodeWindowNos(viewModel.episodeWindow);
   const filteredQueue = filterDecisionItemsByQueue(viewModel.decisionQueue, activeQueueTag);
   const decisionGroups = summarizeDecisionGroups(viewModel.decisionQueue);
+  const visibleTracks = viewModel.tracks.filter((track) => track.clips.length > 0);
   const selectedGroup = decisionGroups.find((group) => group.kind === selectedGroupKind);
   const selectedClip = selectedGroup ? undefined : viewModel.tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId);
   const selectedDecisions = selectedGroup
@@ -100,6 +127,16 @@ export function AssetDecisionTimelinePrototype({
     setDrawerOpen(true);
   }
 
+  function selectDecision(decision: AssetDecisionItem) {
+    setSelectedGroupKind(null);
+
+    if (decision.clipId) {
+      setSelectedClipId(decision.clipId);
+    }
+
+    setDrawerOpen(true);
+  }
+
   return (
     <section className="decision-timeline-shell">
       <div className="decision-timeline-topbar">
@@ -134,6 +171,16 @@ export function AssetDecisionTimelinePrototype({
               </button>
             );
           })}
+          <div className="decision-queue-items">
+            {filteredQueue.slice(0, 4).map((decision) => (
+              <button key={decision.id} onClick={() => selectDecision(decision)} type="button">
+                <span>{decision.title}</span>
+                <small>
+                  第 {formatEpisodeRange(decision.episodeNos)} 集 · {timelineRiskLabels[decision.risk]}
+                </small>
+              </button>
+            ))}
+          </div>
           <p>{viewModel.creatorAssignedWindow ? `当前默认聚焦第 ${viewModel.creatorAssignedWindow.episodeFrom}-${viewModel.creatorAssignedWindow.episodeTo} 集。` : "统筹/编剧可查看当前工作窗口内的全部决策压力。"}</p>
         </aside>
 
@@ -147,8 +194,16 @@ export function AssetDecisionTimelinePrototype({
                 type="button"
               >
                 <span>{group.label}</span>
+                <small>
+                  第 {formatEpisodeRange(group.episodeNos)} 集 · {timelineRiskLabels[group.risk]}
+                </small>
                 <strong>{group.count}</strong>
               </button>
+            ))}
+          </div>
+          <div className="decision-track-legend" aria-label="变化标记图例">
+            {Object.entries(changeMarkerLabels).map(([value, label]) => (
+              <span className={value} key={value}>{label}</span>
             ))}
           </div>
 
@@ -161,7 +216,7 @@ export function AssetDecisionTimelinePrototype({
           </div>
 
           <div className="decision-track-board">
-            {viewModel.tracks.map((track) => (
+            {visibleTracks.map((track) => (
               <section className="decision-track-row" key={track.id}>
                 <div className="decision-track-label">
                   <Layers3 size={15} />
@@ -190,7 +245,7 @@ export function AssetDecisionTimelinePrototype({
 
                     return (
                       <button
-                        className={`decision-clip ${clip.assetType} ${clip.currentSegment.risk} ${clip.id === selectedClipId ? "selected" : ""} ${
+                        className={`decision-clip ${clip.assetType} ${clip.currentSegment.risk} ${getClipChangeMarkers(clip)} ${clip.id === selectedClipId ? "selected" : ""} ${
                           focusedClipIds.size > 0 && !focusedClipIds.has(clip.id) ? "muted" : ""
                         }`}
                         key={clip.id}
@@ -198,7 +253,9 @@ export function AssetDecisionTimelinePrototype({
                         style={{ gridColumn: position.gridColumn }}
                         type="button"
                       >
-                        {clip.ghost?.changeMarkers.includes("new") ? <em className="decision-change-chip">新增</em> : null}
+                        {clip.ghost?.changeMarkers.slice(0, 2).map((marker) => (
+                          <em className={`decision-change-chip ${marker}`} key={marker}>{changeMarkerLabels[marker]}</em>
+                        ))}
                         <span>{clip.assetName}</span>
                         <strong>{clip.currentSegment.stateLabel}</strong>
                         <small>
@@ -230,6 +287,20 @@ export function AssetDecisionTimelinePrototype({
       </div>
     </section>
   );
+}
+
+function formatEpisodeRange(episodeNos: number[]) {
+  if (episodeNos.length === 0) {
+    return "-";
+  }
+
+  return episodeNos[0] === episodeNos[episodeNos.length - 1]
+    ? `${episodeNos[0]}`
+    : `${episodeNos[0]}-${episodeNos[episodeNos.length - 1]}`;
+}
+
+function getClipChangeMarkers(clip: AssetTimelineClip) {
+  return clip.ghost?.changeMarkers.join(" ") ?? "";
 }
 
 function GhostClip({
@@ -316,6 +387,30 @@ function AssetTimelineDetailDrawer({
         </div>
       ) : null}
 
+      {clip ? (
+        <div className="decision-detail-card">
+          <strong>资产详情</strong>
+          <dl className="decision-detail-facts">
+            <div>
+              <dt>资产类型</dt>
+              <dd>{clip.assetType}</dd>
+            </div>
+            <div>
+              <dt>涉及集数</dt>
+              <dd>第 {clip.episodeFrom}-{clip.episodeTo} 集</dd>
+            </div>
+            <div>
+              <dt>风险等级</dt>
+              <dd>{timelineRiskLabels[clip.currentSegment.risk]}</dd>
+            </div>
+            <div>
+              <dt>变化标记</dt>
+              <dd>{clip.ghost?.changeMarkers.map((marker) => changeMarkerLabels[marker]).join("、") || "沿用"}</dd>
+            </div>
+          </dl>
+        </div>
+      ) : null}
+
       {group ? (
         <div className="decision-detail-card hero">
           <Sparkles size={16} />
@@ -342,6 +437,9 @@ function AssetTimelineDetailDrawer({
           <article className={`decision-item ${decision.kind}`} key={decision.id}>
             <span>{timelineDecisionLabels[decision.kind]}</span>
             <strong>{decision.title}</strong>
+            <small>
+              {decisionStatusLabels[decision.status]} · {decision.assignedToRole ? decisionRoleLabels[decision.assignedToRole] : "未指定"} · 第 {formatEpisodeRange(decision.episodeNos)} 集
+            </small>
             <p>{decision.description}</p>
           </article>
         ))}
@@ -366,6 +464,18 @@ function AssetTimelineDetailDrawer({
           </div>
         </div>
       ) : null}
+
+      <div className="decision-detail-card">
+        <strong>沟通记录</strong>
+        <article className="source-excerpt">
+          <span>统筹口径</span>
+          <p>先按当前版剧本范围判断资产影响；争议项由统筹协调，确认后再进入执行。</p>
+        </article>
+        <article className="source-excerpt">
+          <span>制作侧反馈</span>
+          <p>需要明确可见范围、状态延续和是否影响已分配集数，避免重复建资产。</p>
+        </article>
+      </div>
 
       <div className="decision-detail-actions">
         <button className="secondary-button" type="button">我已了解</button>
