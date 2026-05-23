@@ -55,7 +55,7 @@ Passed after merging asset lock workbench:
 - Branch: `codex/asset-decision-timeline`
 - Created from local `main` at `05d018b`.
 - Purpose: prototype the next core module, "资产决策剪辑轨道".
-- Current stage: planning and design baseline.
+- Current stage: static UI prototype committed.
 - Do not push or merge until reviewed.
 
 ## Asset Lock Workbench Completion
@@ -119,6 +119,28 @@ Must-have first-version experience:
 See detailed design baseline:
 
 - `docs/asset-decision-timeline.md`
+
+Committed prototype work:
+
+- `3667022 Document asset decision timeline stage`
+- `c70d4c3 Refine asset timeline prototype scope`
+- `a2270c6 Add asset decision timeline prototype`
+
+Prototype files:
+
+- `apps/web/app/ui/asset-decision-timeline-data.ts`
+- `apps/web/app/ui/asset-decision-timeline-data.test.ts`
+- `apps/web/app/ui/asset-decision-timeline.tsx`
+- `apps/web/app/globals.css`
+- `apps/web/app/ui/m1-dashboard.tsx`
+
+Prototype behavior:
+
+- Adds "资产轨道" entry.
+- Uses local UI mock view model only.
+- Shows a 10-15-ish episode work window.
+- Shows layered asset tracks, clips, ghost comparison markers, decision aggregation, left decision queue, and right detail drawer.
+- Does not add API/domain persistence.
 
 ## Sub-Conversation Status
 
@@ -233,4 +255,4 @@ Recommended first actions:
 2. Use 并行B guidance to keep first version as static UI prototype plus minimal view model.
 3. Use 并行D guidance to keep the horizontal track dominant and use right detail as overlay/drawer.
 4. Use 并行A guidance to keep timeline types in `apps/web/app/ui/asset-decision-timeline-data.ts` for the first prototype.
-5. Start local prototype implementation with mock data and tests, avoiding API/domain overcommit until the UI model is validated.
+5. Run review and browser acceptance on the committed static prototype before adding API/domain behavior.
