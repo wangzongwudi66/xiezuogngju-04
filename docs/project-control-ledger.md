@@ -139,6 +139,8 @@ Next step for asset branch:
 - Fixed hydration mismatch.
 - Completed asset lock workbench frontend API integration.
 - Added frontend API helper, server-backed asset lock records, mutation handlers, and tests.
+- Completed asset lock attachment frontend integration.
+- Added `/api/asset-lock-attachments` frontend helper, active attachment list in the asset detail panel, upload form, upload/list error mapping, and tests.
 - Status: paused.
 
 ### 并行C
@@ -232,7 +234,7 @@ Start the next asset stage with parallel support:
 
 Recommended next stage:
 
-1. Verify and commit attachment backend.
-2. Then ask 分支1 to add the frontend attachment upload/list entry.
-3. Keep UI CSS micro-polish as a separate commit.
+1. Verify and commit attachment frontend integration.
+2. Commit asset lock CSS micro-polish separately if accepted.
+3. Run browser acceptance for asset lock records plus attachment upload/list.
 4. Do not push or merge until the user asks.

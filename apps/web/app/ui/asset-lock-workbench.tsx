@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   ClipboardCheck,
+  FileUp,
   FileWarning,
   Filter,
   Flag,
@@ -17,6 +18,7 @@ import {
   UserCheck
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import type { ChangeEvent } from "react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -38,8 +40,13 @@ import type {
   AssetRisk,
   AssetType
 } from "./asset-lock-workbench-data";
-import type { AssetLockRecord } from "@aigc/domain";
+import type { AssetAttachment, AssetAttachmentType, AssetLockRecord } from "@aigc/domain";
 import type { AssetLockCreateDraft, AssetLockRecordSummary } from "./asset-lock-api";
+import {
+  fetchAssetLockAttachments,
+  formatAssetAttachmentError,
+  uploadAssetLockAttachment
+} from "./asset-lock-attachment-api";
 
 type AssetLockPackage = {
   id: string;
@@ -84,6 +91,12 @@ const riskLabels: Record<AssetRisk, string> = {
   normal: "常规",
   attention: "需关注",
   high: "高风险"
+};
+
+const attachmentTypeLabels: Record<AssetAttachmentType, string> = {
+  reference: "参考资料",
+  production: "制作文件",
+  final: "定版附件"
 };
 
 const emptyFilters: AssetLockFilters = {
@@ -140,6 +153,13 @@ export function AssetLockWorkbench({
   const [selectedAssetId, setSelectedAssetId] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeOperation, setActiveOperation] = useState<string | null>(null);
+  const [attachmentsByRecordId, setAttachmentsByRecordId] = useState<Record<string, AssetAttachment[]>>({});
+  const [attachmentType, setAttachmentType] = useState<AssetAttachmentType>("reference");
+  const [attachmentNote, setAttachmentNote] = useState("");
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [attachmentLoadingRecordId, setAttachmentLoadingRecordId] = useState<string | null>(null);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const publishedPackages = deliveryPackages.filter((deliveryPackage) => deliveryPackage.status === "published");
   const packageForView =
     activeDeliveryPackage?.status === "published"
@@ -163,11 +183,46 @@ export function AssetLockWorkbench({
   const bulkHint = getAssetLockBulkHint(selectedIds.length, Boolean(isMutating || activeOperation));
   const isBusy = Boolean(isMutating || activeOperation);
   const selectedAssetCanFinalLock = Boolean(selectedAsset && selectedAsset.reviewStatus !== "locked" && summary.canLock);
+  const selectedAssetAttachments = selectedAsset ? attachmentsByRecordId[selectedAsset.id] ?? [] : [];
 
   useEffect(() => {
     setSelectedAssetId((current) => (items.some((item) => item.id === current) ? current : items[0]?.id ?? ""));
     setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
   }, [items]);
+
+  useEffect(() => {
+    if (!selectedAsset) {
+      return;
+    }
+
+    let cancelled = false;
+    setAttachmentLoadingRecordId(selectedAsset.id);
+    setAttachmentError(null);
+
+    fetchAssetLockAttachments(selectedAsset.id)
+      .then(({ attachments }) => {
+        if (!cancelled) {
+          setAttachmentsByRecordId((current) => ({
+            ...current,
+            [selectedAsset.id]: attachments.filter((attachment) => attachment.status === "active")
+          }));
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setAttachmentError(formatAssetAttachmentError(error));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAttachmentLoadingRecordId(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAsset]);
 
   async function runAssetOperation(label: string, operation: () => Promise<void>) {
     setActiveOperation(label);
@@ -194,6 +249,46 @@ export function AssetLockWorkbench({
 
   async function handleCreateDemoRecords() {
     await runAssetOperation("正在准备已发布交稿包并生成资产核对记录。", onPrepareDemo);
+  }
+
+  async function refreshSelectedAssetAttachments(assetLockRecordId: string) {
+    const { attachments } = await fetchAssetLockAttachments(assetLockRecordId);
+    setAttachmentsByRecordId((current) => ({
+      ...current,
+      [assetLockRecordId]: attachments.filter((attachment) => attachment.status === "active")
+    }));
+  }
+
+  async function handleUploadAttachment() {
+    if (!selectedAsset || !attachmentFile) {
+      setAttachmentError(formatAssetAttachmentError("asset_attachment_file_required"));
+      return;
+    }
+
+    setAttachmentUploading(true);
+    setAttachmentError(null);
+
+    try {
+      await uploadAssetLockAttachment({
+        assetLockRecordId: selectedAsset.id,
+        attachmentType,
+        file: attachmentFile,
+        note: attachmentNote,
+        uploadedByUserId: actorUserId
+      });
+      setAttachmentFile(null);
+      setAttachmentNote("");
+      await refreshSelectedAssetAttachments(selectedAsset.id);
+    } catch (error) {
+      setAttachmentError(formatAssetAttachmentError(error));
+    } finally {
+      setAttachmentUploading(false);
+    }
+  }
+
+  function handleAttachmentFileChange(event: ChangeEvent<HTMLInputElement>) {
+    setAttachmentFile(event.target.files?.[0] ?? null);
+    setAttachmentError(null);
   }
 
   return (
@@ -469,6 +564,20 @@ export function AssetLockWorkbench({
               ))}
             </div>
 
+            <AssetAttachmentPanel
+              attachmentError={attachmentError}
+              attachmentFile={attachmentFile}
+              attachmentLoading={attachmentLoadingRecordId === selectedAsset.id}
+              attachmentNote={attachmentNote}
+              attachmentType={attachmentType}
+              attachments={selectedAssetAttachments}
+              attachmentUploading={attachmentUploading}
+              onFileChange={handleAttachmentFileChange}
+              onNoteChange={setAttachmentNote}
+              onTypeChange={setAttachmentType}
+              onUpload={() => void handleUploadAttachment()}
+            />
+
             <div className="asset-detail-actions">
               <button
                 className="primary-button"
@@ -518,6 +627,105 @@ export function AssetLockWorkbench({
       </div>
     </section>
   );
+}
+
+function AssetAttachmentPanel({
+  attachmentError,
+  attachmentFile,
+  attachmentLoading,
+  attachmentNote,
+  attachmentType,
+  attachments,
+  attachmentUploading,
+  onFileChange,
+  onNoteChange,
+  onTypeChange,
+  onUpload
+}: {
+  attachmentError: string | null;
+  attachmentFile: File | null;
+  attachmentLoading: boolean;
+  attachmentNote: string;
+  attachmentType: AssetAttachmentType;
+  attachments: AssetAttachment[];
+  attachmentUploading: boolean;
+  onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onNoteChange: (note: string) => void;
+  onTypeChange: (type: AssetAttachmentType) => void;
+  onUpload: () => void;
+}) {
+  return (
+    <div className="asset-attachment-panel">
+      <div className="asset-attachment-head">
+        <div>
+          <FileUp size={15} />
+          <strong>附件</strong>
+        </div>
+        <span>{attachmentLoading ? "加载中" : `${attachments.length} 个 active`}</span>
+      </div>
+
+      {attachments.length === 0 ? (
+        <p className="asset-attachment-empty">当前资产记录还没有 active 附件。</p>
+      ) : (
+        <div className="asset-attachment-list">
+          {attachments.map((attachment) => (
+            <article key={attachment.id}>
+              <div>
+                <strong>{attachment.fileName}</strong>
+                <span>
+                  {attachmentTypeLabels[attachment.attachmentType]} · v{attachment.version} · {formatFileSize(attachment.size)}
+                </span>
+              </div>
+              {attachment.note ? <p>{attachment.note}</p> : null}
+            </article>
+          ))}
+        </div>
+      )}
+
+      <div className="asset-attachment-form">
+        <label>
+          类型
+          <select value={attachmentType} onChange={(event) => onTypeChange(event.target.value as AssetAttachmentType)}>
+            {Object.entries(attachmentTypeLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          说明
+          <input
+            onChange={(event) => onNoteChange(event.target.value)}
+            placeholder="可选，例如：正脸参考、制作拆解、最终定版说明"
+            value={attachmentNote}
+          />
+        </label>
+        <label>
+          文件
+          <input accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf" onChange={onFileChange} type="file" />
+        </label>
+        {attachmentFile ? <p className="asset-attachment-selected">已选择：{attachmentFile.name}</p> : null}
+        {attachmentError ? <p className="inline-warning">{attachmentError}</p> : null}
+        <button className="secondary-button" disabled={!attachmentFile || attachmentUploading} onClick={onUpload} type="button">
+          <FileUp size={15} />
+          {attachmentUploading ? "上传中..." : "上传附件"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function formatFileSize(size: number) {
+  if (size >= 1024 * 1024) {
+    return `${(size / 1024 / 1024).toFixed(1)}MB`;
+  }
+
+  if (size >= 1024) {
+    return `${Math.ceil(size / 1024)}KB`;
+  }
+
+  return `${size}B`;
 }
 
 function AssetMetric({ label, tone = "blue", value }: { label: string; tone?: "blue" | "amber" | "green" | "red"; value: string }) {
