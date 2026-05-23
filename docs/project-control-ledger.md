@@ -129,6 +129,11 @@ See detailed design baseline:
 - Completed asset lock domain model implementation.
 - Completed conservative asset candidate extraction domain helper.
 - Completed asset attachment domain metadata.
+- Completed first-pass view model review for asset decision timeline.
+- Conclusion: first version should define the timeline model in UI mock layer, not domain/API.
+- Suggested location: `apps/web/app/ui/asset-decision-timeline-data.ts`.
+- Future downshift target after validation: `packages/domain/src/types.ts`.
+- Minimal model should cover: asset timeline view mode, track kind, decision kind/status, creator assigned episode window, script source excerpt, asset state segment, previous-version ghost comparison, timeline clip, timeline track, decision item, role-scoped view model.
 - Status: available for next task.
 
 ### 并行B
@@ -137,7 +142,12 @@ See detailed design baseline:
 - Completed asset lock API/workflow review.
 - Completed attachment design review.
 - Completed final asset lock merge review; conclusion was "needs minor fixes", now addressed.
-- Status: available for next read-only product/test review.
+- Completed first-pass scope review for asset decision timeline.
+- Conclusion: first version must be cut down to a static readable prototype plus a minimal view model.
+- Required first version: 10-15 episode horizontal track, asset clips/segments, simple right detail panel, static decision aggregation, static left queue filters, 1-2 ghost comparison examples, local mock data.
+- Do not include in first version: real API/domain persistence, AI parsing, real diff algorithm, complex permissions, drag editing, real task dispatch, full production management flow.
+- Recommended sequence: define minimal view model, build static UI prototype, add pure function tests, add light component tests, then run manual readability验收.
+- Status: available for next review.
 
 ### 并行C
 
@@ -154,7 +164,12 @@ See detailed design baseline:
 - Completed asset lock safety/storage review.
 - Completed attachment security/storage review.
 - Completed UI parallel-safety and final asset lock UI review; minor copy fix addressed.
-- Status: available for next UI/interaction review.
+- Completed first-pass UI/interaction review for asset decision timeline.
+- Conclusion: static prototype is the right first step; success depends on the horizontal track being the clear first visual center.
+- Recommended layout: compact top controls, narrow left decision queue, dominant middle timeline, right detail as drawer/overlay rather than equal-width permanent panel.
+- Must validate first: 10-15 episode work window, ghost clip readability, decision aggregation, queue-to-timeline focus, detail open/close behavior, creator-scoped default view.
+- Avoid: equal-weight three-column layout, ghost clips competing with current clips, quantity-only aggregation, creator seeing full-series asset wall by default.
+- Status: available for next UI review.
 
 ### 分支1
 
@@ -215,6 +230,7 @@ Start the asset decision timeline stage.
 Recommended first actions:
 
 1. Commit the design baseline and ledger update on `codex/asset-decision-timeline`.
-2. Ask 并行B for first-version scope review and risk trimming.
-3. Ask 并行D for timeline UI/interaction critique.
-4. Start a local prototype plan for data shape and static UI, avoiding API/domain overcommit until the UI model is validated.
+2. Use 并行B guidance to keep first version as static UI prototype plus minimal view model.
+3. Use 并行D guidance to keep the horizontal track dominant and use right detail as overlay/drawer.
+4. Use 并行A guidance to keep timeline types in `apps/web/app/ui/asset-decision-timeline-data.ts` for the first prototype.
+5. Start local prototype implementation with mock data and tests, avoiding API/domain overcommit until the UI model is validated.

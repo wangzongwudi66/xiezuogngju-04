@@ -228,6 +228,45 @@
 - 任意两个版本自由对比。
 - 真实生产任务派发系统。
 
+## 首版 View Model
+
+首版类型先放 UI mock 层：
+
+- `apps/web/app/ui/asset-decision-timeline-data.ts`
+
+不要马上进入 domain，也不要新增 API。原因是首版字段主要服务界面表达、筛选、聚合和选中状态，很多字段不应长期持久化。
+
+建议最小类型范围：
+
+- `AssetTimelineViewMode`: `series` / `work_window` / `episode`。
+- `AssetTimelineTrackKind`: existing asset type plus `status`。
+- `AssetDecisionStatus`: `todo` / `acknowledged` / `executable` / `needs_writer_decision` / `conflict` / `returned` / `resolved`。
+- `AssetDecisionKind`: `new_asset` / `removed_asset` / `range_changed` / `state_changed` / `source_changed` / `needs_creator_confirm` / `needs_writer_decision` / `conflict` / `ready_to_execute`。
+- `CreatorAssignedEpisodeWindow`: creator user, assigned episode range, assigned episode numbers, source assignment ids。
+- `ScriptSourceExcerpt`: project, delivery package, episode, excerpt text, optional line range, related asset names。
+- `AssetStateSegment`: asset record reference, asset name/type, state label, episode range, change type, risk, source excerpts。
+- `PreviousVersionGhostComparison`: previous range/state/source and change markers。
+- `AssetTimelineClip`: current segment, optional ghost, decision references, role-scoping flags。
+- `AssetTimelineTrack`: track kind, label, order, clips。
+- `AssetDecisionItem`: kind, status, title, description, episodes, assignee role/user, source excerpts, current/previous summary, risk。
+- `RoleScopedAssetTimelineViewModel`: project/viewer/window/tracks/queue/excerpts/selection/permissions。
+
+与现有模型关系：
+
+- `AssetLockRecord` 是 timeline clip 和 segment 的主要来源。
+- `DeliveryPackage` 用于当前版和上一版来源。
+- `EpisodeAssignment` 用于生成创作者默认工作窗口。
+- `AssetAttachment` 首版不进 timeline 模型，只作为未来详情或真实资产来源。
+
+首版纯函数建议：
+
+- 按资产类型分轨。
+- clip episode range 映射到 10-15 集窗口列。
+- 按队列标签/决策类型筛选。
+- 聚合决策计数。
+- ghost comparison 与当前 clip 对齐。
+- 根据角色生成 scoped view model。
+
 ## 设计原则
 
 - 主轴第一：横向时间轴必须清晰、明确、美观。
