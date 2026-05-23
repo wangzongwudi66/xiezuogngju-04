@@ -18,22 +18,28 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   filterAssetChanges,
-  getMockAssetChanges,
+  getAssetLockBulkHint,
+  getAssetLockEmptyState,
+  getAssetLockFinalLockHint,
+  getAssetLockRoleActions,
   getNextAssetLockOwner,
-  summarizeAssetLock
+  summarizeAssetLock,
+  toAssetLockChangeItems
 } from "./asset-lock-workbench-data";
 import type {
+  AssetLockActorRole,
   AssetChangeType,
-  AssetLockChangeItem,
   AssetConfirmation,
   AssetLockFilters,
   AssetReviewStatus,
   AssetRisk,
   AssetType
 } from "./asset-lock-workbench-data";
+import type { AssetLockRecord } from "@aigc/domain";
+import type { AssetLockCreateDraft, AssetLockRecordSummary } from "./asset-lock-api";
 
 type AssetLockPackage = {
   id: string;
@@ -90,20 +96,53 @@ const emptyFilters: AssetLockFilters = {
 
 export function AssetLockWorkbench({
   activeDeliveryPackage,
+  actorRole,
+  actorUserId,
+  errorText,
+  isLoading,
+  isMutating,
+  onCreateRecord,
+  onFinalLock,
+  onMarkDispute,
+  onMarkNeedsInfo,
   deliveryPackages,
   onOpenDeliveryCenter,
-  projectName
+  onProductionConfirm,
+  onRefresh,
+  onWriterConfirm,
+  projectName,
+  records,
+  serverSummary
 }: {
   activeDeliveryPackage: AssetLockPackage | null;
+  actorRole: AssetLockActorRole;
+  actorUserId: string;
+  errorText?: string | null;
+  isLoading?: boolean;
+  isMutating?: boolean;
+  onCreateRecord: (draft: AssetLockCreateDraft) => Promise<void>;
+  onFinalLock: (assetLockRecordId: string) => Promise<void>;
+  onMarkDispute: (assetLockRecordId: string, disputeReason: string) => Promise<void>;
+  onMarkNeedsInfo: (assetLockRecordId: string, missingInfo: string) => Promise<void>;
   deliveryPackages: AssetLockPackage[];
   onOpenDeliveryCenter: () => void;
+  onProductionConfirm: (assetLockRecordId: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
+  onWriterConfirm: (assetLockRecordId: string) => Promise<void>;
   projectName: string;
+  records: AssetLockRecord[];
+  serverSummary: AssetLockRecordSummary | null;
 }) {
-  const [items, setItems] = useState(() => getMockAssetChanges());
   const [filters, setFilters] = useState<AssetLockFilters>(emptyFilters);
-  const [selectedAssetId, setSelectedAssetId] = useState(items[0]?.id ?? "");
+  const items = useMemo(() => toAssetLockChangeItems(records), [records]);
+  const [selectedAssetId, setSelectedAssetId] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const packageForView = activeDeliveryPackage ?? deliveryPackages[0] ?? null;
+  const [activeOperation, setActiveOperation] = useState<string | null>(null);
+  const publishedPackages = deliveryPackages.filter((deliveryPackage) => deliveryPackage.status === "published");
+  const packageForView =
+    activeDeliveryPackage?.status === "published"
+      ? activeDeliveryPackage
+      : publishedPackages[0] ?? activeDeliveryPackage ?? deliveryPackages[0] ?? null;
   const filteredItems = useMemo(() => filterAssetChanges(items, filters), [filters, items]);
   const summary = useMemo(() => summarizeAssetLock(items), [items]);
   const selectedAsset = items.find((item) => item.id === selectedAssetId) ?? filteredItems[0] ?? items[0];
@@ -112,18 +151,83 @@ export function AssetLockWorkbench({
   const selectedPackageEpisodes = packageForView?.confirmedEpisodeNos.length
     ? packageForView.confirmedEpisodeNos
     : episodeOptions;
+  const canCreateFromPackage = Boolean(packageForView && packageForView.status === "published");
+  const emptyState = getAssetLockEmptyState({
+    hasPublishedPackage: canCreateFromPackage,
+    packageTitle: packageForView?.title
+  });
+  const roleActions = getAssetLockRoleActions(actorRole);
+  const finalLockHint = getAssetLockFinalLockHint(summary);
+  const bulkHint = getAssetLockBulkHint(selectedIds.length, Boolean(isMutating || activeOperation));
+  const isBusy = Boolean(isMutating || activeOperation);
+  const selectedAssetCanFinalLock = Boolean(selectedAsset && selectedAsset.reviewStatus !== "locked" && summary.canLock);
 
-  function updateSelectedAssets(patch: Partial<AssetLockChangeItem>) {
+  useEffect(() => {
+    setSelectedAssetId((current) => (items.some((item) => item.id === current) ? current : items[0]?.id ?? ""));
+    setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
+  }, [items]);
+
+  async function runAssetOperation(label: string, operation: () => Promise<void>) {
+    setActiveOperation(label);
+    try {
+      await operation();
+    } finally {
+      setActiveOperation(null);
+    }
+  }
+
+  async function mutateSelectedAssets(label: string, mutator: (assetLockRecordId: string) => Promise<void>) {
     if (selectedIds.length === 0) {
       return;
     }
 
-    setItems((current) => current.map((item) => (selectedIds.includes(item.id) ? { ...item, ...patch } : item)));
-    setSelectedIds([]);
+    await runAssetOperation(label, async () => {
+      for (const assetLockRecordId of selectedIds) {
+        await mutator(assetLockRecordId);
+      }
+
+      setSelectedIds([]);
+    });
   }
 
-  function updateAsset(assetId: string, patch: Partial<AssetLockChangeItem>) {
-    setItems((current) => current.map((item) => (item.id === assetId ? { ...item, ...patch } : item)));
+  async function handleCreateDemoRecords() {
+    if (!packageForView || packageForView.status !== "published") {
+      return;
+    }
+
+    const episodeNos = packageForView.confirmedEpisodeNos.length
+      ? packageForView.confirmedEpisodeNos
+      : Array.from({ length: packageForView.declaredEpisodeTo - packageForView.declaredEpisodeFrom + 1 }, (_, index) => packageForView.declaredEpisodeFrom + index);
+
+    const drafts: Array<Omit<AssetLockCreateDraft, "deliveryPackageId">> = [
+      {
+        assetName: `第 ${episodeNos[0] ?? packageForView.declaredEpisodeFrom} 集角色设定核对`,
+        assetType: "character",
+        changeType: "modified",
+        episodeNos,
+        productionNote: "请制作侧确认角色外观是否需要同步到资产库。",
+        risk: "attention",
+        writerNote: "基于已发布交稿包生成的资产核对记录。"
+      },
+      {
+        assetName: `第 ${episodeNos.join("、")} 集场景与道具核对`,
+        assetType: "scene",
+        changeType: "new",
+        episodeNos,
+        productionNote: "请核对新增场景、道具和可复用资产。",
+        risk: "normal",
+        writerNote: "请编剧确认变更是否准确覆盖本次发布内容。"
+      }
+    ];
+
+    await runAssetOperation("正在生成资产核对记录，请稍等。", async () => {
+      for (const draft of drafts) {
+        await onCreateRecord({
+          ...draft,
+          deliveryPackageId: packageForView.id
+        });
+      }
+    });
   }
 
   return (
@@ -132,18 +236,35 @@ export function AssetLockWorkbench({
         <div>
           <span>{projectName} · 资产核对闭环</span>
           <h2>资产核对与定版工作台</h2>
-          <p>{packageForView ? packageForView.title : "演示交稿包"} · 涉及第 {selectedPackageEpisodes.join("、")} 集</p>
+          <p>{packageForView ? packageForView.title : "暂无已发布交稿包"} · 涉及第 {selectedPackageEpisodes.join("、") || "-"} 集</p>
         </div>
-        <button className="secondary-button" onClick={onOpenDeliveryCenter} type="button">
-          回到交稿中心
-          <ChevronRight size={15} />
-        </button>
+        <div className="asset-lock-top-actions">
+          <button className="secondary-button" disabled={isLoading || isBusy} onClick={onRefresh} type="button">
+            {isLoading ? "正在刷新..." : "刷新记录"}
+          </button>
+          <button className="secondary-button" onClick={onOpenDeliveryCenter} type="button">
+            回到交稿中心
+            <ChevronRight size={15} />
+          </button>
+        </div>
       </div>
 
+      {errorText ? <p className="inline-warning">{errorText}</p> : null}
+      {isLoading ? <p className="inline-help">正在读取服务端资产定版记录...</p> : null}
+      {activeOperation ? <p className="inline-help" role="status">{activeOperation}</p> : null}
+
       <div className="asset-lock-overview">
-        <AssetMetric label="资产变更" value={summary.totalCount.toString()} />
-        <AssetMetric label="待编剧确认" tone={summary.writerPendingCount ? "amber" : "green"} value={summary.writerPendingCount.toString()} />
-        <AssetMetric label="待制作确认" tone={summary.productionPendingCount ? "amber" : "green"} value={summary.productionPendingCount.toString()} />
+        <AssetMetric label="资产变更" value={(serverSummary?.total ?? summary.totalCount).toString()} />
+        <AssetMetric
+          label="待编剧确认"
+          tone={(serverSummary?.pendingWriterCount ?? summary.writerPendingCount) ? "amber" : "green"}
+          value={(serverSummary?.pendingWriterCount ?? summary.writerPendingCount).toString()}
+        />
+        <AssetMetric
+          label="待制作确认"
+          tone={(serverSummary?.pendingProductionCount ?? summary.productionPendingCount) ? "amber" : "green"}
+          value={(serverSummary?.pendingProductionCount ?? summary.productionPendingCount).toString()}
+        />
         <AssetMetric label="争议/缺资料" tone={summary.disputeCount + summary.needsInfoCount ? "red" : "green"} value={`${summary.disputeCount}/${summary.needsInfoCount}`} />
         <div className={`asset-lock-status ${summary.canLock ? "ready" : "blocked"}`}>
           <LockKeyhole size={18} />
@@ -155,29 +276,79 @@ export function AssetLockWorkbench({
       </div>
 
       <div className="asset-lock-actions">
-        <span>{selectedIds.length > 0 ? `已选择 ${selectedIds.length} 项` : "可批量处理筛选后的资产项"}</span>
-        <button className="secondary-button compact" disabled={selectedIds.length === 0} onClick={() => updateSelectedAssets({ writerConfirmation: "confirmed" })} type="button">
-          <UserCheck size={14} />
-          批量编剧确认
-        </button>
-        <button className="secondary-button compact" disabled={selectedIds.length === 0} onClick={() => updateSelectedAssets({ reviewStatus: "needs_info" })} type="button">
-          <FileWarning size={14} />
-          标记需补充
-        </button>
-        <button
-          className="secondary-button compact"
-          disabled={selectedIds.length === 0}
-          onClick={() => updateSelectedAssets({ productionConfirmation: "confirmed", reviewStatus: "ready_to_lock" })}
-          type="button"
-        >
-          <ClipboardCheck size={14} />
-          制作确认完成
-        </button>
-        <button className="primary-button" disabled={!summary.canLock} type="button">
-          <LockKeyhole size={15} />
-          统筹定版
-        </button>
+        <span title={bulkHint}>{bulkHint}</span>
+        {roleActions.canWriterConfirm ? (
+          <button
+            className="secondary-button compact"
+            disabled={selectedIds.length === 0 || isBusy}
+            onClick={() => mutateSelectedAssets("正在提交编剧侧批量确认。", onWriterConfirm)}
+            title={selectedIds.length === 0 ? "先勾选资产核对记录，再进行批量确认。" : "批量提交编剧侧确认。"}
+            type="button"
+          >
+            <UserCheck size={14} />
+            批量编剧侧确认
+          </button>
+        ) : null}
+        {roleActions.canCoordinate ? (
+          <button
+            className="secondary-button compact"
+            disabled={selectedIds.length === 0 || isBusy}
+            onClick={() => mutateSelectedAssets("正在批量标记需补资料。", (assetLockRecordId) => onMarkNeedsInfo(assetLockRecordId, "批量标记：请补充资产核对资料。"))}
+            title={selectedIds.length === 0 ? "先勾选资产核对记录，再标记需补资料。" : "把选中记录退回补充资料。"}
+            type="button"
+          >
+            <FileWarning size={14} />
+            标记需补充
+          </button>
+        ) : null}
+        {roleActions.canProductionConfirm ? (
+          <button
+            className="secondary-button compact"
+            disabled={selectedIds.length === 0 || isBusy}
+            onClick={() => mutateSelectedAssets("正在提交制作侧批量确认。", onProductionConfirm)}
+            title={selectedIds.length === 0 ? "先勾选资产核对记录，再进行批量确认。" : "批量提交制作侧确认。"}
+            type="button"
+          >
+            <ClipboardCheck size={14} />
+            批量制作侧确认
+          </button>
+        ) : null}
+        {roleActions.canCoordinate ? (
+          <button
+            className="primary-button"
+            disabled={!selectedAssetCanFinalLock || isBusy}
+            onClick={() => selectedAsset && runAssetOperation("正在提交统筹最终定版。", () => onFinalLock(selectedAsset.id))}
+            title={finalLockHint}
+            type="button"
+          >
+            <LockKeyhole size={15} />
+            统筹定版
+          </button>
+        ) : null}
       </div>
+      <p className={`asset-lock-gate-note ${summary.canLock ? "ready" : "blocked"}`}>{finalLockHint}</p>
+
+      {items.length === 0 ? (
+        <div className="empty-card soft">
+          <ShieldCheck size={22} />
+          <strong>{emptyState.title}</strong>
+          {canCreateFromPackage ? (
+            <>
+              <p>{emptyState.body}</p>
+              <button className="primary-button" disabled={isBusy || !actorUserId} onClick={handleCreateDemoRecords} type="button">
+                {activeOperation ? "正在生成..." : emptyState.actionLabel}
+              </button>
+            </>
+          ) : (
+            <>
+              <p>{emptyState.body}</p>
+              <button className="secondary-button" onClick={onOpenDeliveryCenter} type="button">
+                {emptyState.actionLabel}
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
 
       <div className="asset-lock-layout">
         <aside className="asset-filter-panel">
@@ -253,6 +424,7 @@ export function AssetLockWorkbench({
             </div>
             <span>编剧 / 制作 / 统筹状态</span>
           </div>
+          {filteredItems.length === 0 ? <p className="empty-state">当前筛选条件下没有资产核对记录。</p> : null}
           {filteredItems.map((item) => (
             <article
               className={`asset-row ${selectedAsset?.id === item.id ? "active" : ""} ${item.reviewStatus}`}
@@ -328,29 +500,46 @@ export function AssetLockWorkbench({
             <div className="asset-detail-actions">
               <button
                 className="primary-button"
-                onClick={() =>
-                  updateAsset(selectedAsset.id, {
-                    productionConfirmation: "confirmed",
-                    reviewStatus: selectedAsset.writerConfirmation === "confirmed" ? "ready_to_lock" : "writer_pending"
-                  })
-                }
+                disabled={isBusy || !roleActions.canWriterConfirm}
+                onClick={() => runAssetOperation("正在提交编剧侧确认。", () => onWriterConfirm(selectedAsset.id))}
+                title={roleActions.canWriterConfirm ? "确认编剧侧已经核对该资产记录。" : "当前角色不能提交编剧侧确认。"}
                 type="button"
               >
                 <Check size={15} />
-                确认
+                {roleActions.writerConfirmLabel}
               </button>
               <button
-                className="secondary-button"
-                onClick={() => updateAsset(selectedAsset.id, { productionConfirmation: "returned", reviewStatus: "needs_info" })}
+                className="primary-button"
+                disabled={isBusy || !roleActions.canProductionConfirm}
+                onClick={() => runAssetOperation("正在提交制作侧确认。", () => onProductionConfirm(selectedAsset.id))}
+                title={roleActions.canProductionConfirm ? "确认制作侧已经核对该资产记录。" : "当前角色不能提交制作侧确认。"}
                 type="button"
               >
-                <RotateCcw size={15} />
-                退回补充
+                <ClipboardCheck size={15} />
+                {roleActions.productionConfirmLabel}
               </button>
-              <button className="secondary-button" onClick={() => updateAsset(selectedAsset.id, { reviewStatus: "disputed", risk: "high" })} type="button">
-                <AlertTriangle size={15} />
-                标记争议
-              </button>
+              {roleActions.canCoordinate ? (
+                <button
+                  className="secondary-button"
+                  disabled={isBusy}
+                  onClick={() => runAssetOperation("正在标记需补资料。", () => onMarkNeedsInfo(selectedAsset.id, "请补充资产参考、可见范围或制作侧所需资料。"))}
+                  type="button"
+                >
+                  <RotateCcw size={15} />
+                  退回补充
+                </button>
+              ) : null}
+              {roleActions.canCoordinate ? (
+                <button
+                  className="secondary-button"
+                  disabled={isBusy}
+                  onClick={() => runAssetOperation("正在标记争议项。", () => onMarkDispute(selectedAsset.id, "编剧侧与制作侧对资产变更存在争议，请统筹协调。"))}
+                  type="button"
+                >
+                  <AlertTriangle size={15} />
+                  标记争议
+                </button>
+              ) : null}
             </div>
           </aside>
         ) : null}

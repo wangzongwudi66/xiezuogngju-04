@@ -45,9 +45,10 @@ Main currently includes:
 - Branch: `codex/asset-lock-workbench`
 - Created from latest `main` at `d2a6db7`.
 - Purpose: dedicated prototype for the asset review and final lock workflow.
-- Current worktree has uncommitted changes.
+- Current asset prototype is committed at `3471924 Add asset lock workbench prototype`.
+- Current worktree should be clean before starting the next stage.
 
-Current uncommitted files:
+Committed asset workbench files:
 
 - `apps/web/app/ui/asset-lock-workbench.tsx`
 - `apps/web/app/ui/asset-lock-workbench-data.ts`
@@ -76,8 +77,11 @@ Asset branch completed so far:
   - Mark needs info.
   - Production confirmation.
   - Coordinator final lock action.
-- Data is currently mock prototype data in `asset-lock-workbench-data.ts`.
-- Asset helper logic has tests.
+- Added domain-backed asset lock records in `WorkspaceState.assetLockRecords`.
+- Added `/api/asset-lock-records` for list, create, writer confirm, production confirm, needs info, dispute, and final lock.
+- Replaced mock-only workbench flow with API-backed records and server mutation refresh.
+- Kept mock/demo mapping only as a minimal create/demo helper and display adapter.
+- Asset helper, domain, API, and frontend behavior have tests.
 
 Latest verification on asset branch:
 
@@ -93,15 +97,9 @@ Passed:
 
 Next step for asset branch:
 
-1. Customer manager manually reviews the asset lock workbench UI.
-2. If accepted, commit:
-
-```text
-Add asset lock workbench prototype
-```
-
-3. If not accepted, continue UI/interaction refinement only on `codex/asset-lock-workbench`.
-4. Do not merge into `main` until manual review passes.
+1. Continue into asset workflow model planning and implementation.
+2. Keep backend/data-model work scoped to the asset lock stage.
+3. Do not merge into `main` until the next stage is reviewed and committed.
 
 ## Sub-Conversation Status
 
@@ -109,6 +107,9 @@ Add asset lock workbench prototype
 
 - Completed coordinator role UI rework.
 - Completed member role vs episode assignment model rework.
+- Completed asset lock domain model implementation.
+- Added `AssetLockRecord`, asset lock enum types, and domain actions for create, writer confirm, production confirm, needs info, dispute, and final lock.
+- Verified with `npm.cmd run test -w packages/domain`, `npm.cmd run typecheck -w apps/web`, and `npm.cmd run test -w apps/web`.
 - Status: paused.
 
 ### 分支2
@@ -116,6 +117,8 @@ Add asset lock workbench prototype
 - Completed import/parse UX rework.
 - Completed import/parse reliability rework.
 - Completed frontend import retry entry.
+- Completed asset lock workbench UX/message pass after API integration.
+- Improved empty states, role-specific action labels, processing states, final-lock blocking hints, and business error messages.
 - Status: paused.
 
 ### 分支1
@@ -123,24 +126,36 @@ Add asset lock workbench prototype
 - Completed role home and navigation structure rework.
 - Completed project switching and current project context rework.
 - Fixed hydration mismatch.
+- Completed asset lock workbench frontend API integration.
+- Added frontend API helper, server-backed asset lock records, mutation handlers, and tests.
 - Status: paused.
 
 ### 并行C
 
 - Completed original Word file persistence.
 - Completed backend delivery import retry.
+- Completed `/api/asset-lock-records` backend service and route.
+- Added service/route tests for list, create, writer confirm, production confirm, needs info, dispute, and final lock.
+- Completed backend hardening after 并行D review.
+- Added tests for ignored client status fields, cross-project rejection, invalid episodeNos, unauthorized actors, draft-package rejection, legacy snapshots without `assetLockRecords`, and GET-all behavior.
 - Status: paused.
 
 ### 并行B
 
 - Completed test review for original file persistence.
 - Completed test review for import retry.
+- Completed read-only review for asset lock API and workflow boundaries.
+- Recommended `/api/asset-lock-records` as a separate API.
+- Recommended storing asset lock records in `WorkspaceState.assetLockRecords`, reusing the current workspace persistence file.
 - Status: paused.
 
 ### 并行D
 
 - Completed Turbopack/NFT warning investigation and fix guidance.
 - Completed safety/storage review for original Word file persistence.
+- Completed read-only review for asset lock domain/API.
+- Conclusion: needs minor backend hardening before final integration.
+- Key concerns: actor identity is request-body trusted in prototype mode; clarify draft vs published delivery package creation rule; add tests for cross-project, unauthorized actors, ignored client status fields, and old snapshots without `assetLockRecords`.
 - Status: paused.
 
 ### Lagrange
@@ -160,7 +175,7 @@ Add asset lock workbench prototype
 - Do not let multiple sub-conversations edit `m1-dashboard.tsx` at the same time.
 - Do not expand into real database work yet.
 - Do not build original Word download/audit UI unless it becomes a new stage.
-- Do not modify backend for the asset workbench unless product review explicitly requires a data model.
+- Do not create a separate asset JSON persistence file; keep asset records inside `WorkspaceState`.
 
 ## Recovery Steps After Context Compression
 
@@ -183,16 +198,16 @@ npm.cmd run verify
 
 ## Immediate Next Decision
 
-Ask the user to manually review the asset lock workbench.
+Start the next asset stage with parallel support:
 
-If user says it is acceptable:
+- Main conversation: own branch rhythm, integration, verification, and commits.
+- One implementation sub-conversation can build the asset workflow/domain model.
+- One review sub-conversation can review product flow, edge cases, and tests.
+- Avoid concurrent edits to `m1-dashboard.tsx`.
 
-1. Run `npm.cmd run verify`.
-2. Stage asset workbench files and this ledger if desired.
-3. Commit `Add asset lock workbench prototype`.
+Recommended next stage:
 
-If user reports UI/product issues:
-
-1. Keep work on `codex/asset-lock-workbench`.
-2. Fix only asset workbench UI/interaction unless explicitly told otherwise.
-3. Re-run `npm.cmd run verify`.
+1. Run full `npm.cmd run verify`.
+2. Commit the asset domain/API/frontend integration stage if verification passes.
+3. Do not push or merge until the user asks.
+4. Keep larger visual polish as a later stage.

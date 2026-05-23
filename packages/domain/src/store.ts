@@ -1,4 +1,11 @@
 import type {
+  AssetLockRecord,
+  AssetLockRecordDisputeInput,
+  AssetLockRecordFinalLockInput,
+  AssetLockRecordInput,
+  AssetLockRecordNeedsInfoInput,
+  AssetLockRecordProductionConfirmationInput,
+  AssetLockRecordWriterConfirmationInput,
   AssignmentInput,
   DeliveryPackage,
   DeliveryPackageConfirmationInput,
@@ -531,6 +538,163 @@ export function publishDeliveryPackage(
   };
 }
 
+export function createAssetLockRecord(state: WorkspaceState, input: AssetLockRecordInput): WorkspaceState {
+  requireProject(state, input.projectId);
+  const deliveryPackage = requireDeliveryPackage(state, input.deliveryPackageId);
+
+  if (deliveryPackage.projectId !== input.projectId) {
+    throw new Error("资产核对记录必须关联同一项目的交稿包");
+  }
+
+  assertDeliveryStatus(deliveryPackage, "published");
+  assertProjectRole(state, input.projectId, input.createdByUserId, ["owner", "coordinator", "head_writer", "writer"], "创建资产核对记录");
+  const episodeNos = normalizeAssetEpisodeNos(input.episodeNos);
+  assertEpisodeNosBelongToDeliveryPackage(state, deliveryPackage.id, episodeNos);
+
+  const assetName = input.assetName.trim();
+  if (!assetName) {
+    throw new Error("资产名称不能为空");
+  }
+
+  const createdAt = timestamp();
+  const record: AssetLockRecord = {
+    id: createId("asset-lock", `${deliveryPackage.id}-${assetName}`),
+    projectId: input.projectId,
+    deliveryPackageId: input.deliveryPackageId,
+    episodeNos,
+    assetName,
+    assetType: input.assetType,
+    changeType: input.changeType,
+    writerConfirmation: "pending",
+    writerNote: input.writerNote?.trim() || undefined,
+    productionConfirmation: "pending",
+    productionNote: input.productionNote?.trim() || undefined,
+    risk: input.risk ?? "normal",
+    status: "draft",
+    createdByUserId: input.createdByUserId,
+    createdAt,
+    updatedAt: createdAt
+  };
+
+  return {
+    ...state,
+    assetLockRecords: [...getAssetLockRecords(state), record]
+  };
+}
+
+export function confirmAssetLockRecordByWriter(
+  state: WorkspaceState,
+  input: AssetLockRecordWriterConfirmationInput
+): WorkspaceState {
+  const record = requireAssetLockRecord(state, input.assetLockRecordId);
+  assertProjectRole(state, record.projectId, input.confirmedByUserId, ["owner", "coordinator", "head_writer", "writer"], "编剧确认资产核对记录");
+  const updated = {
+    ...record,
+    writerConfirmation: "confirmed" as const,
+    writerConfirmedByUserId: input.confirmedByUserId,
+    writerConfirmedAt: timestamp(),
+    writerNote: input.note?.trim() || record.writerNote,
+    status: nextAssetLockStatus({
+      writerConfirmation: "confirmed",
+      productionConfirmation: record.productionConfirmation
+    }),
+    missingInfo: undefined,
+    disputeReason: undefined
+  };
+
+  return replaceAssetLockRecord(state, { ...updated, updatedAt: updated.writerConfirmedAt });
+}
+
+export function confirmAssetLockRecordByProduction(
+  state: WorkspaceState,
+  input: AssetLockRecordProductionConfirmationInput
+): WorkspaceState {
+  const record = requireAssetLockRecord(state, input.assetLockRecordId);
+  assertProjectRole(state, record.projectId, input.confirmedByUserId, ["owner", "coordinator", "creator"], "制作确认资产核对记录");
+  const updated = {
+    ...record,
+    productionConfirmation: "confirmed" as const,
+    productionConfirmedByUserId: input.confirmedByUserId,
+    productionConfirmedAt: timestamp(),
+    productionNote: input.note?.trim() || record.productionNote,
+    status: nextAssetLockStatus({
+      writerConfirmation: record.writerConfirmation,
+      productionConfirmation: "confirmed"
+    }),
+    missingInfo: undefined,
+    disputeReason: undefined
+  };
+
+  return replaceAssetLockRecord(state, { ...updated, updatedAt: updated.productionConfirmedAt });
+}
+
+export function markAssetLockRecordNeedsInfo(
+  state: WorkspaceState,
+  input: AssetLockRecordNeedsInfoInput
+): WorkspaceState {
+  const record = requireAssetLockRecord(state, input.assetLockRecordId);
+  assertProjectRole(state, record.projectId, input.markedByUserId, ["owner", "coordinator", "head_writer", "writer", "creator"], "标记资产补充信息");
+  const missingInfo = input.missingInfo.trim();
+
+  if (!missingInfo) {
+    throw new Error("补充信息说明不能为空");
+  }
+
+  return replaceAssetLockRecord(state, {
+    ...record,
+    writerConfirmation: record.writerConfirmation === "confirmed" ? record.writerConfirmation : "returned",
+    productionConfirmation: record.productionConfirmation === "confirmed" ? record.productionConfirmation : "returned",
+    status: "needs_info",
+    missingInfo,
+    disputeReason: undefined,
+    updatedAt: timestamp()
+  });
+}
+
+export function markAssetLockRecordDisputed(state: WorkspaceState, input: AssetLockRecordDisputeInput): WorkspaceState {
+  const record = requireAssetLockRecord(state, input.assetLockRecordId);
+  assertProjectRole(state, record.projectId, input.markedByUserId, ["owner", "coordinator", "head_writer", "writer", "creator"], "标记资产争议");
+  const disputeReason = input.disputeReason.trim();
+
+  if (!disputeReason) {
+    throw new Error("争议说明不能为空");
+  }
+
+  return replaceAssetLockRecord(state, {
+    ...record,
+    status: "disputed",
+    risk: "high",
+    disputeReason,
+    updatedAt: timestamp()
+  });
+}
+
+export function finalLockAssetRecord(state: WorkspaceState, input: AssetLockRecordFinalLockInput): WorkspaceState {
+  const record = requireAssetLockRecord(state, input.assetLockRecordId);
+  assertProjectRole(state, record.projectId, input.lockedByUserId, ["owner", "coordinator"], "定版资产核对记录");
+
+  if (record.writerConfirmation !== "confirmed" || record.productionConfirmation !== "confirmed") {
+    throw new Error("编剧和制作确认完成后才能定版");
+  }
+
+  if (record.status === "needs_info") {
+    throw new Error("资产仍需补充信息，不能定版");
+  }
+
+  if (record.status === "disputed") {
+    throw new Error("资产仍有争议，不能定版");
+  }
+
+  const lockedAt = timestamp();
+  return replaceAssetLockRecord(state, {
+    ...record,
+    status: "locked",
+    finalLockedByUserId: input.lockedByUserId,
+    finalLockedAt: lockedAt,
+    updatedAt: lockedAt
+  });
+}
+
 export function markNotificationRead(state: WorkspaceState, notificationId: string): WorkspaceState {
   const readAt = timestamp();
 
@@ -818,6 +982,27 @@ function requireDeliveryPackage(state: WorkspaceState, deliveryPackageId: string
   return deliveryPackage;
 }
 
+function getAssetLockRecords(state: WorkspaceState) {
+  return state.assetLockRecords ?? [];
+}
+
+function requireAssetLockRecord(state: WorkspaceState, assetLockRecordId: string) {
+  const record = getAssetLockRecords(state).find((item) => item.id === assetLockRecordId);
+
+  if (!record) {
+    throw new Error("资产核对记录不存在");
+  }
+
+  return record;
+}
+
+function replaceAssetLockRecord(state: WorkspaceState, record: AssetLockRecord): WorkspaceState {
+  return {
+    ...state,
+    assetLockRecords: getAssetLockRecords(state).map((item) => (item.id === record.id ? record : item))
+  };
+}
+
 function assertDeliveryStatus(deliveryPackage: DeliveryPackage, status: DeliveryPackage["status"]) {
   if (deliveryPackage.status !== status) {
     throw new Error(`交稿包状态必须是 ${status}`);
@@ -879,6 +1064,42 @@ function normalizePackageEpisodes(episodes: DeliveryPackageDraftInput["episodes"
 
 function normalizeConfirmedEpisodeNos(episodeNos: number[]) {
   return Array.from(new Set(episodeNos)).sort((a, b) => a - b);
+}
+
+function normalizeAssetEpisodeNos(episodeNos: number[]) {
+  const normalized = Array.from(new Set(episodeNos)).sort((a, b) => a - b);
+
+  if (normalized.length === 0 || normalized.some((episodeNo) => !Number.isInteger(episodeNo) || episodeNo < 1)) {
+    throw new Error("资产关联集数不合法");
+  }
+
+  return normalized;
+}
+
+function assertEpisodeNosBelongToDeliveryPackage(state: WorkspaceState, deliveryPackageId: string, episodeNos: number[]) {
+  const packageEpisodeNos = new Set(
+    state.deliveryPackageEpisodes
+      .filter((episode) => episode.deliveryPackageId === deliveryPackageId)
+      .map((episode) => episode.episodeNo)
+  );
+
+  for (const episodeNo of episodeNos) {
+    if (!packageEpisodeNos.has(episodeNo)) {
+      throw new Error("资产关联集数不在交稿包内容中");
+    }
+  }
+}
+
+function nextAssetLockStatus(record: Pick<AssetLockRecord, "writerConfirmation" | "productionConfirmation">) {
+  if (record.writerConfirmation !== "confirmed") {
+    return "draft" as const;
+  }
+
+  if (record.productionConfirmation !== "confirmed") {
+    return "draft" as const;
+  }
+
+  return "ready_to_lock" as const;
 }
 
 function nextRevisionNo(state: WorkspaceState, episodeId: string) {

@@ -65,6 +65,7 @@ import {
   updateProjectMemberPermissions
 } from "@aigc/domain";
 import type {
+  AssetLockRecord,
   DeliveryPackageDraftInput,
   DeliveryPackageStatus,
   EpisodeAssignment,
@@ -75,6 +76,8 @@ import type {
   WorkspaceState
 } from "@aigc/domain";
 import { buildTodayTasks } from "./dashboard-tasks";
+import { fetchAssetLockRecords, formatAssetLockError, mutateAssetLockRecord } from "./asset-lock-api";
+import type { AssetLockCreateDraft, AssetLockRecordSummary } from "./asset-lock-api";
 import { canRetryDeliveryImportJob, formatDeliveryImportError } from "./delivery-import-feedback";
 import {
   canAccessDeliveryRole,
@@ -379,6 +382,11 @@ export function M1Dashboard() {
   const [wordParseFeedback, setWordParseFeedback] = useState<TextParseFeedback | null>(null);
   const [deliveryParseIssuesByPackageId, setDeliveryParseIssuesByPackageId] = useState<Record<string, WordDeliveryIssue[]>>({});
   const [deliveryImportJobs, setDeliveryImportJobs] = useState<DeliveryImportJob[]>([]);
+  const [assetLockRecords, setAssetLockRecords] = useState<AssetLockRecord[]>([]);
+  const [assetLockSummary, setAssetLockSummary] = useState<AssetLockRecordSummary | null>(null);
+  const [assetLockError, setAssetLockError] = useState<string | null>(null);
+  const [assetLockLoading, setAssetLockLoading] = useState(false);
+  const [assetLockMutating, setAssetLockMutating] = useState(false);
   const [rejectionReason, setRejectionReason] = useState("范围声明需要再确认");
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -390,7 +398,9 @@ export function M1Dashboard() {
     const persistedWorkspace = readM2WorkspacePersistence();
 
     if (persistedWorkspace) {
-      setState(persistedWorkspace.state);
+      const persistedState = normalizeWorkspaceState(persistedWorkspace.state);
+      setState(persistedState);
+      setAssetLockRecords(persistedState.assetLockRecords ?? []);
       setDeliveryParseIssuesByPackageId(persistedWorkspace.deliveryParseIssuesByPackageId);
       setDeliveryImportJobs(persistedWorkspace.deliveryImportJobs);
       setSelectedProjectId(persistedWorkspace.selectedProjectId ?? seedWorkspace.projects[0].id);
@@ -452,6 +462,39 @@ export function M1Dashboard() {
     }
   }, [selectedProjectId, state.projects]);
 
+  useEffect(() => {
+    if (!hasHydrated || activeModule !== "资产定版") {
+      return;
+    }
+
+    let cancelled = false;
+    setAssetLockLoading(true);
+    setAssetLockError(null);
+
+    fetchAssetLockRecords(selectedProjectId)
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+
+        applyAssetLockResponse(response);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setAssetLockError(formatAssetLockError(error) || "资产定版记录加载失败，请稍后重试。");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAssetLockLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeModule, hasHydrated, selectedProjectId]);
+
   if (!hasHydrated) {
     return <AuthGate state={seedWorkspace} setState={setState} />;
   }
@@ -512,6 +555,7 @@ export function M1Dashboard() {
   const deliveryPackageDetails = projectDeliveryPackages
     .map((deliveryPackage) => selectDeliveryPackageDetail(state, deliveryPackage.id))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const projectAssetLockRecords = assetLockRecords.filter((record) => record.projectId === selectedProject.id);
   const pendingDeliveryPackages = deliveryPackageDetails.filter((deliveryPackage) => deliveryPackage.status === "pending_review");
   const recentPublishedDeliveryPackages = deliveryPackageDetails
     .filter((deliveryPackage) => deliveryPackage.status === "published")
@@ -535,6 +579,9 @@ export function M1Dashboard() {
     setSelectedDeliveryPackageId(null);
     setDeliveryImportJobs([]);
     setDeliveryParseIssuesByPackageId({});
+    setAssetLockRecords(next.assetLockRecords ?? []);
+    setAssetLockSummary(null);
+    setAssetLockError(null);
     setWordParseFeedback(null);
     setActionMessage({ tone: "success", text: "原型数据已重置为默认演示状态。" });
     setUserMenuOpen(false);
@@ -574,6 +621,118 @@ export function M1Dashboard() {
     setDeliveryImportJobs((items) => mergeDeliveryImportJobs(items, [job]));
   }
 
+  function applyAssetLockResponse(response: { records: AssetLockRecord[]; summary: AssetLockRecordSummary }) {
+    setAssetLockRecords((current) => mergeProjectScopedItems(current, response.records, selectedProjectId));
+    setAssetLockSummary(response.summary);
+    setAssetLockError(null);
+    setState((current) => ({
+      ...current,
+      assetLockRecords: mergeProjectScopedItems(current.assetLockRecords ?? [], response.records, selectedProjectId)
+    }));
+  }
+
+  async function refreshAssetLockRecordsFromServer() {
+    setAssetLockLoading(true);
+    setAssetLockError(null);
+
+    try {
+      const response = await fetchAssetLockRecords(selectedProject.id);
+      applyAssetLockResponse(response);
+    } catch (error) {
+      const message = formatAssetLockError(error) || "资产定版记录加载失败，请稍后重试。";
+      setAssetLockError(message);
+      throw new Error(message);
+    } finally {
+      setAssetLockLoading(false);
+    }
+  }
+
+  async function mutateAssetLockFromServer(input: Parameters<typeof mutateAssetLockRecord>[0], successText: string) {
+    setAssetLockMutating(true);
+    setAssetLockError(null);
+
+    try {
+      const response = await mutateAssetLockRecord(input);
+      applyAssetLockResponse(response);
+      setActionMessage({ tone: "success", text: successText });
+    } catch (error) {
+      const message = formatAssetLockError(error) || "资产定版操作失败，请稍后重试。";
+      setAssetLockError(message);
+      setActionMessage({ tone: "error", text: message });
+    } finally {
+      setAssetLockMutating(false);
+    }
+  }
+
+  async function handleCreateAssetLockRecord(draft: AssetLockCreateDraft) {
+    await mutateAssetLockFromServer(
+      {
+        action: "create",
+        projectId: selectedProject.id,
+        createdByUserId: currentUserId,
+        ...draft
+      },
+      "资产核对记录已生成。"
+    );
+  }
+
+  async function handleWriterConfirmAssetLock(assetLockRecordId: string) {
+    await mutateAssetLockFromServer(
+      {
+        action: "writer_confirm",
+        assetLockRecordId,
+        confirmedByUserId: currentUserId
+      },
+      "编剧确认已提交。"
+    );
+  }
+
+  async function handleProductionConfirmAssetLock(assetLockRecordId: string) {
+    await mutateAssetLockFromServer(
+      {
+        action: "production_confirm",
+        assetLockRecordId,
+        confirmedByUserId: currentUserId
+      },
+      "制作确认已提交。"
+    );
+  }
+
+  async function handleMarkAssetLockNeedsInfo(assetLockRecordId: string, missingInfo: string) {
+    await mutateAssetLockFromServer(
+      {
+        action: "needs_info",
+        assetLockRecordId,
+        markedByUserId: currentUserId,
+        missingInfo
+      },
+      "已标记为需补资料。"
+    );
+  }
+
+  async function handleMarkAssetLockDispute(assetLockRecordId: string, disputeReason: string) {
+    await mutateAssetLockFromServer(
+      {
+        action: "dispute",
+        assetLockRecordId,
+        markedByUserId: currentUserId,
+        disputeReason
+      },
+      "已标记为争议项。"
+    );
+  }
+
+  async function handleFinalLockAsset(assetLockRecordId: string) {
+    await mutateAssetLockFromServer(
+      {
+        action: "final_lock",
+        assetLockRecordId,
+        lockedByUserId: currentUserId
+      },
+      "资产记录已最终定版。"
+    );
+  }
+
   function applyDeliveryWorkspaceSnapshot(snapshot: Awaited<ReturnType<typeof fetchDeliveryImportWorkspace>>) {
     setDeliveryParseIssuesByPackageId((current) => ({
       ...current,
@@ -586,6 +745,7 @@ export function M1Dashboard() {
       deliveryPackageEpisodes: mergeById(current.deliveryPackageEpisodes, snapshot.state.deliveryPackageEpisodes),
       episodeRevisions: mergeById(current.episodeRevisions, snapshot.state.episodeRevisions),
       episodeCurrents: mergeById(current.episodeCurrents, snapshot.state.episodeCurrents),
+      assetLockRecords: mergeById(current.assetLockRecords ?? [], snapshot.state.assetLockRecords ?? []),
       notifications: mergeById(current.notifications, snapshot.state.notifications)
     }));
   }
@@ -1121,10 +1281,17 @@ export function M1Dashboard() {
             <ModuleWorkbench
               activeModule={effectiveActiveModule}
               activeDeliveryPackage={activeDeliveryPackage}
-            activeDeliveryParseIssues={activeDeliveryParseIssues}
-            assignmentSummary={assignmentSummary}
-            canAccessDelivery={canAccessDelivery}
-            canCreateDelivery={canCreateDelivery}
+              activeDeliveryParseIssues={activeDeliveryParseIssues}
+              actorUserId={currentUserId}
+              actorRole={primaryRole}
+              assetLockError={assetLockError}
+              assetLockLoading={assetLockLoading}
+              assetLockMutating={assetLockMutating}
+              assetLockRecords={projectAssetLockRecords}
+              assetLockSummary={assetLockSummary}
+              assignmentSummary={assignmentSummary}
+              canAccessDelivery={canAccessDelivery}
+              canCreateDelivery={canCreateDelivery}
               canReviewDelivery={canReviewDelivery}
               canSubmitDelivery={canSubmitDelivery}
               deliveryImportJobs={projectDeliveryImportJobs}
@@ -1136,6 +1303,12 @@ export function M1Dashboard() {
               handlePublishDelivery={handlePublishDelivery}
               handleRejectDelivery={handleRejectDelivery}
               handleRetryDeliveryImportJob={handleRetryDeliveryImportJob}
+              handleCreateAssetLockRecord={handleCreateAssetLockRecord}
+              handleFinalLockAsset={handleFinalLockAsset}
+              handleMarkAssetLockDispute={handleMarkAssetLockDispute}
+              handleMarkAssetLockNeedsInfo={handleMarkAssetLockNeedsInfo}
+              handleProductionConfirmAssetLock={handleProductionConfirmAssetLock}
+              handleWriterConfirmAssetLock={handleWriterConfirmAssetLock}
               handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
               handleUpdateConfirmedEpisode={handleUpdateConfirmedEpisode}
               projectName={selectedProject.name}
@@ -1147,6 +1320,7 @@ export function M1Dashboard() {
               setSelectedDeliveryPackageId={setSelectedDeliveryPackageId}
               setSelectedMockDeliveryKey={setSelectedMockDeliveryKey}
               navigateToModule={navigateToModule}
+              refreshAssetLockRecordsFromServer={refreshAssetLockRecordsFromServer}
               state={state}
               tasks={todayTasks}
               wordDeclaredRangeDraft={wordDeclaredRangeDraft}
@@ -1727,6 +1901,13 @@ function ModuleWorkbench({
   activeModule,
   activeDeliveryPackage,
   activeDeliveryParseIssues,
+  actorUserId,
+  actorRole,
+  assetLockError,
+  assetLockLoading,
+  assetLockMutating,
+  assetLockRecords,
+  assetLockSummary,
   assignmentSummary,
   canAccessDelivery,
   canCreateDelivery,
@@ -1741,10 +1922,17 @@ function ModuleWorkbench({
   handlePublishDelivery,
   handleRejectDelivery,
   handleRetryDeliveryImportJob,
+  handleCreateAssetLockRecord,
+  handleFinalLockAsset,
+  handleMarkAssetLockDispute,
+  handleMarkAssetLockNeedsInfo,
+  handleProductionConfirmAssetLock,
+  handleWriterConfirmAssetLock,
   handleSubmitDeliveryForReview,
   handleUpdateConfirmedEpisode,
   projectName,
   recentUpdates,
+  refreshAssetLockRecordsFromServer,
   rejectionReason,
   retryingImportJobId,
   selectedMockDeliveryKey,
@@ -1763,6 +1951,13 @@ function ModuleWorkbench({
   activeModule: string;
   activeDeliveryPackage: ReturnType<typeof selectDeliveryPackageDetail> | null;
   activeDeliveryParseIssues: WordDeliveryIssue[];
+  actorUserId: string;
+  actorRole: ProjectRole;
+  assetLockError: string | null;
+  assetLockLoading: boolean;
+  assetLockMutating: boolean;
+  assetLockRecords: AssetLockRecord[];
+  assetLockSummary: AssetLockRecordSummary | null;
   assignmentSummary: AssignmentSummaryItem[];
   canAccessDelivery: boolean;
   canCreateDelivery: boolean;
@@ -1777,10 +1972,17 @@ function ModuleWorkbench({
   handlePublishDelivery: (deliveryPackageId: string) => void;
   handleRejectDelivery: (deliveryPackageId: string) => void;
   handleRetryDeliveryImportJob: (jobId: string) => void;
+  handleCreateAssetLockRecord: (draft: AssetLockCreateDraft) => Promise<void>;
+  handleFinalLockAsset: (assetLockRecordId: string) => Promise<void>;
+  handleMarkAssetLockDispute: (assetLockRecordId: string, disputeReason: string) => Promise<void>;
+  handleMarkAssetLockNeedsInfo: (assetLockRecordId: string, missingInfo: string) => Promise<void>;
+  handleProductionConfirmAssetLock: (assetLockRecordId: string) => Promise<void>;
+  handleWriterConfirmAssetLock: (assetLockRecordId: string) => Promise<void>;
   handleSubmitDeliveryForReview: (deliveryPackageId: string) => void;
   handleUpdateConfirmedEpisode: (deliveryPackageId: string, episodeNo: number, checked: boolean) => void;
   projectName: string;
   recentUpdates: ReturnType<typeof buildRecentUpdates>;
+  refreshAssetLockRecordsFromServer: () => Promise<void>;
   rejectionReason: string;
   retryingImportJobId: string | null;
   selectedMockDeliveryKey: MockDeliveryKey;
@@ -1947,9 +2149,23 @@ function ModuleWorkbench({
     return (
       <AssetLockWorkbench
         activeDeliveryPackage={activeDeliveryPackage}
+        actorRole={actorRole}
+        actorUserId={actorUserId}
+        errorText={assetLockError}
+        isLoading={assetLockLoading}
+        isMutating={assetLockMutating}
+        onCreateRecord={handleCreateAssetLockRecord}
+        onFinalLock={handleFinalLockAsset}
+        onMarkDispute={handleMarkAssetLockDispute}
+        onMarkNeedsInfo={handleMarkAssetLockNeedsInfo}
         deliveryPackages={deliveryPackageDetails}
         onOpenDeliveryCenter={() => navigateToModule("交稿中心")}
+        onProductionConfirm={handleProductionConfirmAssetLock}
+        onRefresh={refreshAssetLockRecordsFromServer}
+        onWriterConfirm={handleWriterConfirmAssetLock}
         projectName={projectName}
+        records={assetLockRecords}
+        serverSummary={assetLockSummary}
       />
     );
   }
@@ -3038,7 +3254,12 @@ function buildShortcutItems(permissions: ReturnType<typeof selectPermissions>, p
 
 function formatActionError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
+  const assetLockError = formatAssetLockError(error);
   const deliveryImportError = formatDeliveryImportError(error);
+
+  if (assetLockError) {
+    return assetLockError;
+  }
 
   if (deliveryImportError) {
     return deliveryImportError;
@@ -3088,10 +3309,21 @@ function mergeById<T extends { id: string }>(current: T[], incoming: T[]) {
   return [...current.filter((item) => !incomingIds.has(item.id)), ...incoming];
 }
 
+function mergeProjectScopedItems<T extends { projectId: string }>(current: T[], incoming: T[], projectId: string) {
+  return [...current.filter((item) => item.projectId !== projectId), ...incoming];
+}
+
 function mergeDeliveryImportJobs(current: DeliveryImportJob[], incoming: DeliveryImportJob[]) {
   return mergeById(current, incoming)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 20);
+}
+
+function normalizeWorkspaceState(state: WorkspaceState): WorkspaceState {
+  return {
+    ...state,
+    assetLockRecords: state.assetLockRecords ?? []
+  };
 }
 
 type CurrentRevisionDocxInput = {

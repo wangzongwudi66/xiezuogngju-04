@@ -3,9 +3,14 @@ import { seedWorkspace } from "./seed";
 import {
   archiveProject,
   assignEpisodes,
+  confirmAssetLockRecordByProduction,
+  confirmAssetLockRecordByWriter,
   createDeliveryPackageDraft,
+  createAssetLockRecord,
   createProject,
+  finalLockAssetRecord,
   loginAsUser,
+  markAssetLockRecordNeedsInfo,
   markNotificationRead,
   publishDeliveryPackage,
   registerUser,
@@ -366,5 +371,168 @@ describe("M2 delivery package workflow", () => {
     expect(timeline.currentRevision?.content).toContain("整集替换后的版本");
     expect(episodeFive?.hasUnreadKeyChange).toBe(true);
     expect(creatorNotifications.some((notification) => notification.title === "第 5 集剧本已更新")).toBe(true);
+  });
+});
+
+describe("asset lock workflow", () => {
+  function createPublishedDeliveryForAssetLock() {
+    const draft = createDeliveryPackageDraft(seedWorkspace, {
+      projectId: "project-jincheng",
+      uploadedByUserId: "user-head-writer",
+      type: "range",
+      declaredEpisodeFrom: 3,
+      declaredEpisodeTo: 5,
+      episodes: [
+        { episodeNo: 3, content: "第 3 集\n升降笼第一次出现。" },
+        { episodeNo: 4, content: "第 4 集\n红色安全灯规则建立。" },
+        { episodeNo: 5, content: "第 5 集\n李砚旧伤露出。" }
+      ],
+      confirmedEpisodeNos: [3, 4, 5]
+    });
+    const deliveryPackageId = draft.deliveryPackages.at(-1)?.id ?? "";
+
+    return {
+      deliveryPackageId,
+      state: publishDeliveryPackage(
+        submitDeliveryPackageForReview(draft, deliveryPackageId, "user-head-writer"),
+        deliveryPackageId,
+        "user-owner"
+      )
+    };
+  }
+
+  function createAssetRecord() {
+    const { deliveryPackageId, state } = createPublishedDeliveryForAssetLock();
+    const next = createAssetLockRecord(state, {
+      projectId: "project-jincheng",
+      deliveryPackageId,
+      episodeNos: [3, 5],
+      assetName: "北井升降笼",
+      assetType: "scene",
+      changeType: "new",
+      createdByUserId: "user-head-writer",
+      risk: "attention",
+      writerNote: "第 5 集会复用困局空间。"
+    });
+
+    return {
+      deliveryPackageId,
+      record: next.assetLockRecords?.at(-1),
+      state: next
+    };
+  }
+
+  it("creates an asset lock record tied to project, delivery package, and episodes", () => {
+    const { deliveryPackageId, record } = createAssetRecord();
+
+    expect(record).toMatchObject({
+      projectId: "project-jincheng",
+      deliveryPackageId,
+      episodeNos: [3, 5],
+      assetName: "北井升降笼",
+      assetType: "scene",
+      changeType: "new",
+      writerConfirmation: "pending",
+      productionConfirmation: "pending",
+      risk: "attention",
+      status: "draft"
+    });
+  });
+
+  it("rejects asset lock records before the delivery package is published", () => {
+    const draft = createDeliveryPackageDraft(seedWorkspace, {
+      projectId: "project-jincheng",
+      uploadedByUserId: "user-head-writer",
+      type: "range",
+      declaredEpisodeFrom: 3,
+      declaredEpisodeTo: 5,
+      episodes: [
+        { episodeNo: 3, content: "第 3 集\n升降笼第一次出现。" },
+        { episodeNo: 4, content: "第 4 集\n红色安全灯规则建立。" },
+        { episodeNo: 5, content: "第 5 集\n李砚旧伤露出。" }
+      ],
+      confirmedEpisodeNos: [3, 4, 5]
+    });
+    const deliveryPackageId = draft.deliveryPackages.at(-1)?.id ?? "";
+
+    expect(() =>
+      createAssetLockRecord(draft, {
+        projectId: "project-jincheng",
+        deliveryPackageId,
+        episodeNos: [3, 5],
+        assetName: "北井升降笼",
+        assetType: "scene",
+        changeType: "new",
+        createdByUserId: "user-head-writer"
+      })
+    ).toThrow("published");
+  });
+
+  it("records writer and production confirmations before becoming ready to lock", () => {
+    const { record, state } = createAssetRecord();
+    const writerConfirmed = confirmAssetLockRecordByWriter(state, {
+      assetLockRecordId: record?.id ?? "",
+      confirmedByUserId: "user-head-writer",
+      note: "编剧确认升降笼为新增主场景资产。"
+    });
+    const afterWriter = writerConfirmed.assetLockRecords?.find((item) => item.id === record?.id);
+
+    expect(afterWriter?.writerConfirmation).toBe("confirmed");
+    expect(afterWriter?.status).toBe("draft");
+
+    const productionConfirmed = confirmAssetLockRecordByProduction(writerConfirmed, {
+      assetLockRecordId: record?.id ?? "",
+      confirmedByUserId: "user-creator-a",
+      note: "制作确认结构和材质可以进入制作。"
+    });
+    const afterProduction = productionConfirmed.assetLockRecords?.find((item) => item.id === record?.id);
+
+    expect(afterProduction?.productionConfirmation).toBe("confirmed");
+    expect(afterProduction?.status).toBe("ready_to_lock");
+  });
+
+  it("marks an asset lock record as needing missing information", () => {
+    const { record, state } = createAssetRecord();
+    const next = markAssetLockRecordNeedsInfo(state, {
+      assetLockRecordId: record?.id ?? "",
+      markedByUserId: "user-creator-a",
+      missingInfo: "缺少升降笼正面结构参考。"
+    });
+    const updated = next.assetLockRecords?.find((item) => item.id === record?.id);
+
+    expect(updated?.status).toBe("needs_info");
+    expect(updated?.missingInfo).toBe("缺少升降笼正面结构参考。");
+  });
+
+  it("blocks final lock before all confirmations are completed", () => {
+    const { record, state } = createAssetRecord();
+
+    expect(() =>
+      finalLockAssetRecord(state, {
+        assetLockRecordId: record?.id ?? "",
+        lockedByUserId: "user-owner"
+      })
+    ).toThrow("编剧和制作确认完成后才能定版");
+  });
+
+  it("allows coordinator to final lock after writer and production confirmations", () => {
+    const { record, state } = createAssetRecord();
+    const writerConfirmed = confirmAssetLockRecordByWriter(state, {
+      assetLockRecordId: record?.id ?? "",
+      confirmedByUserId: "user-head-writer"
+    });
+    const productionConfirmed = confirmAssetLockRecordByProduction(writerConfirmed, {
+      assetLockRecordId: record?.id ?? "",
+      confirmedByUserId: "user-creator-a"
+    });
+    const locked = finalLockAssetRecord(productionConfirmed, {
+      assetLockRecordId: record?.id ?? "",
+      lockedByUserId: "user-owner"
+    });
+    const updated = locked.assetLockRecords?.find((item) => item.id === record?.id);
+
+    expect(updated?.status).toBe("locked");
+    expect(updated?.finalLockedByUserId).toBe("user-owner");
+    expect(updated?.finalLockedAt).toBeTruthy();
   });
 });

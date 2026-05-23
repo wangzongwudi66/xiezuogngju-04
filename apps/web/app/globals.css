@@ -1835,6 +1835,13 @@ select:focus-visible {
   letter-spacing: 0;
 }
 
+.asset-lock-top-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .asset-lock-top h2 {
   font-size: 22px;
 }
@@ -1936,6 +1943,27 @@ select:focus-visible {
   border-radius: var(--radius);
   background: #fff;
   padding: 10px;
+}
+
+.asset-lock-gate-note {
+  margin: -4px 0 0;
+  border-radius: var(--radius);
+  padding: 9px 11px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.asset-lock-gate-note.ready {
+  border: 1px solid rgba(31, 164, 99, 0.22);
+  background: var(--green-soft);
+  color: #12613c;
+}
+
+.asset-lock-gate-note.blocked {
+  border: 1px solid rgba(240, 122, 36, 0.24);
+  background: var(--orange-soft);
+  color: #8f430f;
 }
 
 .asset-lock-layout {

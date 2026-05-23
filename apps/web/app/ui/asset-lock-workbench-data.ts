@@ -1,8 +1,11 @@
+import type { AssetLockRecord } from "@aigc/domain";
+
 export type AssetChangeType = "new" | "modified" | "removed" | "reused";
 export type AssetType = "character" | "scene" | "prop" | "vehicle" | "effect";
 export type AssetConfirmation = "pending" | "confirmed" | "returned";
 export type AssetReviewStatus = "writer_pending" | "production_pending" | "ready_to_lock" | "disputed" | "needs_info" | "locked";
 export type AssetRisk = "normal" | "attention" | "high";
+export type AssetLockActorRole = "owner" | "coordinator" | "head_writer" | "writer" | "creator";
 
 export type AssetLockChangeItem = {
   id: string;
@@ -30,6 +33,8 @@ export type AssetLockFilters = {
   status: "all" | AssetReviewStatus;
   type: "all" | AssetType;
 };
+
+export type AssetLockSummary = ReturnType<typeof summarizeAssetLock>;
 
 const mockAssetChanges: AssetLockChangeItem[] = [
   {
@@ -164,6 +169,27 @@ export function getMockAssetChanges() {
   return mockAssetChanges.map((item) => ({ ...item, episodeNos: [...item.episodeNos], discussion: [...item.discussion] }));
 }
 
+export function toAssetLockChangeItems(records: AssetLockRecord[]): AssetLockChangeItem[] {
+  return records.map((record) => ({
+    id: record.id,
+    assetName: record.assetName,
+    assetType: record.assetType,
+    changeType: record.changeType,
+    episodeNos: [...record.episodeNos],
+    owner: record.productionConfirmedByUserId ?? record.writerConfirmedByUserId ?? record.createdByUserId,
+    writerConfirmation: record.writerConfirmation,
+    productionConfirmation: record.productionConfirmation,
+    reviewStatus: toAssetReviewStatus(record),
+    risk: record.risk,
+    before: "来自已发布交稿包，旧资产描述以当前资产库记录为准。",
+    after: record.productionNote || record.writerNote || "待编剧和制作侧补充资产变更说明。",
+    writerNote: record.writerNote || "暂无编剧说明。",
+    productionNote: record.productionNote || record.missingInfo || record.disputeReason || "暂无制作备注。",
+    sourceParagraph: `关联交稿包：${record.deliveryPackageId}；涉及第 ${record.episodeNos.join("、")} 集。`,
+    discussion: buildRecordDiscussion(record)
+  }));
+}
+
 export function filterAssetChanges(items: AssetLockChangeItem[], filters: AssetLockFilters) {
   return items.filter((item) => {
     const matchesEpisode = filters.episode === "all" || item.episodeNos.includes(Number(filters.episode));
@@ -176,13 +202,47 @@ export function filterAssetChanges(items: AssetLockChangeItem[], filters: AssetL
   });
 }
 
+function toAssetReviewStatus(record: AssetLockRecord): AssetReviewStatus {
+  if (record.status === "draft") {
+    return record.writerConfirmation !== "confirmed" ? "writer_pending" : "production_pending";
+  }
+
+  return record.status;
+}
+
+function buildRecordDiscussion(record: AssetLockRecord) {
+  const discussion = [`创建记录：${record.createdByUserId}`];
+
+  if (record.writerConfirmedByUserId) {
+    discussion.push(`编剧确认：${record.writerConfirmedByUserId}`);
+  }
+
+  if (record.productionConfirmedByUserId) {
+    discussion.push(`制作确认：${record.productionConfirmedByUserId}`);
+  }
+
+  if (record.missingInfo) {
+    discussion.push(`需补资料：${record.missingInfo}`);
+  }
+
+  if (record.disputeReason) {
+    discussion.push(`争议说明：${record.disputeReason}`);
+  }
+
+  if (record.finalLockedByUserId) {
+    discussion.push(`最终定版：${record.finalLockedByUserId}`);
+  }
+
+  return discussion;
+}
+
 export function summarizeAssetLock(items: AssetLockChangeItem[]) {
   const writerPendingCount = items.filter((item) => item.writerConfirmation !== "confirmed").length;
   const productionPendingCount = items.filter((item) => item.productionConfirmation !== "confirmed").length;
   const disputeCount = items.filter((item) => item.reviewStatus === "disputed").length;
   const needsInfoCount = items.filter((item) => item.reviewStatus === "needs_info").length;
   const readyCount = items.filter((item) => item.reviewStatus === "ready_to_lock" || item.reviewStatus === "locked").length;
-  const canLock = writerPendingCount === 0 && productionPendingCount === 0 && disputeCount === 0 && needsInfoCount === 0;
+  const canLock = items.length > 0 && writerPendingCount === 0 && productionPendingCount === 0 && disputeCount === 0 && needsInfoCount === 0;
 
   return {
     canLock,
@@ -196,6 +256,10 @@ export function summarizeAssetLock(items: AssetLockChangeItem[]) {
 }
 
 export function getNextAssetLockOwner(items: AssetLockChangeItem[]) {
+  if (items.length === 0) {
+    return "先生成资产核对记录";
+  }
+
   if (items.some((item) => item.reviewStatus === "disputed")) {
     return "统筹协调争议项";
   }
@@ -213,4 +277,66 @@ export function getNextAssetLockOwner(items: AssetLockChangeItem[]) {
   }
 
   return "统筹定版";
+}
+
+export function canCreateAssetLockRecordFromPackage(deliveryPackage: { status: string } | null | undefined) {
+  return deliveryPackage?.status === "published";
+}
+
+export function getAssetLockEmptyState(input: { hasPublishedPackage: boolean; packageTitle?: string | null }) {
+  if (input.hasPublishedPackage) {
+    return {
+      title: "当前项目还没有资产核对记录",
+      body: `已找到已发布交稿包“${input.packageTitle ?? "未命名交稿包"}”。资产核对记录会把交稿包里的资产变更整理成待确认清单。`,
+      actionLabel: "生成资产核对记录"
+    };
+  }
+
+  return {
+    title: "当前项目还没有资产核对记录",
+    body: "资产核对记录只能基于已发布交稿包生成。请先到交稿中心发布交稿包，再回来做资产确认和定版。",
+    actionLabel: "去交稿中心"
+  };
+}
+
+export function getAssetLockRoleActions(actorRole: AssetLockActorRole) {
+  const isCoordinator = actorRole === "owner" || actorRole === "coordinator";
+  const isWriter = actorRole === "head_writer" || actorRole === "writer";
+  const isProduction = actorRole === "creator";
+
+  return {
+    canWriterConfirm: isCoordinator || isWriter,
+    canProductionConfirm: isCoordinator || isProduction,
+    canCoordinate: isCoordinator,
+    writerConfirmLabel: isWriter ? "我已确认编剧侧" : "编剧侧确认",
+    productionConfirmLabel: isProduction ? "我已确认制作侧" : "制作侧确认"
+  };
+}
+
+export function getAssetLockFinalLockHint(summary: AssetLockSummary) {
+  if (summary.totalCount === 0) {
+    return "没有资产核对记录，不能定版。";
+  }
+
+  if (summary.disputeCount > 0 || summary.needsInfoCount > 0) {
+    return "还有争议或需补资料项，先处理完再定版。";
+  }
+
+  if (summary.writerPendingCount > 0 || summary.productionPendingCount > 0) {
+    return "定版需要编剧和制作都确认完成。";
+  }
+
+  return "编剧和制作都已确认，可以由统筹最终定版。";
+}
+
+export function getAssetLockBulkHint(selectedCount: number, isMutating: boolean) {
+  if (isMutating) {
+    return "正在处理上一项操作，请稍等。";
+  }
+
+  if (selectedCount === 0) {
+    return "先勾选资产核对记录，再进行批量处理。";
+  }
+
+  return `已选择 ${selectedCount} 项，可批量处理。`;
 }

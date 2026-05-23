@@ -4,6 +4,16 @@ export type DeliveryPackageStatus = "draft" | "pending_review" | "published" | "
 
 export type DeliveryPackageType = "range" | "single_replace";
 
+export type AssetChangeType = "new" | "modified" | "removed" | "reused";
+
+export type AssetConfirmationStatus = "pending" | "confirmed" | "returned";
+
+export type AssetLockStatus = "draft" | "needs_info" | "disputed" | "ready_to_lock" | "locked";
+
+export type AssetRiskLevel = "normal" | "attention" | "high";
+
+export type AssetType = "character" | "scene" | "prop" | "vehicle" | "effect";
+
 export type ProjectRole =
   | "owner"
   | "coordinator"
@@ -85,6 +95,33 @@ export interface EpisodeAssignment {
   createdAt: string;
 }
 
+export interface AssetLockRecord {
+  id: string;
+  projectId: string;
+  deliveryPackageId: string;
+  episodeNos: number[];
+  assetName: string;
+  assetType: AssetType;
+  changeType: AssetChangeType;
+  writerConfirmation: AssetConfirmationStatus;
+  writerConfirmedByUserId?: string;
+  writerConfirmedAt?: string;
+  writerNote?: string;
+  productionConfirmation: AssetConfirmationStatus;
+  productionConfirmedByUserId?: string;
+  productionConfirmedAt?: string;
+  productionNote?: string;
+  risk: AssetRiskLevel;
+  status: AssetLockStatus;
+  missingInfo?: string;
+  disputeReason?: string;
+  finalLockedByUserId?: string;
+  finalLockedAt?: string;
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DeliveryPackage {
   id: string;
   projectId: string;
@@ -155,6 +192,7 @@ export interface WorkspaceState {
   memberPermissions: ProjectMemberPermission[];
   episodes: Episode[];
   assignments: EpisodeAssignment[];
+  assetLockRecords?: AssetLockRecord[];
   deliveryPackages: DeliveryPackage[];
   deliveryPackageEpisodes: DeliveryPackageEpisode[];
   episodeRevisions: EpisodeRevision[];
@@ -192,6 +230,48 @@ export interface AssignmentInput {
   episodeFrom: number;
   episodeTo: number;
   responsibility: EpisodeAssignment["responsibility"];
+}
+
+export interface AssetLockRecordInput {
+  projectId: string;
+  deliveryPackageId: string;
+  episodeNos: number[];
+  assetName: string;
+  assetType: AssetType;
+  changeType: AssetChangeType;
+  createdByUserId: string;
+  risk?: AssetRiskLevel;
+  writerNote?: string;
+  productionNote?: string;
+}
+
+export interface AssetLockRecordWriterConfirmationInput {
+  assetLockRecordId: string;
+  confirmedByUserId: string;
+  note?: string;
+}
+
+export interface AssetLockRecordProductionConfirmationInput {
+  assetLockRecordId: string;
+  confirmedByUserId: string;
+  note?: string;
+}
+
+export interface AssetLockRecordNeedsInfoInput {
+  assetLockRecordId: string;
+  markedByUserId: string;
+  missingInfo: string;
+}
+
+export interface AssetLockRecordDisputeInput {
+  assetLockRecordId: string;
+  markedByUserId: string;
+  disputeReason: string;
+}
+
+export interface AssetLockRecordFinalLockInput {
+  assetLockRecordId: string;
+  lockedByUserId: string;
 }
 
 export interface RegisterInput {
