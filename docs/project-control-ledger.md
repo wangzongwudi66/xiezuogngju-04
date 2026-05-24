@@ -377,7 +377,7 @@ Verification after fixes:
 - `npm.cmd run typecheck -w apps/web` passed.
 - `npm.cmd run verify` passed before and after both follow-up mobile overflow fixes: web 14 files / 108 tests, domain 5 files / 47 tests, Next build passed.
 - `http://localhost:3000` returned 200.
-- In-app Browser control still lacks the required Node REPL tool in this thread, so Branch B should re-run the `390x844` page-level overflow measurement before merge.
+- Branch B rechecked `8bd353d`: `390x844` passed with `documentElement.scrollWidth=375` and `clientWidth=375`; `.decision-track-scroll` remained synchronized (`scrollLeft 0 -> 54`, ruler and track both moved `-54px`). Branch B returned "无剩余 P1，可进入合并准备".
 
 ## Recovery Steps After Context Compression
 
@@ -403,12 +403,12 @@ npm.cmd run verify
 
 ## Immediate Next Decision
 
-Continue asset decision timeline acceptance after the final follow-up fixes.
+Prepare to merge `codex/asset-decision-timeline` into `main`.
 
 Recommended first actions:
 
-1. Re-run Branch B visual checks, especially `390x844` full-page overflow and `1366x768` drawer-open behavior.
-2. If Branch B has no remaining P1, run final `npm.cmd run verify` if new changes were made after the last pass.
+1. Confirm whether `main` has moved since the branch split.
+2. If `main` has not moved, fast-forward merge `codex/asset-decision-timeline` into `main`.
 3. Keep timeline types in `apps/web/app/ui/asset-decision-timeline-data.ts` until product/UI validation is complete.
 4. Do not add database, real auth/session, AI parsing, or new timeline APIs yet.
-5. If visual acceptance passes, decide whether to merge `codex/asset-decision-timeline` into `main`.
+5. After merge, run `npm.cmd run verify` on `main`.
