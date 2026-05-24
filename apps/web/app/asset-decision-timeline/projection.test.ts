@@ -3,7 +3,8 @@ import type {
   AssetLockRecord,
   DeliveryPackageEpisode,
   Episode,
-  EpisodeAssignment
+  EpisodeAssignment,
+  ScriptSourceBinding
 } from "@aigc/domain";
 import {
   buildAssetTimelineProjection,
@@ -77,6 +78,79 @@ describe("asset decision timeline projection", () => {
         endLine: 1
       })
     );
+  });
+
+  it("uses explicit source bindings before asset-name fallback", () => {
+    const projection = buildAssetTimelineProjection({
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      viewerRole: "coordinator",
+      viewerUserId: "user-coordinator",
+      assetLockRecords: [buildRecord({ id: "asset-map", assetName: "Mine Map", assetType: "prop", episodeNos: [2] })],
+      deliveryPackageEpisodes: [buildPackageEpisode(2, "Mine Map fallback line.\nMine Map second fallback.")],
+      episodes,
+      assignments,
+      scriptSourceBindings: [
+        buildSourceBinding({
+          id: "binding-map",
+          assetLockRecordId: "asset-map",
+          episodeNo: 2,
+          startLine: 2,
+          endLine: 2,
+          excerptSnapshot: "  Selected source line  "
+        })
+      ]
+    });
+
+    expect(projection.sourceExcerpts).toEqual([
+      expect.objectContaining({
+        id: "source-binding-binding-map",
+        episodeNo: 2,
+        excerpt: "  Selected source line  ",
+        relatedAssetNames: ["Mine Map"],
+        startLine: 2,
+        endLine: 2
+      })
+    ]);
+    expect(projection.decisionQueue[0]?.sourceExcerptIds).toEqual(["source-binding-binding-map"]);
+    expect(projection.tracks.flatMap((track) => track.clips)[0]?.currentSegment.sourceExcerptIds).toEqual([
+      "source-binding-binding-map"
+    ]);
+  });
+
+  it("scopes explicit source bindings before attaching source excerpt ids", () => {
+    const projection = buildAssetTimelineProjection({
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      viewerRole: "creator",
+      viewerUserId: "user-creator-b",
+      assetLockRecords: [buildRecord({ id: "asset-map", assetName: "Mine Map", assetType: "prop", episodeNos: [1, 2] })],
+      deliveryPackageEpisodes: [buildPackageEpisode(1, "Mine Map hidden line."), buildPackageEpisode(2, "Mine Map visible line.")],
+      episodes,
+      assignments,
+      scriptSourceBindings: [
+        buildSourceBinding({
+          id: "binding-hidden",
+          assetLockRecordId: "asset-map",
+          episodeNo: 1,
+          excerptSnapshot: "Hidden source line"
+        }),
+        buildSourceBinding({
+          id: "binding-visible",
+          assetLockRecordId: "asset-map",
+          episodeNo: 2,
+          excerptSnapshot: "Visible source line"
+        })
+      ]
+    });
+
+    expect(projection.creatorAssignedWindow?.episodeNos).toEqual([2]);
+    expect(projection.sourceExcerpts.map((excerpt) => excerpt.id)).toEqual(["source-binding-binding-visible"]);
+    expect(projection.sourceExcerpts.map((excerpt) => excerpt.excerpt)).toEqual(["Visible source line"]);
+    expect(projection.decisionQueue[0]?.sourceExcerptIds).toEqual(["source-binding-binding-visible"]);
+    expect(projection.tracks.flatMap((track) => track.clips)[0]?.currentSegment.sourceExcerptIds).toEqual([
+      "source-binding-binding-visible"
+    ]);
   });
 
   it("maps asset lock statuses to decision kind and queue tags", () => {
@@ -426,6 +500,22 @@ function buildPackageEpisode(
     title: `第 ${episodeNo} 集`,
     content,
     isConfirmedChange
+  };
+}
+
+function buildSourceBinding(overrides: Partial<ScriptSourceBinding>): ScriptSourceBinding {
+  return {
+    id: "binding-source",
+    projectId: "project-jincheng",
+    deliveryPackageId: "delivery-current",
+    assetLockRecordId: "asset-record",
+    episodeNo: 1,
+    startLine: 1,
+    endLine: 1,
+    excerptSnapshot: "Bound source line",
+    createdByUserId: "user-writer",
+    createdAt: now,
+    ...overrides
   };
 }
 

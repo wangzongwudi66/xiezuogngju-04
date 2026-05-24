@@ -3,7 +3,8 @@ import type {
   DeliveryPackageEpisode,
   Episode,
   EpisodeAssignment,
-  ProjectRole
+  ProjectRole,
+  ScriptSourceBinding
 } from "@aigc/domain";
 import {
   buildTracks,
@@ -30,6 +31,7 @@ export interface AssetTimelineProjectionInput {
   deliveryPackageEpisodes: DeliveryPackageEpisode[];
   episodes: Episode[];
   assignments: EpisodeAssignment[];
+  scriptSourceBindings?: ScriptSourceBinding[];
   previousAssetLockRecords?: AssetLockRecord[];
 }
 
@@ -66,13 +68,33 @@ export function buildAssetTimelineProjection(input: AssetTimelineProjectionInput
   const scopedRecords = isRoleScoped
     ? records.filter((record) => record.episodeNos.some((episodeNo) => roleEpisodeSet.has(episodeNo)))
     : records;
-  const assetNames = scopedRecords.map((record) => record.assetName);
-  const sourceExcerpts = deriveSourceExcerptsFromPackageEpisodes({
-    assetNames,
+  const explicitSourceBindings = filterVisibleScriptSourceBindings({
+    bindings: input.scriptSourceBindings ?? [],
+    deliveryPackageEpisodes: currentPackageEpisodes,
+    deliveryPackageId: input.deliveryPackageId,
+    isRoleScoped,
+    projectId: input.projectId,
+    records: scopedRecords,
+    roleEpisodeSet
+  });
+  const explicitSourceExcerpts = deriveSourceExcerptsFromScriptSourceBindings({
+    bindings: explicitSourceBindings,
+    deliveryPackageEpisodes: currentPackageEpisodes,
+    deliveryPackageId: input.deliveryPackageId,
+    projectId: input.projectId,
+    records: scopedRecords
+  });
+  const recordsWithExplicitExcerpts = new Set(explicitSourceBindings.map((binding) => binding.assetLockRecordId));
+  const fallbackAssetNames = scopedRecords
+    .filter((record) => !recordsWithExplicitExcerpts.has(record.id))
+    .map((record) => record.assetName);
+  const fallbackSourceExcerpts = deriveSourceExcerptsFromPackageEpisodes({
+    assetNames: fallbackAssetNames,
     deliveryPackageEpisodes: currentPackageEpisodes,
     deliveryPackageId: input.deliveryPackageId,
     projectId: input.projectId
   }).filter((excerpt) => !isRoleScoped || roleEpisodeSet.has(excerpt.episodeNo));
+  const sourceExcerpts = [...explicitSourceExcerpts, ...fallbackSourceExcerpts];
   const previousRecords = filterPreviousAssetLockRecords(input);
   const segments = scopedRecords.map((record) => buildAssetStateSegment(record, sourceExcerpts));
   const decisions = scopedRecords.map((record) => deriveDecisionItemFromAssetLockRecord(record, sourceExcerpts));
@@ -144,6 +166,97 @@ export function deriveCreatorAssignedEpisodeWindow({
     episodeNos,
     sourceAssignmentIds: scopedAssignments.map((assignment) => assignment.id).sort()
   };
+}
+
+export function deriveSourceExcerptsFromScriptSourceBindings({
+  bindings,
+  deliveryPackageEpisodes,
+  deliveryPackageId,
+  isRoleScoped = false,
+  projectId,
+  records,
+  roleEpisodeSet = new Set<number>()
+}: {
+  bindings: ScriptSourceBinding[];
+  deliveryPackageEpisodes: DeliveryPackageEpisode[];
+  deliveryPackageId: string;
+  isRoleScoped?: boolean;
+  projectId: string;
+  records: AssetLockRecord[];
+  roleEpisodeSet?: Set<number>;
+}): ScriptSourceExcerpt[] {
+  const visibleBindings = filterVisibleScriptSourceBindings({
+    bindings,
+    deliveryPackageEpisodes,
+    deliveryPackageId,
+    isRoleScoped,
+    projectId,
+    records,
+    roleEpisodeSet
+  });
+  const recordById = new Map(records.map((record) => [record.id, record]));
+  const packageEpisodeByKey = new Map(
+    deliveryPackageEpisodes
+      .filter((episode) => episode.deliveryPackageId === deliveryPackageId)
+      .map((episode) => [`${episode.deliveryPackageId}:${episode.episodeNo}`, episode])
+  );
+
+  return visibleBindings.flatMap((binding) => {
+    const record = recordById.get(binding.assetLockRecordId);
+    const packageEpisode = packageEpisodeByKey.get(`${binding.deliveryPackageId}:${binding.episodeNo}`);
+
+    if (!record || !packageEpisode) {
+      return [];
+    }
+
+    return [
+      {
+        id: `source-binding-${binding.id}`,
+        projectId: binding.projectId,
+        deliveryPackageId: binding.deliveryPackageId,
+        episodeNo: binding.episodeNo,
+        title: `${packageEpisode.title} lines ${binding.startLine}-${binding.endLine}`,
+        excerpt: binding.excerptSnapshot,
+        startLine: binding.startLine,
+        endLine: binding.endLine,
+        relatedAssetNames: [record.assetName]
+      }
+    ];
+  });
+}
+
+function filterVisibleScriptSourceBindings({
+  bindings,
+  deliveryPackageEpisodes,
+  deliveryPackageId,
+  isRoleScoped = false,
+  projectId,
+  records,
+  roleEpisodeSet = new Set<number>()
+}: {
+  bindings: ScriptSourceBinding[];
+  deliveryPackageEpisodes: DeliveryPackageEpisode[];
+  deliveryPackageId: string;
+  isRoleScoped?: boolean;
+  projectId: string;
+  records: AssetLockRecord[];
+  roleEpisodeSet?: Set<number>;
+}) {
+  const recordIds = new Set(records.map((record) => record.id));
+  const packageEpisodeKeys = new Set(
+    deliveryPackageEpisodes
+      .filter((episode) => episode.deliveryPackageId === deliveryPackageId)
+      .map((episode) => `${episode.deliveryPackageId}:${episode.episodeNo}`)
+  );
+
+  return bindings.filter(
+    (binding) =>
+      binding.projectId === projectId &&
+      binding.deliveryPackageId === deliveryPackageId &&
+      recordIds.has(binding.assetLockRecordId) &&
+      packageEpisodeKeys.has(`${binding.deliveryPackageId}:${binding.episodeNo}`) &&
+      (!isRoleScoped || roleEpisodeSet.has(binding.episodeNo))
+  );
 }
 
 export function deriveSourceExcerptsFromPackageEpisodes({

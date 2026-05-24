@@ -92,7 +92,7 @@ Passed after fast-forward merging `codex/asset-decision-timeline` into `main`:
 - Branch: `codex/script-source-binding-plan`.
 - Created from local `main` at `e803512`.
 - Purpose: define the minimal `ScriptSourceBinding` boundary before touching domain, store, API, or timeline UI.
-- Current stage: domain-only source binding helper and tests; no store/API/projection/UI wiring yet.
+- Current stage: projection consumes explicit source bindings; no store/API/UI wiring yet.
 - Last completed branch: `codex/asset-lock-session-scope`, merged at `aff5803`.
 - Do not push unless the user explicitly asks.
 
@@ -111,7 +111,7 @@ Scope:
 Next implementation sequence after documentation review:
 
 1. Add domain-only `ScriptSourceBinding` helper and tests. Done on this branch after 01/02 review.
-2. Let timeline projection consume explicit bindings while preserving asset-name fallback.
+2. Let timeline projection consume explicit bindings while preserving asset-name fallback. Done on this branch.
 3. Add read-only service plumbing for optional legacy-safe workspace bindings.
 4. Only then consider narrow `asset-lock-records` actions for bind/remove source.
 
@@ -127,6 +127,13 @@ Verification after domain helper step:
 - `npm.cmd run test -w packages/domain -- script-source-binding` passed: 1 file / 9 tests.
 - `npm.cmd run test -w packages/domain` passed: 6 files / 56 tests.
 - `npm.cmd run typecheck --workspaces --if-present` passed.
+
+Verification after projection binding step:
+
+- Domain snapshot fix: `npm.cmd run test -w packages/domain -- script-source-binding` passed: 1 file / 11 tests.
+- Domain snapshot fix: `npm.cmd run typecheck -w packages/domain` passed.
+- Projection binding: `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 6 files / 41 tests.
+- Projection binding: `npm.cmd run typecheck -w apps/web` passed.
 
 ## Asset Lock Workbench Completion
 
