@@ -3283,9 +3283,25 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 760px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   .auth-shell,
   .replica-grid {
     padding: 18px;
+  }
+
+  .replica-shell,
+  .replica-main,
+  .replica-grid,
+  .module-panel,
+  .panel {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: clip;
   }
 
   .auth-stats,
