@@ -17,8 +17,8 @@ Read it first before making scheduling, branch, or merge decisions.
 
 - Branch: `main`
 - Remote tracking: `xiezuogongju-02/main`
-- Local `main` is ahead of remote by 30 commits as of 2026-05-24 before this ledger update.
-- Latest local `main` commit after merging the asset decision timeline branch: `0f00d3f Record final asset timeline visual pass`.
+- Local `main` is ahead of remote by 31 commits as of 2026-05-24 before the field-map branch.
+- Latest local `main` commit after planning the post-merge timeline work: `2b665a3 Plan post-merge asset timeline work`.
 - `codex/asset-lock-workbench` has been fast-forward merged into `main`.
 - `codex/asset-decision-timeline` has been fast-forward merged into `main`.
 
@@ -55,10 +55,12 @@ Passed after fast-forward merging `codex/asset-decision-timeline` into `main`:
 
 ## Active Feature Branch
 
-- Branch: none currently active.
-- Current branch: `main`.
+- Branch: `codex/asset-timeline-field-map`.
+- Created from local `main` at `2b665a3`.
+- Purpose: document asset timeline field sources, projection boundaries, and next implementation sequence.
+- Current stage: documentation-only field map.
 - Last completed branch: `codex/asset-decision-timeline`, fast-forward merged into `main` at `0f00d3f`.
-- Next work should start from `main` on a new `codex/` branch only after the scope is chosen.
+- Do not add API/domain implementation on this branch until the mapping document is reviewed.
 - Do not push unless the user explicitly asks.
 
 ## Asset Lock Workbench Completion
@@ -407,15 +409,29 @@ npm.cmd run verify
 
 ## Immediate Next Decision
 
-Start the post-merge planning stage for asset timeline formalization.
+Review the field-map design before any implementation.
 
 Recommended first actions:
 
-1. Create a new branch from `main` only after choosing the next scope; suggested branch name: `codex/asset-timeline-field-map`.
-2. First deliverable should be a mapping/design document, not production API code.
-3. Map every mock timeline field to one of: `AssetLockRecord`, `DeliveryPackage/EpisodeRevision`, `EpisodeAssignment`, or pure UI-derived state.
-4. Define the minimum state transitions needed before any timeline mutation/API work.
-5. Keep the current UI mock working while the mapping is reviewed.
+1. Review `docs/asset-timeline-field-map.md`.
+2. If accepted, keep the next implementation branch focused on pure projection helpers and tests.
+3. Do not add real timeline mutations yet.
+4. Keep existing UI mock working while projection helpers are developed.
+5. Run full verification before any branch merge.
+
+## 2026-05-24 Post-Merge Planning Review
+
+Branch A/B/C/D returned on `main` at `2b665a3`:
+
+- Branch A: next product target should turn the static timeline into a real decision workbench based on published packages, asset lock records, and assignments. It recommends realizing asset state segments, script source bindings, lightweight discussion entries, and possibly decision lifecycle fields only when due/assignee/acknowledgement become real scope.
+- Branch B: mapped existing mock fields. Tracks, clips, queues, selection, grouping, ghost marker summaries, permissions, and layout remain UI/projection. Existing domain sources are `AssetLockRecord`, `DeliveryPackage/EpisodeRevision`, and `EpisodeAssignment`.
+- Branch C: recommends no new persistent domain type yet. Next technical step should be a minimal read-only projection API after projection helpers are proven; existing asset-lock mutations should continue handling confirm, needs-info, dispute, and final-lock transitions.
+- Branch D: recommends one writable branch only, `codex/asset-timeline-field-map`; first commit should be documentation, then pure tests/helpers, and UI/API wiring last.
+
+Main-conversation action:
+
+- Created branch `codex/asset-timeline-field-map` from `main`.
+- Added `docs/asset-timeline-field-map.md` with field source mapping, non-goals, candidate future business objects, read-only projection API boundary, permission rules, minimum test plan, and commit sequence.
 
 ## Next Post-Merge Parallel Batch
 
