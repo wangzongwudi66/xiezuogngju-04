@@ -10,7 +10,8 @@ import {
   canSubmitDeliveryRole,
   filterProjectItems,
   selectAssetTimelineDeliveryPackageId,
-  selectDefaultDeliveryPackageId
+  selectDefaultDeliveryPackageId,
+  selectRealAssetTimelineDeliveryPackageId
 } from "./delivery-role-view";
 import { filterAssetChanges, getMockAssetChanges, getNextAssetLockOwner, summarizeAssetLock } from "./asset-lock-workbench-data";
 
@@ -107,6 +108,58 @@ describe("coordinator delivery role view", () => {
 
     expect(selectDefaultDeliveryPackageId(packages, "coordinator", null)).toBe("pending-package");
     expect(selectAssetTimelineDeliveryPackageId(packages)).toBe("latest-published-package");
+  });
+
+  it("selects only server-known published packages for the real asset timeline request", () => {
+    const packages = [
+      {
+        id: "local-prototype-published",
+        status: "published" as const,
+        createdAt: "2026-05-24T10:00:00.000Z",
+        publishedAt: "2026-05-24T10:00:00.000Z"
+      },
+      {
+        id: "server-published",
+        status: "published" as const,
+        createdAt: "2026-05-23T10:00:00.000Z",
+        publishedAt: "2026-05-23T10:00:00.000Z"
+      }
+    ];
+
+    expect(selectAssetTimelineDeliveryPackageId(packages, ["server-published"])).toBe("server-published");
+    expect(selectAssetTimelineDeliveryPackageId(packages, [])).toBeUndefined();
+  });
+
+  it("gates the real asset timeline package on workspace session sync", () => {
+    const packages = [
+      {
+        id: "local-prototype-published",
+        status: "published" as const,
+        createdAt: "2026-05-24T10:00:00.000Z",
+        publishedAt: "2026-05-24T10:00:00.000Z"
+      },
+      {
+        id: "server-published",
+        status: "published" as const,
+        createdAt: "2026-05-23T10:00:00.000Z",
+        publishedAt: "2026-05-23T10:00:00.000Z"
+      }
+    ];
+
+    expect(
+      selectRealAssetTimelineDeliveryPackageId({
+        deliveryPackages: packages,
+        serverDeliveryPackageIds: ["server-published"],
+        sessionReady: false
+      })
+    ).toBeUndefined();
+    expect(
+      selectRealAssetTimelineDeliveryPackageId({
+        deliveryPackages: packages,
+        serverDeliveryPackageIds: ["server-published"],
+        sessionReady: true
+      })
+    ).toBe("server-published");
   });
 });
 

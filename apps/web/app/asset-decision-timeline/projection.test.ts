@@ -201,6 +201,34 @@ describe("asset decision timeline projection", () => {
     expect(headWriterProjection.decisionQueue.map((decision) => decision.assetLockRecordId)).toEqual(["asset-support", "asset-writer"]);
   });
 
+  it("keeps writer work windows centered on scoped real records instead of the full assignment range", () => {
+    const broadEpisodes = Array.from({ length: 20 }, (_, index) => buildEpisode(index + 1, "project-jincheng"));
+    const writerProjection = buildAssetTimelineProjection({
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      viewerRole: "writer",
+      viewerUserId: "user-writer-a",
+      assetLockRecords: [
+        buildRecord({ id: "asset-ep3", assetName: "Episode Three Asset", episodeNos: [3] }),
+        buildRecord({ id: "asset-ep4", assetName: "Episode Four Asset", episodeNos: [4] })
+      ],
+      deliveryPackageEpisodes: [
+        buildPackageEpisode(3, "Episode Three Asset needs a decision."),
+        buildPackageEpisode(4, "Episode Four Asset needs a decision.")
+      ],
+      episodes: broadEpisodes,
+      assignments: broadEpisodes.map((episode) =>
+        buildAssignment(`assignment-writer-${episode.episodeNo}`, episode.id, "user-writer-a", "writer")
+      )
+    });
+
+    expect(writerProjection.episodeWindow).toEqual({ from: 2, to: 11 });
+    expect(writerProjection.tracks.flatMap((track) => track.clips).map((clip) => clip.assetLockRecordId)).toEqual([
+      "asset-ep3",
+      "asset-ep4"
+    ]);
+  });
+
   it("filters current asset records by project and delivery package", () => {
     const projection = buildAssetTimelineProjection({
       projectId: "project-jincheng",

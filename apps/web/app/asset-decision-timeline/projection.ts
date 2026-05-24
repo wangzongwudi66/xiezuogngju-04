@@ -87,9 +87,15 @@ export function buildAssetTimelineProjection(input: AssetTimelineProjectionInput
     })
   );
   const packageEpisodeNos = normalizeEpisodeNos(currentPackageEpisodes.map((episode) => episode.episodeNo));
+  const scopedProjectionEpisodeNos = normalizeEpisodeNos([
+    ...scopedRecords.flatMap((record) => record.episodeNos),
+    ...sourceExcerpts.map((excerpt) => excerpt.episodeNo)
+  ]);
   const projectedEpisodeNos =
     roleScopedEpisodeNos !== undefined
-      ? roleScopedEpisodeNos
+      ? scopedProjectionEpisodeNos.length > 0
+        ? scopedProjectionEpisodeNos
+        : roleScopedEpisodeNos
       : normalizeEpisodeNos([...packageEpisodeNos, ...records.flatMap((record) => record.episodeNos)]);
 
   return {

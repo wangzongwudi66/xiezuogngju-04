@@ -635,6 +635,22 @@ Next main-conversation work:
 - Run browser acceptance for the asset timeline before merge preparation.
 - If browser acceptance passes, update this ledger with browser results and consider merging `codex/asset-timeline-field-map` back to `main`.
 
+Browser acceptance and final pre-merge hardening:
+
+- Branch A browser acceptance reported no P0/P1 on the real asset timeline projection wiring:
+  - `creator-a` login synchronized `/api/workspace-session`.
+  - Asset timeline requested `/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=delivery-jc-3-4-qmk20g`.
+  - Query did not include `viewerUserId`, `viewerRole`, `assignedEpisodeNos`, or `previousDeliveryPackageId`.
+  - `creator-a` and `writer` both showed real projection; `writer` could see real episode 3/4 clips.
+  - `creator-b` could not see `creator-a` scoped assets; `head_writer` and `coordinator` could see full projection.
+  - `1366x768`, `760x900`, and `390x844` had no page-level horizontal overflow; track ruler and clips scrolled in sync.
+  - Queue, group, clip, and detail interactions were readable; account switching reset drawer/selected clip state.
+- Branch B code review reported no P0/P1:
+  - `sessionReady` gating and `serverDeliveryPackageIds` whitelist behavior were accepted.
+  - Server workspace refresh maintains the whitelist; prototype reset clears it.
+  - Writer episode-window fix did not break creator empty assignment, creator-B isolation, or head-writer full view.
+- Main-conversation decision: skip the remaining P3-only integration test gap for now and proceed to merge preparation after final verification.
+
 ## Next Post-Merge Parallel Batch
 
 Use `main` at or after `0f00d3f Record final asset timeline visual pass` as the baseline. If this ledger has a newer commit, use the latest `main` commit. All sub-conversations are read-only unless the main conversation explicitly delegates implementation.

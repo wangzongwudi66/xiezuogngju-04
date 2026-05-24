@@ -87,8 +87,8 @@ import {
   canReviewDeliveryRole,
   canSubmitDeliveryRole,
   filterProjectItems,
-  selectAssetTimelineDeliveryPackageId,
-  selectDefaultDeliveryPackageId
+  selectDefaultDeliveryPackageId,
+  selectRealAssetTimelineDeliveryPackageId
 } from "./delivery-role-view";
 import {
   fetchDeliveryImportJobs,
@@ -389,6 +389,7 @@ export function M1Dashboard() {
   const [wordParseFeedback, setWordParseFeedback] = useState<TextParseFeedback | null>(null);
   const [deliveryParseIssuesByPackageId, setDeliveryParseIssuesByPackageId] = useState<Record<string, WordDeliveryIssue[]>>({});
   const [deliveryImportJobs, setDeliveryImportJobs] = useState<DeliveryImportJob[]>([]);
+  const [serverDeliveryPackageIds, setServerDeliveryPackageIds] = useState<string[]>([]);
   const [assetLockRecords, setAssetLockRecords] = useState<AssetLockRecord[]>([]);
   const [assetLockSummary, setAssetLockSummary] = useState<AssetLockRecordSummary | null>(null);
   const [assetLockError, setAssetLockError] = useState<string | null>(null);
@@ -614,6 +615,7 @@ export function M1Dashboard() {
     const next = buildM2PrototypeWorkspace();
     clearM2WorkspacePersistence();
     setState(next);
+    setServerDeliveryPackageIds([]);
     setSelectedProjectId(next.projects[0]?.id ?? seedWorkspace.projects[0].id);
     setSelectedDeliveryPackageId(null);
     setDeliveryImportJobs([]);
@@ -802,6 +804,7 @@ export function M1Dashboard() {
   }
 
   function applyDeliveryWorkspaceSnapshot(snapshot: Awaited<ReturnType<typeof fetchDeliveryImportWorkspace>>) {
+    setServerDeliveryPackageIds(snapshot.state.deliveryPackages.map((deliveryPackage) => deliveryPackage.id));
     setDeliveryParseIssuesByPackageId((current) => ({
       ...current,
       ...snapshot.deliveryParseIssuesByPackageId
@@ -1391,6 +1394,7 @@ export function M1Dashboard() {
               rejectionReason={rejectionReason}
               retryingImportJobId={retryingImportJobId}
               selectedMockDeliveryKey={selectedMockDeliveryKey}
+              serverDeliveryPackageIds={serverDeliveryPackageIds}
               setRejectionReason={setRejectionReason}
               setSelectedDeliveryPackageId={setSelectedDeliveryPackageId}
               setSelectedMockDeliveryKey={setSelectedMockDeliveryKey}
@@ -2016,6 +2020,7 @@ function ModuleWorkbench({
   rejectionReason,
   retryingImportJobId,
   selectedMockDeliveryKey,
+  serverDeliveryPackageIds,
   setRejectionReason,
   setSelectedDeliveryPackageId,
   setSelectedMockDeliveryKey,
@@ -2071,6 +2076,7 @@ function ModuleWorkbench({
   rejectionReason: string;
   retryingImportJobId: string | null;
   selectedMockDeliveryKey: MockDeliveryKey;
+  serverDeliveryPackageIds: string[];
   setRejectionReason: React.Dispatch<React.SetStateAction<string>>;
   setSelectedDeliveryPackageId: React.Dispatch<React.SetStateAction<string | null>>;
   setSelectedMockDeliveryKey: React.Dispatch<React.SetStateAction<MockDeliveryKey>>;
@@ -2083,7 +2089,11 @@ function ModuleWorkbench({
   setWordDeclaredRangeDraft: React.Dispatch<React.SetStateAction<string>>;
   setWordTextDraft: React.Dispatch<React.SetStateAction<string>>;
 }) {
-  const assetTimelineDeliveryPackageId = assetTimelineSessionReady ? selectAssetTimelineDeliveryPackageId(deliveryPackageDetails) : undefined;
+  const assetTimelineDeliveryPackageId = selectRealAssetTimelineDeliveryPackageId({
+    deliveryPackages: deliveryPackageDetails,
+    serverDeliveryPackageIds,
+    sessionReady: assetTimelineSessionReady
+  });
 
   if (activeModule === "集工作台") {
     if (!episode) {

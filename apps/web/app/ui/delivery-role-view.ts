@@ -41,11 +41,30 @@ export function selectDefaultDeliveryPackageId(
 }
 
 export function selectAssetTimelineDeliveryPackageId(
-  deliveryPackages: Array<{ id: string; status: DeliveryPackageStatus; createdAt: string; publishedAt?: string }>
+  deliveryPackages: Array<{ id: string; status: DeliveryPackageStatus; createdAt: string; publishedAt?: string }>,
+  eligiblePackageIds?: Iterable<string>
 ) {
+  const eligibleSet = eligiblePackageIds ? new Set(eligiblePackageIds) : null;
+
   return (
     [...deliveryPackages]
-      .filter((deliveryPackage) => deliveryPackage.status === "published")
+      .filter((deliveryPackage) => deliveryPackage.status === "published" && (!eligibleSet || eligibleSet.has(deliveryPackage.id)))
       .sort((a, b) => (b.publishedAt ?? b.createdAt).localeCompare(a.publishedAt ?? a.createdAt))[0]?.id ?? undefined
   );
+}
+
+export function selectRealAssetTimelineDeliveryPackageId({
+  deliveryPackages,
+  serverDeliveryPackageIds,
+  sessionReady
+}: {
+  deliveryPackages: Array<{ id: string; status: DeliveryPackageStatus; createdAt: string; publishedAt?: string }>;
+  serverDeliveryPackageIds: Iterable<string>;
+  sessionReady: boolean;
+}) {
+  if (!sessionReady) {
+    return undefined;
+  }
+
+  return selectAssetTimelineDeliveryPackageId(deliveryPackages, serverDeliveryPackageIds);
 }

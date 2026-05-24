@@ -1,6 +1,6 @@
 # AIGC 视频协作工具
 
-当前进度：M1 工作台已完成并可验收；M2 已接入交稿中心、交稿确认、发布/驳回、集工作台当前生效剧本、修订记录入口、diff 摘要占位与 docx 导出占位。Word 自动切段、剧本 diff、docx 导出工具已在领域层实现并有测试。M3 资产审核仍未开始。
+当前进度：M1 工作台已完成并可验收；M2 已接入交稿中心、交稿确认、发布/驳回、集工作台当前生效剧本、修订记录入口、diff 摘要占位与 docx 导出占位。Word 自动切段、剧本 diff、docx 导出工具已在领域层实现并有测试。M3 资产定版、资产锁记录、附件元数据、资产决策轨道真实 projection API 与前端接线已进入可验收状态，仍属于本地原型持久化，不是正式鉴权/数据库后端。
 
 ## 技术选型
 
@@ -85,6 +85,58 @@ npm run build
 ```bash
 npm run verify
 ```
+
+## 工作延续日志
+
+### 2026-05-24：资产轨道真实 projection 接线修复
+
+当前分支：`codex/asset-timeline-field-map`。本轮从浏览器验收发现两个 P1，并已修复：
+
+- 干净浏览器登录后，资产轨道会把客户端本地 prototype 生成的 published package id 传给 `/api/asset-decision-timeline`，服务端找不到该包并落到 Demo fallback。现在资产轨道只会从服务端 workspace snapshot 返回过的 delivery package id 中选择 latest published 包，避免本地临时包误打真实 projection API。相关文件：`apps/web/app/ui/m1-dashboard.tsx`、`apps/web/app/ui/delivery-role-view.ts`、`apps/web/app/ui/m1-dashboard.test.ts`。
+- writer 真实 projection API 返回了第 3/4 集资产，但 UI 工作窗口按完整 writer assignment 推到第 11-20 集，导致 clips 不可见。现在 role-scoped 用户在存在真实 scoped records/source excerpts 时，优先用这些真实集数计算 `episodeWindow`；没有真实项时再回退到完整 assignment 范围。相关文件：`apps/web/app/asset-decision-timeline/projection.ts`、`apps/web/app/asset-decision-timeline/projection.test.ts`。
+
+已跑验证：
+
+```bash
+npm.cmd run test -w apps/web -- workspace-session asset-decision-timeline asset-decision-timeline-api m1-dashboard
+npm.cmd run typecheck -w apps/web
+npm.cmd run verify
+```
+
+浏览器复验结果：
+
+- `creator-a` 干净浏览器登录后，顶部显示“真实投影”，请求 `/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=delivery-jc-3-4-qmk20g`。
+- 请求 query 未包含 `viewerUserId`、`viewerRole`、`assignedEpisodeNos`、`previousDeliveryPackageId`。
+- `writer` 现在能看到第 3/4 集真实资产 clips。
+- `1366x768`、`760x900`、`390x844` 未见整页横向溢出；移动端轨道横滚时时间尺和 clips 同步。
+
+后续接手建议：
+
+- 若继续做资产轨道，优先补 UI 级测试或轻量集成测试，覆盖“本地 prototype package 与服务端 package 同时存在时，只用服务端 published package 打真实 API”。
+- 若要让本地 prototype 默认就能真实 projection，应考虑初始化服务端 `.local-data/delivery-import-jobs.json`，而不是让前端临时生成 package 后直接请求服务端。
+- 不要让客户端传 `viewerUserId`、`viewerRole`、`assignedEpisodeNos` 参与资产轨道 API scope；服务端必须继续从 workspace session 和项目成员关系推导。
+
+### 2026-05-25：资产轨道真实包选择补测
+
+继续补强了资产轨道前端接线的可测边界：
+
+- 新增 `selectRealAssetTimelineDeliveryPackageId`，把 `assetTimelineSessionReady` 会话门控和服务端 package id 白名单合成一个纯函数，`ModuleWorkbench` 不再内联这段判断。
+- `m1-dashboard.test.ts` 现在覆盖：会话未同步时不选择真实 projection package；会话同步后即使本地 prototype published package 更新，也只选择服务端 workspace 已知的 published package。
+
+已跑验证：
+
+```bash
+npm.cmd run test -w apps/web -- m1-dashboard asset-decision-timeline
+npm.cmd run typecheck -w apps/web
+npm.cmd run verify
+git diff --check
+```
+
+轻量浏览器冒烟：
+
+- `creator-a` 和 `writer` 登录后均显示“真实投影”。
+- 二者均请求 `/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=delivery-jc-3-4-qmk20g`，响应状态为 `200`。
+- 两个账号下都能看到第 3/4 集真实资产 clips，未见整页横向溢出。
 
 ## M1 验收步骤
 
