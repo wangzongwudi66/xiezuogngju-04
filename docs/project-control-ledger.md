@@ -89,16 +89,15 @@ Passed after fast-forward merging `codex/asset-decision-timeline` into `main`:
 
 ## Active Feature Branch
 
-- Branch: `codex/script-source-binding-plan`.
-- Created from local `main` at `e803512`.
-- Purpose: define the minimal `ScriptSourceBinding` boundary before touching domain, store, API, or timeline UI.
-- Current stage: projection consumes explicit source bindings; no store/API/UI wiring yet.
-- Last completed branch: `codex/asset-lock-session-scope`, merged at `aff5803`.
+- Branch: none currently active after `codex/script-source-binding-plan` was fast-forward merged into `main`.
+- Last completed branch: `codex/script-source-binding-plan`, merged at `5f93cae`.
+- Next recommended branch: `codex/script-source-binding-service`, focused on read-only service plumbing for `state.scriptSourceBindings ?? []`.
 - Do not push unless the user explicitly asks.
 
 ## Script Source Binding Planning
 
 Started on branch `codex/script-source-binding-plan`.
+Fast-forward merged into `main` at `5f93cae` on `2026-05-25 02:03:09 +08:00`.
 
 Scope:
 
@@ -134,6 +133,7 @@ Verification after projection binding step:
 - Domain snapshot fix: `npm.cmd run typecheck -w packages/domain` passed.
 - Projection binding: `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 6 files / 41 tests.
 - Projection binding: `npm.cmd run typecheck -w apps/web` passed.
+- Pre-merge verification: `npm.cmd run verify` passed on `codex/script-source-binding-plan`.
 
 ## Asset Lock Workbench Completion
 
