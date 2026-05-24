@@ -437,6 +437,10 @@ Main-conversation action:
 - Targeted verification for this helper stage:
   - `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 3 files / 16 tests.
   - `npm.cmd run typecheck -w apps/web` passed.
+- Hardened projection helpers with package-scoped episode-window filtering and previous-version ghost comparison coverage.
+- Follow-up verification for the projection hardening step:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 3 files / 18 tests.
+  - `npm.cmd run typecheck -w apps/web` passed.
 
 ## Next Post-Merge Parallel Batch
 

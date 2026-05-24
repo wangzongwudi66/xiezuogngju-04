@@ -160,6 +160,65 @@ describe("asset decision timeline projection", () => {
     expect(projection.sourceExcerpts).toEqual([]);
     expect(projection.tracks.flatMap((track) => track.clips).every((clip) => clip.isDimmedByRoleScope)).toBe(true);
   });
+
+  it("does not let unrelated package episodes change the projected episode window", () => {
+    const projection = buildAssetTimelineProjection({
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      viewerRole: "coordinator",
+      viewerUserId: "user-coordinator",
+      assetLockRecords: [],
+      deliveryPackageEpisodes: [
+        buildPackageEpisode(1, "Current package line."),
+        buildPackageEpisode(24, "Unrelated package line.", "delivery-other")
+      ],
+      episodes,
+      assignments
+    });
+
+    expect(projection.episodeWindow).toEqual({ from: 1, to: 10 });
+    expect(projection.decisionQueue).toEqual([]);
+  });
+
+  it("projects previous-version ghost markers from matching previous asset locks", () => {
+    const projection = buildAssetTimelineProjection({
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      viewerRole: "coordinator",
+      viewerUserId: "user-coordinator",
+      assetLockRecords: [
+        buildRecord({
+          id: "asset-map",
+          assetName: "Mine Map",
+          assetType: "prop",
+          episodeNos: [2, 3]
+        })
+      ],
+      previousAssetLockRecords: [
+        buildRecord({
+          id: "asset-map-prev",
+          assetName: "Mine Map",
+          assetType: "prop",
+          deliveryPackageId: "delivery-previous",
+          episodeNos: [1]
+        })
+      ],
+      deliveryPackageEpisodes: [buildPackageEpisode(2, "Mine Map is unfolded."), buildPackageEpisode(3, "Mine Map is marked.")],
+      episodes,
+      assignments
+    });
+
+    const clip = projection.tracks.flatMap((track) => track.clips).find((item) => item.assetLockRecordId === "asset-map");
+
+    expect(clip?.ghost).toEqual(
+      expect.objectContaining({
+        previousDeliveryPackageId: "delivery-previous",
+        previousEpisodeFrom: 1,
+        previousEpisodeTo: 1,
+        changeMarkers: ["range_changed"]
+      })
+    );
+  });
 });
 
 function buildEpisode(episodeNo: number, projectId: string): Episode {
@@ -185,10 +244,10 @@ function buildAssignment(id: string, episodeId: string, userId: string): Episode
   };
 }
 
-function buildPackageEpisode(episodeNo: number, content: string): DeliveryPackageEpisode {
+function buildPackageEpisode(episodeNo: number, content: string, deliveryPackageId = "delivery-current"): DeliveryPackageEpisode {
   return {
-    id: `package-episode-${episodeNo}`,
-    deliveryPackageId: "delivery-current",
+    id: `package-episode-${deliveryPackageId}-${episodeNo}`,
+    deliveryPackageId,
     episodeNo,
     title: `第 ${episodeNo} 集`,
     content,

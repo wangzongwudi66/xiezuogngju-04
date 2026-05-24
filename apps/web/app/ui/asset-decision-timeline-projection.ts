@@ -33,6 +33,7 @@ export function buildAssetTimelineProjection(input: AssetTimelineProjectionInput
   const records = input.assetLockRecords
     .filter((record) => record.projectId === input.projectId && record.deliveryPackageId === input.deliveryPackageId)
     .sort((a, b) => getEpisodeRange(a.episodeNos).from - getEpisodeRange(b.episodeNos).from || a.assetName.localeCompare(b.assetName));
+  const currentPackageEpisodes = input.deliveryPackageEpisodes.filter((episode) => episode.deliveryPackageId === input.deliveryPackageId);
   const assetNames = records.map((record) => record.assetName);
   const creatorAssignedWindow =
     input.viewerRole === "creator"
@@ -46,7 +47,7 @@ export function buildAssetTimelineProjection(input: AssetTimelineProjectionInput
   const creatorEpisodeSet = new Set(creatorAssignedWindow?.episodeNos ?? []);
   const sourceExcerpts = deriveSourceExcerptsFromPackageEpisodes({
     assetNames,
-    deliveryPackageEpisodes: input.deliveryPackageEpisodes,
+    deliveryPackageEpisodes: currentPackageEpisodes,
     deliveryPackageId: input.deliveryPackageId,
     projectId: input.projectId
   }).filter((excerpt) => input.viewerRole !== "creator" || creatorEpisodeSet.has(excerpt.episodeNo));
@@ -67,7 +68,7 @@ export function buildAssetTimelineProjection(input: AssetTimelineProjectionInput
     input.viewerRole === "creator"
       ? decisions.filter((decision) => decision.episodeNos.some((episodeNo) => creatorEpisodeSet.has(episodeNo)))
       : decisions;
-  const packageEpisodeNos = normalizeEpisodeNos(input.deliveryPackageEpisodes.map((episode) => episode.episodeNo));
+  const packageEpisodeNos = normalizeEpisodeNos(currentPackageEpisodes.map((episode) => episode.episodeNo));
   const projectedEpisodeNos =
     input.viewerRole === "creator" && creatorAssignedWindow
       ? creatorAssignedWindow.episodeNos
