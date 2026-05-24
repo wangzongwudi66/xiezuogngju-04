@@ -664,6 +664,37 @@ Browser acceptance and final pre-merge hardening:
   - Domain tests passed: 5 files / 47 tests.
   - Next production build passed with dynamic routes `/api/asset-decision-timeline` and `/api/workspace-session`.
 
+## Asset Lock Session Scope Hardening
+
+Branch after main merge: `codex/asset-lock-session-scope`.
+
+Read-only review inputs:
+
+- Branch A confirmed the next product target should be a lightweight asset decision workbench with traceable source text and actionable status, while keeping timeline tracks/clips/queues as projection/UI.
+- Branch B found the blocking API risk: `/api/asset-lock-records` still trusted client-supplied user ids and its GET returned project-wide records without creator/writer episode scoping.
+- Branch C returned an outdated baseline (`codex/asset-timeline-field-map` at `4750f96`), so it was treated as stale context rather than current acceptance input.
+
+Main-conversation implementation:
+
+- `asset-lock-records` route parsing no longer requires `createdByUserId`, `confirmedByUserId`, `markedByUserId`, `lockedByUserId`, or `actorUserId`.
+- `asset-lock-records` service now derives the actor from `WorkspaceState.currentUserId`.
+- `asset-lock-records` GET now filters by server session role and episode assignments:
+  - `owner` / `coordinator` / `head_writer`: full project records.
+  - `writer`: records intersecting writer assignments.
+  - `creator`: records intersecting creator / lead_creator assignments.
+- Existing asset-lock mutations remain the only write path; no timeline mutation route was added.
+- Frontend asset-lock calls no longer send user identity fields for create/confirm/needs-info/dispute/final-lock/prepare-demo.
+- Tests now cover malicious client-supplied identity being ignored and creator scope filtering on asset-lock GET.
+
+Verification so far:
+
+- `npm.cmd run test -w apps/web -- asset-lock-records asset-decision-timeline asset-lock-attachments m1-dashboard` passed: 11 files / 93 tests.
+- `npm.cmd run typecheck -w apps/web` passed.
+- `npm.cmd run verify` passed.
+- Web tests passed: 20 files / 146 tests.
+- Domain tests passed: 5 files / 47 tests.
+- Next production build passed with dynamic routes `/api/asset-decision-timeline`, `/api/asset-lock-records`, and `/api/workspace-session`.
+
 ## Next Post-Merge Parallel Batch
 
 Use `main` at or after `0f00d3f Record final asset timeline visual pass` as the baseline. If this ledger has a newer commit, use the latest `main` commit. All sub-conversations are read-only unless the main conversation explicitly delegates implementation.

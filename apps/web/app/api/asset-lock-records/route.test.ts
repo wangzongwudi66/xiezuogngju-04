@@ -2,7 +2,9 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { loginAsUser } from "@aigc/domain";
 import { createDeliveryImportJob } from "../delivery-import-jobs/service";
+import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { mutateDeliveryPackage } from "../delivery-packages/service";
 import { GET, POST } from "./route";
 
@@ -13,6 +15,7 @@ describe("asset lock record route", () => {
     storeDir = join(tmpdir(), `aigc-asset-lock-record-route-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
+    await login("user-head-writer");
   });
 
   afterEach(async () => {
@@ -56,6 +59,7 @@ describe("asset lock record route", () => {
     const response = await POST(
       jsonRequest({
         ...buildCreateBody(deliveryPackageId),
+        createdByUserId: "user-owner",
         status: "locked",
         finalLockedByUserId: "user-owner",
         writerConfirmation: "confirmed",
@@ -67,10 +71,40 @@ describe("asset lock record route", () => {
     expect(response.status).toBe(200);
     expect(created.record).toMatchObject({
       status: "draft",
+      createdByUserId: "user-head-writer",
       writerConfirmation: "pending",
       productionConfirmation: "pending"
     });
     expect(created.record.finalLockedByUserId).toBeUndefined();
+  });
+
+  it("scopes GET records to the server session user instead of client-controlled identity", async () => {
+    const deliveryPackageId = await createDraft();
+    const createResponse = await POST(jsonRequest({ ...buildCreateBody(deliveryPackageId), createdByUserId: "user-owner" }));
+    const created = await createResponse.json();
+
+    expect(created.record).toMatchObject({
+      createdByUserId: "user-head-writer",
+      episodeNos: [1, 2]
+    });
+
+    await login("user-creator-b");
+    const creatorBResponse = await GET(
+      new Request("http://localhost/api/asset-lock-records?projectId=project-jincheng&viewerUserId=user-owner&assignedEpisodeNos=1")
+    );
+    await expect(creatorBResponse.json()).resolves.toMatchObject({
+      records: [],
+      summary: {
+        total: 0
+      }
+    });
+
+    await login("user-creator-a");
+    const creatorAResponse = await GET(new Request("http://localhost/api/asset-lock-records?projectId=project-jincheng"));
+    const creatorARecords = await creatorAResponse.json();
+
+    expect(creatorARecords.records).toContainEqual(created.record);
+    expect(creatorARecords.summary.total).toBe(1);
   });
 
   it("runs confirmation, needs-info, dispute, and final-lock actions", async () => {
@@ -86,14 +120,16 @@ describe("asset lock record route", () => {
         note: "writer ok"
       })
     );
+    await login("user-creator-a");
     const productionResponse = await POST(
       jsonRequest({
         action: "production_confirm",
         assetLockRecordId: recordId,
-        confirmedByUserId: "user-creator-a",
+        confirmedByUserId: "user-owner",
         note: "production ok"
       })
     );
+    await login("user-owner");
     const lockResponse = await POST(
       jsonRequest({
         action: "final_lock",
@@ -101,6 +137,7 @@ describe("asset lock record route", () => {
         lockedByUserId: "user-owner"
       })
     );
+    await login("user-head-writer");
     const lockedWriterResponse = await POST(
       jsonRequest({
         action: "writer_confirm",
@@ -118,6 +155,7 @@ describe("asset lock record route", () => {
     await expect(productionResponse.json()).resolves.toMatchObject({
       record: {
         productionConfirmation: "confirmed",
+        productionConfirmedByUserId: "user-creator-a",
         productionNote: "production ok",
         status: "ready_to_lock"
       }
@@ -135,6 +173,7 @@ describe("asset lock record route", () => {
     });
 
     const needsInfoId = (await (await POST(jsonRequest(buildCreateBody(deliveryPackageId, "Needs Info Asset")))).json()).record.id;
+    await login("user-creator-a");
     const needsInfoResponse = await POST(
       jsonRequest({
         action: "needs_info",
@@ -143,7 +182,9 @@ describe("asset lock record route", () => {
         missingInfo: "front reference missing"
       })
     );
+    await login("user-head-writer");
     const disputeId = (await (await POST(jsonRequest(buildCreateBody(deliveryPackageId, "Disputed Asset")))).json()).record.id;
+    await login("user-head-writer");
     const disputeResponse = await POST(
       jsonRequest({
         action: "dispute",
@@ -169,6 +210,7 @@ describe("asset lock record route", () => {
   });
 
   it("prepares demo records for acceptance testing when no published package exists", async () => {
+    await login("user-owner");
     const response = await POST(
       jsonRequest({
         action: "prepare_demo",
@@ -221,6 +263,24 @@ describe("asset lock record route", () => {
     });
   });
 
+  it("requires a server workspace session for asset lock reads and writes", async () => {
+    await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: null }));
+
+    const listResponse = await GET(new Request("http://localhost/api/asset-lock-records?projectId=project-jincheng"));
+    const mutateResponse = await POST(jsonRequest({ action: "prepare_demo", projectId: "project-jincheng" }));
+
+    expect(listResponse.status).toBe(401);
+    await expect(listResponse.json()).resolves.toMatchObject({
+      error: "asset_lock_records_request_failed",
+      message: "asset_lock_unauthenticated"
+    });
+    expect(mutateResponse.status).toBe(401);
+    await expect(mutateResponse.json()).resolves.toMatchObject({
+      error: "asset_lock_record_mutation_failed",
+      message: "asset_lock_unauthenticated"
+    });
+  });
+
   it("returns an empty list for legacy workspaces without asset lock records", async () => {
     const response = await GET(new Request("http://localhost/api/asset-lock-records?projectId=project-jincheng"));
 
@@ -233,6 +293,10 @@ describe("asset lock record route", () => {
     });
   });
 });
+
+async function login(userId: string) {
+  await mutateDeliveryImportWorkspace((state) => loginAsUser(state, userId));
+}
 
 async function createDraft() {
   const result = await createDeliveryImportJob({

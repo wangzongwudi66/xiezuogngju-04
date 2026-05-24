@@ -8,6 +8,7 @@
   markAssetLockRecordDisputed,
   markAssetLockRecordNeedsInfo,
   publishDeliveryPackage,
+  selectPrimaryRole,
   submitDeliveryPackageForReview
 } from "@aigc/domain";
 import type {
@@ -15,6 +16,8 @@ import type {
   AssetLockRecord,
   AssetRiskLevel,
   AssetType,
+  EpisodeAssignment,
+  ProjectRole,
   WorkspaceState
 } from "@aigc/domain";
 import { mutateDeliveryImportWorkspace, readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
@@ -28,7 +31,7 @@ export type AssetLockRecordMutationRequest =
       assetName: string;
       assetType: AssetType;
       changeType: AssetChangeType;
-      createdByUserId: string;
+      createdByUserId?: string;
       risk?: AssetRiskLevel;
       writerNote?: string;
       productionNote?: string;
@@ -36,42 +39,42 @@ export type AssetLockRecordMutationRequest =
   | {
       action: "writer_confirm";
       assetLockRecordId: string;
-      confirmedByUserId: string;
+      confirmedByUserId?: string;
       note?: string;
     }
   | {
       action: "production_confirm";
       assetLockRecordId: string;
-      confirmedByUserId: string;
+      confirmedByUserId?: string;
       note?: string;
     }
   | {
       action: "needs_info";
       assetLockRecordId: string;
-      markedByUserId: string;
+      markedByUserId?: string;
       missingInfo: string;
     }
   | {
       action: "dispute";
       assetLockRecordId: string;
-      markedByUserId: string;
+      markedByUserId?: string;
       disputeReason: string;
     }
   | {
       action: "final_lock";
       assetLockRecordId: string;
-      lockedByUserId: string;
+      lockedByUserId?: string;
     }
   | {
       action: "prepare_demo";
       projectId: string;
-      actorUserId: string;
+      actorUserId?: string;
     }
   | {
       action: "generate_from_package";
       projectId: string;
       deliveryPackageId: string;
-      actorUserId: string;
+      actorUserId?: string;
     };
 
 export interface AssetLockRecordListResponse {
@@ -93,7 +96,8 @@ export interface AssetLockRecordSummary {
 
 export async function listAssetLockRecords(projectId?: string): Promise<AssetLockRecordListResponse> {
   const workspace = await readDeliveryImportWorkspace();
-  const records = selectAssetLockRecords(workspace.state, projectId);
+  const viewerUserId = requireCurrentUserId(workspace.state);
+  const records = selectAssetLockRecords(workspace.state, projectId, viewerUserId);
 
   return {
     records,
@@ -104,7 +108,8 @@ export async function listAssetLockRecords(projectId?: string): Promise<AssetLoc
 export async function mutateAssetLockRecord(input: AssetLockRecordMutationRequest): Promise<AssetLockRecordMutationResponse> {
   const snapshot = await mutateDeliveryImportWorkspace((state) => applyAssetLockRecordMutation(state, input));
   const record = findMutatedRecord(snapshot.state, input);
-  const records = selectAssetLockRecords(snapshot.state, record.projectId);
+  const viewerUserId = requireCurrentUserId(snapshot.state);
+  const records = selectAssetLockRecords(snapshot.state, record.projectId, viewerUserId);
 
   return {
     record,
@@ -114,6 +119,9 @@ export async function mutateAssetLockRecord(input: AssetLockRecordMutationReques
 }
 
 function applyAssetLockRecordMutation(state: WorkspaceState, input: AssetLockRecordMutationRequest) {
+  const actorUserId = requireCurrentUserId(state);
+  assertAssetLockMutationPermission(state, input, actorUserId);
+
   switch (input.action) {
     case "create":
       return createAssetLockRecord(state, {
@@ -123,7 +131,7 @@ function applyAssetLockRecordMutation(state: WorkspaceState, input: AssetLockRec
         assetName: input.assetName,
         assetType: input.assetType,
         changeType: input.changeType,
-        createdByUserId: input.createdByUserId,
+        createdByUserId: actorUserId,
         risk: input.risk,
         writerNote: input.writerNote,
         productionNote: input.productionNote
@@ -131,39 +139,39 @@ function applyAssetLockRecordMutation(state: WorkspaceState, input: AssetLockRec
     case "writer_confirm":
       return confirmAssetLockRecordByWriter(state, {
         assetLockRecordId: input.assetLockRecordId,
-        confirmedByUserId: input.confirmedByUserId,
+        confirmedByUserId: actorUserId,
         note: input.note
       });
     case "production_confirm":
       return confirmAssetLockRecordByProduction(state, {
         assetLockRecordId: input.assetLockRecordId,
-        confirmedByUserId: input.confirmedByUserId,
+        confirmedByUserId: actorUserId,
         note: input.note
       });
     case "needs_info":
       return markAssetLockRecordNeedsInfo(state, {
         assetLockRecordId: input.assetLockRecordId,
-        markedByUserId: input.markedByUserId,
+        markedByUserId: actorUserId,
         missingInfo: input.missingInfo
       });
     case "dispute":
       return markAssetLockRecordDisputed(state, {
         assetLockRecordId: input.assetLockRecordId,
-        markedByUserId: input.markedByUserId,
+        markedByUserId: actorUserId,
         disputeReason: input.disputeReason
       });
     case "final_lock":
       return finalLockAssetRecord(state, {
         assetLockRecordId: input.assetLockRecordId,
-        lockedByUserId: input.lockedByUserId
+        lockedByUserId: actorUserId
       });
     case "prepare_demo":
-      return prepareAssetLockDemoRecords(state, input.projectId, input.actorUserId);
+      return prepareAssetLockDemoRecords(state, input.projectId, actorUserId);
     case "generate_from_package":
       return generateAssetLockRecordsFromPackage(state, {
         projectId: input.projectId,
         deliveryPackageId: input.deliveryPackageId,
-        actorUserId: input.actorUserId,
+        actorUserId,
         allowFallback: false
       });
   }
@@ -332,10 +340,192 @@ function normalizeAssetLockNameKey(assetName: string) {
   return assetName.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
-function selectAssetLockRecords(state: WorkspaceState, projectId?: string) {
+function selectAssetLockRecords(state: WorkspaceState, projectId: string | undefined, viewerUserId: string) {
   return (state.assetLockRecords ?? [])
     .filter((record) => !projectId || record.projectId === projectId)
+    .filter((record) => canViewAssetLockRecord(state, record, viewerUserId))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function requireCurrentUserId(state: WorkspaceState) {
+  if (!state.currentUserId) {
+    throw new Error("asset_lock_unauthenticated");
+  }
+
+  return state.currentUserId;
+}
+
+function requireProjectMemberRole(state: WorkspaceState, projectId: string, userId: string) {
+  const isMember = state.members.some((member) => member.projectId === projectId && member.userId === userId);
+
+  if (!isMember) {
+    throw new Error("asset_lock_project_member_required");
+  }
+
+  return selectPrimaryRole(state, userId, projectId);
+}
+
+function canViewAssetLockRecord(state: WorkspaceState, record: AssetLockRecord, viewerUserId: string) {
+  if (!state.members.some((member) => member.projectId === record.projectId && member.userId === viewerUserId)) {
+    return false;
+  }
+
+  const role = selectPrimaryRole(state, viewerUserId, record.projectId);
+
+  if (hasFullAssetLockAccess(role)) {
+    return true;
+  }
+
+  if (role === "writer") {
+    return intersects(record.episodeNos, getAssignedEpisodeNos(state, record.projectId, viewerUserId, ["writer"]));
+  }
+
+  if (role === "creator") {
+    return intersects(record.episodeNos, getAssignedEpisodeNos(state, record.projectId, viewerUserId, ["creator", "lead_creator"]));
+  }
+
+  return false;
+}
+
+function assertAssetLockMutationPermission(state: WorkspaceState, input: AssetLockRecordMutationRequest, actorUserId: string) {
+  const projectId = getMutationProjectId(state, input);
+  const role = requireProjectMemberRole(state, projectId, actorUserId);
+
+  switch (input.action) {
+    case "create":
+      assertCanCreateAssetLockRecord(state, input, actorUserId, role);
+      return;
+    case "generate_from_package":
+    case "prepare_demo":
+      if (!hasFullAssetLockAccess(role)) {
+        throw new Error("asset_lock_action_forbidden");
+      }
+      return;
+    case "writer_confirm":
+      assertCanMutateExistingRecord(state, input.assetLockRecordId, actorUserId, role, "writer_confirm");
+      return;
+    case "production_confirm":
+      assertCanMutateExistingRecord(state, input.assetLockRecordId, actorUserId, role, "production_confirm");
+      return;
+    case "needs_info":
+    case "dispute":
+      assertCanMutateExistingRecord(state, input.assetLockRecordId, actorUserId, role, "comment");
+      return;
+    case "final_lock":
+      if (role !== "owner" && role !== "coordinator") {
+        throw new Error("asset_lock_action_forbidden");
+      }
+      return;
+  }
+}
+
+function getMutationProjectId(state: WorkspaceState, input: AssetLockRecordMutationRequest) {
+  if (input.action === "create" || input.action === "generate_from_package" || input.action === "prepare_demo") {
+    return input.projectId;
+  }
+
+  return requireAssetLockRecordForService(state, input.assetLockRecordId).projectId;
+}
+
+function assertCanCreateAssetLockRecord(
+  state: WorkspaceState,
+  input: Extract<AssetLockRecordMutationRequest, { action: "create" }>,
+  actorUserId: string,
+  role: ProjectRole
+) {
+  if (hasFullAssetLockAccess(role)) {
+    return;
+  }
+
+  if (role !== "writer") {
+    throw new Error("asset_lock_action_forbidden");
+  }
+
+  const assignedEpisodeNos = getAssignedEpisodeNos(state, input.projectId, actorUserId, ["writer"]);
+
+  if (input.episodeNos.length === 0 || !input.episodeNos.every((episodeNo) => assignedEpisodeNos.includes(episodeNo))) {
+    throw new Error("asset_lock_episode_scope_forbidden");
+  }
+}
+
+function assertCanMutateExistingRecord(
+  state: WorkspaceState,
+  assetLockRecordId: string,
+  actorUserId: string,
+  role: ProjectRole,
+  action: "comment" | "production_confirm" | "writer_confirm"
+) {
+  const record = requireAssetLockRecordForService(state, assetLockRecordId);
+
+  if (role === "owner" || role === "coordinator") {
+    return;
+  }
+
+  if (role === "head_writer") {
+    if (action === "production_confirm") {
+      throw new Error("asset_lock_action_forbidden");
+    }
+
+    return;
+  }
+
+  if (role === "writer") {
+    if (action === "production_confirm") {
+      throw new Error("asset_lock_action_forbidden");
+    }
+
+    if (intersects(record.episodeNos, getAssignedEpisodeNos(state, record.projectId, actorUserId, ["writer"]))) {
+      return;
+    }
+  }
+
+  if (role === "creator") {
+    if (action === "writer_confirm") {
+      throw new Error("asset_lock_action_forbidden");
+    }
+
+    if (intersects(record.episodeNos, getAssignedEpisodeNos(state, record.projectId, actorUserId, ["creator", "lead_creator"]))) {
+      return;
+    }
+  }
+
+  throw new Error("asset_lock_episode_scope_forbidden");
+}
+
+function hasFullAssetLockAccess(role: ProjectRole) {
+  return role === "owner" || role === "coordinator" || role === "head_writer";
+}
+
+function getAssignedEpisodeNos(
+  state: WorkspaceState,
+  projectId: string,
+  userId: string,
+  responsibilities: EpisodeAssignment["responsibility"][]
+) {
+  const episodeIds = new Set(
+    state.assignments
+      .filter((assignment) => assignment.userId === userId && responsibilities.includes(assignment.responsibility))
+      .map((assignment) => assignment.episodeId)
+  );
+
+  return state.episodes
+    .filter((episode) => episode.projectId === projectId && episodeIds.has(episode.id))
+    .map((episode) => episode.episodeNo);
+}
+
+function intersects(left: number[], right: number[]) {
+  const rightSet = new Set(right);
+  return left.some((episodeNo) => rightSet.has(episodeNo));
+}
+
+function requireAssetLockRecordForService(state: WorkspaceState, assetLockRecordId: string) {
+  const record = (state.assetLockRecords ?? []).find((item) => item.id === assetLockRecordId);
+
+  if (!record) {
+    throw new Error("asset_lock_record_not_found");
+  }
+
+  return record;
 }
 
 function summarizeAssetLockRecords(records: AssetLockRecord[]): AssetLockRecordSummary {

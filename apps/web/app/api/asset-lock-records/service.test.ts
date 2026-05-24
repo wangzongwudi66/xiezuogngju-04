@@ -2,8 +2,9 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { seedWorkspace } from "@aigc/domain";
+import { loginAsUser, seedWorkspace } from "@aigc/domain";
 import { createDeliveryImportJob, getDeliveryImportWorkspace } from "../delivery-import-jobs/service";
+import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { mutateDeliveryPackage } from "../delivery-packages/service";
 import { listAssetLockRecords, mutateAssetLockRecord } from "./service";
 
@@ -14,6 +15,7 @@ describe("asset lock record service", () => {
     storeDir = join(tmpdir(), `aigc-asset-lock-records-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
+    await login("user-head-writer");
   });
 
   afterEach(async () => {
@@ -68,6 +70,7 @@ describe("asset lock record service", () => {
   });
 
   it("prepares demo delivery package and asset records for acceptance testing", async () => {
+    await login("user-owner");
     const result = await mutateAssetLockRecord({
       action: "prepare_demo",
       projectId: "project-jincheng",
@@ -254,6 +257,7 @@ describe("asset lock record service", () => {
       confirmedByUserId: "user-head-writer",
       note: "writer ok"
     });
+    await login("user-creator-a");
     const productionConfirmed = await mutateAssetLockRecord({
       action: "production_confirm",
       assetLockRecordId: record.id,
@@ -277,6 +281,7 @@ describe("asset lock record service", () => {
 
   it("marks records as needing information or disputed", async () => {
     const needsInfoRecord = (await createAssetRecord(await createDraft())).record;
+    await login("user-creator-a");
     const needsInfo = await mutateAssetLockRecord({
       action: "needs_info",
       assetLockRecordId: needsInfoRecord.id,
@@ -284,6 +289,7 @@ describe("asset lock record service", () => {
       missingInfo: "front reference missing"
     });
     const disputedRecord = (await createAssetRecord(await createDraft())).record;
+    await login("user-head-writer");
     const disputed = await mutateAssetLockRecord({
       action: "dispute",
       assetLockRecordId: disputedRecord.id,
@@ -318,11 +324,13 @@ describe("asset lock record service", () => {
       assetLockRecordId: record.id,
       confirmedByUserId: "user-head-writer"
     });
+    await login("user-creator-a");
     await mutateAssetLockRecord({
       action: "production_confirm",
       assetLockRecordId: record.id,
       confirmedByUserId: "user-creator-a"
     });
+    await login("user-owner");
     const locked = await mutateAssetLockRecord({
       action: "final_lock",
       assetLockRecordId: record.id,
@@ -335,6 +343,7 @@ describe("asset lock record service", () => {
     });
     expect(locked.record.finalLockedAt).toBeTruthy();
 
+    await login("user-owner");
     await expect(
       mutateAssetLockRecord({
         action: "writer_confirm",
@@ -353,6 +362,7 @@ describe("asset lock record service", () => {
 
   it("does not final lock records that still need information or are disputed", async () => {
     const needsInfoRecord = (await createAssetRecord(await createDraft())).record;
+    await login("user-creator-a");
     await mutateAssetLockRecord({
       action: "needs_info",
       assetLockRecordId: needsInfoRecord.id,
@@ -360,6 +370,7 @@ describe("asset lock record service", () => {
       missingInfo: "front reference missing"
     });
 
+    await login("user-owner");
     await expect(
       mutateAssetLockRecord({
         action: "final_lock",
@@ -369,16 +380,19 @@ describe("asset lock record service", () => {
     ).rejects.toThrow();
 
     const disputedRecord = (await createAssetRecord(await createDraft())).record;
+    await login("user-head-writer");
     await mutateAssetLockRecord({
       action: "writer_confirm",
       assetLockRecordId: disputedRecord.id,
       confirmedByUserId: "user-head-writer"
     });
+    await login("user-creator-a");
     await mutateAssetLockRecord({
       action: "production_confirm",
       assetLockRecordId: disputedRecord.id,
       confirmedByUserId: "user-creator-a"
     });
+    await login("user-head-writer");
     await mutateAssetLockRecord({
       action: "dispute",
       assetLockRecordId: disputedRecord.id,
@@ -386,6 +400,7 @@ describe("asset lock record service", () => {
       disputeReason: "asset scope unclear"
     });
 
+    await login("user-owner");
     await expect(
       mutateAssetLockRecord({
         action: "final_lock",
@@ -411,6 +426,7 @@ describe("asset lock record service", () => {
   it("rejects actors without the required role for each action", async () => {
     const record = (await createAssetRecord(await createDraft())).record;
 
+    await login("user-creator-a");
     await expect(
       mutateAssetLockRecord({
         action: "writer_confirm",
@@ -418,6 +434,7 @@ describe("asset lock record service", () => {
         confirmedByUserId: "user-creator-a"
       })
     ).rejects.toThrow();
+    await login("user-writer");
     await expect(
       mutateAssetLockRecord({
         action: "production_confirm",
@@ -425,16 +442,19 @@ describe("asset lock record service", () => {
         confirmedByUserId: "user-writer"
       })
     ).rejects.toThrow();
+    await login("user-head-writer");
     await mutateAssetLockRecord({
       action: "writer_confirm",
       assetLockRecordId: record.id,
       confirmedByUserId: "user-head-writer"
     });
+    await login("user-creator-a");
     await mutateAssetLockRecord({
       action: "production_confirm",
       assetLockRecordId: record.id,
       confirmedByUserId: "user-creator-a"
     });
+    await login("user-writer");
     await expect(
       mutateAssetLockRecord({
         action: "final_lock",
@@ -442,6 +462,7 @@ describe("asset lock record service", () => {
         lockedByUserId: "user-writer"
       })
     ).rejects.toThrow();
+    await login("user-creator-a");
     await expect(
       mutateAssetLockRecord({
         action: "final_lock",
@@ -463,6 +484,7 @@ describe("asset lock record service", () => {
       }),
       "utf8"
     );
+    await login("user-head-writer");
 
     await expect(listAssetLockRecords("project-jincheng")).resolves.toMatchObject({
       records: [],
@@ -549,6 +571,7 @@ async function createCandidateDraft(input: { publish?: boolean } = {}) {
 }
 
 async function createAssetRecord(deliveryPackageId: string, assetName = "Mine Lift") {
+  await login("user-head-writer");
   return mutateAssetLockRecord({
     action: "create",
     projectId: "project-jincheng",
@@ -561,4 +584,8 @@ async function createAssetRecord(deliveryPackageId: string, assetName = "Mine Li
     risk: "attention",
     writerNote: "writer note"
   });
+}
+
+async function login(userId: string) {
+  await mutateDeliveryImportWorkspace((state) => loginAsUser(state, userId));
 }

@@ -9,7 +9,12 @@ const riskLevels: AssetRiskLevel[] = ["normal", "attention", "high"];
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  return NextResponse.json(await listAssetLockRecords(searchParams.get("projectId") ?? undefined));
+
+  try {
+    return NextResponse.json(await listAssetLockRecords(searchParams.get("projectId") ?? undefined));
+  } catch (error) {
+    return assetLockErrorResponse(error, "asset_lock_records_request_failed");
+  }
 }
 
 export async function POST(request: Request) {
@@ -30,13 +35,7 @@ export async function POST(request: Request) {
   try {
     return NextResponse.json(await mutateAssetLockRecord(input));
   } catch (error) {
-    return NextResponse.json(
-      {
-        error: "asset_lock_record_mutation_failed",
-        message: error instanceof Error ? error.message : "asset lock record mutation failed"
-      },
-      { status: 400 }
-    );
+    return assetLockErrorResponse(error, "asset_lock_record_mutation_failed");
   }
 }
 
@@ -50,7 +49,6 @@ function parseMutationRequest(body: unknown): AssetLockRecordMutationRequest | n
       const projectId = readString(body.projectId);
       const deliveryPackageId = readString(body.deliveryPackageId);
       const assetName = readString(body.assetName);
-      const createdByUserId = readString(body.createdByUserId);
       const assetType = readAssetType(body.assetType);
       const changeType = readChangeType(body.changeType);
       const parsedRisk = body.risk === undefined ? undefined : readRiskLevel(body.risk);
@@ -63,7 +61,6 @@ function parseMutationRequest(body: unknown): AssetLockRecordMutationRequest | n
         !assetName ||
         !assetType ||
         !changeType ||
-        !createdByUserId ||
         (body.risk !== undefined && !parsedRisk)
       ) {
         return null;
@@ -79,7 +76,6 @@ function parseMutationRequest(body: unknown): AssetLockRecordMutationRequest | n
         assetName,
         assetType,
         changeType,
-        createdByUserId,
         risk,
         writerNote: readOptionalString(body.writerNote),
         productionNote: readOptionalString(body.productionNote)
@@ -88,93 +84,81 @@ function parseMutationRequest(body: unknown): AssetLockRecordMutationRequest | n
     case "writer_confirm":
     case "production_confirm": {
       const assetLockRecordId = readString(body.assetLockRecordId);
-      const confirmedByUserId = readString(body.confirmedByUserId);
 
-      if (!assetLockRecordId || !confirmedByUserId) {
+      if (!assetLockRecordId) {
         return null;
       }
 
       return {
         action: body.action,
         assetLockRecordId,
-        confirmedByUserId,
         note: readOptionalString(body.note)
       };
     }
     case "needs_info": {
       const assetLockRecordId = readString(body.assetLockRecordId);
-      const markedByUserId = readString(body.markedByUserId);
       const missingInfo = readString(body.missingInfo);
 
-      if (!assetLockRecordId || !markedByUserId || !missingInfo) {
+      if (!assetLockRecordId || !missingInfo) {
         return null;
       }
 
       return {
         action: body.action,
         assetLockRecordId,
-        markedByUserId,
         missingInfo
       };
     }
     case "dispute": {
       const assetLockRecordId = readString(body.assetLockRecordId);
-      const markedByUserId = readString(body.markedByUserId);
       const disputeReason = readString(body.disputeReason);
 
-      if (!assetLockRecordId || !markedByUserId || !disputeReason) {
+      if (!assetLockRecordId || !disputeReason) {
         return null;
       }
 
       return {
         action: body.action,
         assetLockRecordId,
-        markedByUserId,
         disputeReason
       };
     }
     case "final_lock": {
       const assetLockRecordId = readString(body.assetLockRecordId);
-      const lockedByUserId = readString(body.lockedByUserId);
 
-      if (!assetLockRecordId || !lockedByUserId) {
+      if (!assetLockRecordId) {
         return null;
       }
 
       return {
         action: body.action,
-        assetLockRecordId,
-        lockedByUserId
+        assetLockRecordId
       };
     }
     case "prepare_demo": {
       const projectId = readString(body.projectId);
-      const actorUserId = readString(body.actorUserId);
 
-      if (!projectId || !actorUserId) {
+      if (!projectId) {
         return null;
       }
 
       return {
         action: body.action,
-        projectId,
-        actorUserId
+        projectId
       };
     }
     case "generate_from_package": {
       const projectId = readString(body.projectId);
       const deliveryPackageId = readString(body.deliveryPackageId);
-      const actorUserId = readString(body.actorUserId);
 
-      if (!projectId || !deliveryPackageId || !actorUserId) {
+      if (!projectId || !deliveryPackageId) {
         return null;
       }
 
       return {
         action: body.action,
         projectId,
-        deliveryPackageId,
-        actorUserId
+        deliveryPackageId
       };
     }
     default:
@@ -209,4 +193,24 @@ function readChangeType(value: unknown): AssetChangeType | null {
 
 function readRiskLevel(value: unknown): AssetRiskLevel | null {
   return typeof value === "string" && riskLevels.includes(value as AssetRiskLevel) ? (value as AssetRiskLevel) : null;
+}
+
+function assetLockErrorResponse(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback;
+  const status =
+    message === "asset_lock_unauthenticated"
+      ? 401
+      : message === "asset_lock_project_member_required" ||
+          message === "asset_lock_action_forbidden" ||
+          message === "asset_lock_episode_scope_forbidden"
+        ? 403
+        : 400;
+
+  return NextResponse.json(
+    {
+      error: fallback,
+      message
+    },
+    { status }
+  );
 }

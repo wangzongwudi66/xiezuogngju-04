@@ -710,7 +710,6 @@ export function M1Dashboard() {
       {
         action: "create",
         projectId: selectedProject.id,
-        createdByUserId: currentUserId,
         ...draft
       },
       "资产核对记录已生成。"
@@ -721,8 +720,7 @@ export function M1Dashboard() {
     await mutateAssetLockFromServer(
       {
         action: "writer_confirm",
-        assetLockRecordId,
-        confirmedByUserId: currentUserId
+        assetLockRecordId
       },
       "编剧确认已提交。"
     );
@@ -732,8 +730,7 @@ export function M1Dashboard() {
     await mutateAssetLockFromServer(
       {
         action: "production_confirm",
-        assetLockRecordId,
-        confirmedByUserId: currentUserId
+        assetLockRecordId
       },
       "制作确认已提交。"
     );
@@ -744,7 +741,6 @@ export function M1Dashboard() {
       {
         action: "needs_info",
         assetLockRecordId,
-        markedByUserId: currentUserId,
         missingInfo
       },
       "已标记为需补资料。"
@@ -756,7 +752,6 @@ export function M1Dashboard() {
       {
         action: "dispute",
         assetLockRecordId,
-        markedByUserId: currentUserId,
         disputeReason
       },
       "已标记为争议项。"
@@ -767,8 +762,7 @@ export function M1Dashboard() {
     await mutateAssetLockFromServer(
       {
         action: "final_lock",
-        assetLockRecordId,
-        lockedByUserId: currentUserId
+        assetLockRecordId
       },
       "资产记录已最终定版。"
     );
@@ -780,8 +774,7 @@ export function M1Dashboard() {
 
     try {
       const response = await prepareAssetLockDemo({
-        projectId: selectedProject.id,
-        actorUserId: currentUserId
+        projectId: selectedProject.id
       });
       const snapshot = await refreshDeliveryWorkspaceFromServer();
       applyAssetLockResponse(response);

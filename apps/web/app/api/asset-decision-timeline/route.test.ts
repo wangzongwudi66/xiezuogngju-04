@@ -35,6 +35,7 @@ describe("asset decision timeline route", () => {
 
   it("returns a read-only projection for the current project member", async () => {
     const deliveryPackageId = await createPublishedPackage();
+    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-head-writer"));
     await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Mine Lift", [1]));
     await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-owner"));
 
@@ -60,6 +61,7 @@ describe("asset decision timeline route", () => {
 
   it("does not accept client-controlled viewer identity or assignment scope", async () => {
     const deliveryPackageId = await createPublishedPackage();
+    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-head-writer"));
     await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Mine Lift", [1]));
     await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Far Signal", [9]));
     await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-creator-a"));

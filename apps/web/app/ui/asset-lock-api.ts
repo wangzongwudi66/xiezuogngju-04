@@ -9,7 +9,7 @@ export type AssetLockRecordListResponse = {
 export type AssetLockRecordMutationInput = AssetLockRecordMutationRequest;
 
 export type AssetLockCreateDraft = Omit<Extract<AssetLockRecordMutationRequest, { action: "create" }>, "action" | "projectId" | "createdByUserId">;
-export type AssetLockPrepareDemoInput = Omit<Extract<AssetLockRecordMutationRequest, { action: "prepare_demo" }>, "action">;
+export type AssetLockPrepareDemoInput = Omit<Extract<AssetLockRecordMutationRequest, { action: "prepare_demo" }>, "action" | "actorUserId">;
 
 export type { AssetLockRecordSummary };
 

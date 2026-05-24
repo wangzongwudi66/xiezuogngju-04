@@ -2,7 +2,9 @@ import { mkdir, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { loginAsUser } from "@aigc/domain";
 import { createDeliveryImportJob } from "../delivery-import-jobs/service";
+import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { mutateDeliveryPackage } from "../delivery-packages/service";
 import { mutateAssetLockRecord } from "../asset-lock-records/service";
 import { GET, POST } from "./route";
@@ -17,6 +19,7 @@ describe("asset lock attachment route", () => {
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
     process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR = attachmentDir;
+    await login("user-head-writer");
   });
 
   afterEach(async () => {
@@ -107,6 +110,7 @@ describe("asset lock attachment route", () => {
   async function createAssetRecord() {
     const deliveryPackageId = await createPublishedDeliveryPackage();
 
+    await login("user-head-writer");
     return mutateAssetLockRecord({
       action: "create",
       projectId: "project-jincheng",
@@ -118,6 +122,10 @@ describe("asset lock attachment route", () => {
       createdByUserId: "user-head-writer",
       risk: "attention"
     });
+  }
+
+  async function login(userId: string) {
+    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, userId));
   }
 
   async function createPublishedDeliveryPackage() {
