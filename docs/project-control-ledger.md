@@ -92,7 +92,7 @@ Passed after fast-forward merging `codex/asset-decision-timeline` into `main`:
 - Branch: `codex/script-source-binding-plan`.
 - Created from local `main` at `e803512`.
 - Purpose: define the minimal `ScriptSourceBinding` boundary before touching domain, store, API, or timeline UI.
-- Current stage: documentation-only source binding plan.
+- Current stage: domain-only source binding helper and tests; no store/API/projection/UI wiring yet.
 - Last completed branch: `codex/asset-lock-session-scope`, merged at `aff5803`.
 - Do not push unless the user explicitly asks.
 
@@ -110,10 +110,23 @@ Scope:
 
 Next implementation sequence after documentation review:
 
-1. Add domain-only `ScriptSourceBinding` helper and tests.
+1. Add domain-only `ScriptSourceBinding` helper and tests. Done on this branch after 01/02 review.
 2. Let timeline projection consume explicit bindings while preserving asset-name fallback.
 3. Add read-only service plumbing for optional legacy-safe workspace bindings.
 4. Only then consider narrow `asset-lock-records` actions for bind/remove source.
+
+01/02 review decisions applied:
+
+- Removed `source: "manual" | "extracted"` from the v1 binding shape.
+- Clarified project roles vs `EpisodeAssignment.responsibility`.
+- Locked asset records should reject source binding create/remove.
+- First code step must not touch `store.ts`, `asset-lock-records` API, timeline projection, dashboard, or CSS.
+
+Verification after domain helper step:
+
+- `npm.cmd run test -w packages/domain -- script-source-binding` passed: 1 file / 9 tests.
+- `npm.cmd run test -w packages/domain` passed: 6 files / 56 tests.
+- `npm.cmd run typecheck --workspaces --if-present` passed.
 
 ## Asset Lock Workbench Completion
 

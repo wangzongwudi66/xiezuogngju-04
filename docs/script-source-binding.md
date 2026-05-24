@@ -42,7 +42,6 @@ export interface ScriptSourceBinding {
   excerptSnapshot: string;
   createdByUserId: string;
   createdAt: string;
-  source: "manual" | "extracted";
 }
 ```
 
@@ -57,7 +56,6 @@ export interface ScriptSourceBindingInput {
   startLine: number;
   endLine: number;
   createdByUserId: string;
-  source?: "manual" | "extracted";
 }
 ```
 
@@ -66,7 +64,7 @@ Notes:
 - `excerptSnapshot` is generated from package content at bind time, not accepted from the client.
 - `createdByUserId` should be injected by the server service from `WorkspaceState.currentUserId`, not trusted from a route body.
 - `episodeRevisionId` can be added later if the binding must attach to a specific revision row. For the first pass, `deliveryPackageId + episodeNo + line range` is enough because only published, confirmed package episodes are eligible.
-- `source` distinguishes manual review bindings from future extracted suggestions, but extracted suggestions are not automatically trusted.
+- `source: "extracted"` is intentionally not part of v1. Extracted suggestions can exist later as non-trusted candidates, but only reviewed bindings become audit source.
 
 ## Validation Rules
 
@@ -83,22 +81,24 @@ The domain helper should reject or normalize before persistence:
 - Line range must be inside the package episode content.
 - `excerptSnapshot.trim()` must not be empty.
 - Duplicate bindings for the same `assetLockRecordId + deliveryPackageId + episodeNo + startLine + endLine` should be rejected.
+- `AssetLockRecord.status === "locked"` should reject create/remove source binding until a product decision explicitly allows post-lock source changes.
 
 ## Permission Rules
 
 Use server workspace session only.
 
-- `owner` and `coordinator`: can create and remove bindings for project records.
-- `head_writer`: can create and remove bindings for project records.
-- `writer`: can create and remove bindings only when the binding episode intersects their `writer` assignment.
-- `creator` and `lead_creator`: read only; can view bindings only inside assigned creator episodes.
-- `reviewer` and `support`: no write permission unless a later product decision grants it.
+- project role `owner` and `coordinator`: can create and remove bindings for project records.
+- project role `head_writer`: can create and remove bindings for project records.
+- project role `writer`: can create and remove bindings only when the binding episode intersects their `writer` episode assignment.
+- project role `creator`: read only; can view bindings only inside `creator` or `lead_creator` episode assignments.
+- episode responsibilities `reviewer` and `support`: do not grant source-binding write permission unless a later product decision grants it.
 
 Read visibility must match the timeline projection:
 
 - creators see only bindings whose `episodeNo` is in their creator/lead_creator assignment scope;
 - ordinary writers see only bindings whose `episodeNo` is in their writer assignment scope;
 - head writers, coordinators, and owners can see project-wide bindings.
+- implementation must derive scope by joining `EpisodeAssignment.episodeId` to `Episode.projectId/episodeNo`, not by trusting client-provided episode numbers.
 
 ## API Boundary
 
@@ -125,6 +125,8 @@ POST /api/asset-lock-records
   "scriptSourceBindingId": "..."
 }
 ```
+
+v1 can hard-delete bindings if persistence is approved. That means audit only covers currently active bindings. If deletion history becomes a product requirement, add `status`, `removedByUserId`, and `removedAt` before exposing remove in production.
 
 The route must not accept:
 
@@ -180,7 +182,7 @@ Domain helper tests:
 - rejects out-of-range line numbers;
 - rejects empty excerpt;
 - rejects duplicate line range binding;
-- normalizes optional `source` to `"manual"` when omitted.
+- rejects locked records for create/remove source binding.
 
 API/service tests:
 

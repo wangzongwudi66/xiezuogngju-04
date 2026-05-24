@@ -145,6 +145,19 @@ export interface AssetAttachment {
   deletedAt?: string;
 }
 
+export interface ScriptSourceBinding {
+  id: string;
+  projectId: string;
+  deliveryPackageId: string;
+  assetLockRecordId: string;
+  episodeNo: number;
+  startLine: number;
+  endLine: number;
+  excerptSnapshot: string;
+  createdByUserId: string;
+  createdAt: string;
+}
+
 export interface DeliveryPackage {
   id: string;
   projectId: string;
@@ -217,6 +230,7 @@ export interface WorkspaceState {
   assignments: EpisodeAssignment[];
   assetLockRecords?: AssetLockRecord[];
   assetAttachments?: AssetAttachment[];
+  scriptSourceBindings?: ScriptSourceBinding[];
   deliveryPackages: DeliveryPackage[];
   deliveryPackageEpisodes: DeliveryPackageEpisode[];
   episodeRevisions: EpisodeRevision[];
@@ -316,6 +330,16 @@ export interface AssetAttachmentMetadataInput {
 export interface AssetAttachmentDeleteInput {
   assetAttachmentId: string;
   deletedByUserId: string;
+}
+
+export interface ScriptSourceBindingInput {
+  projectId: string;
+  deliveryPackageId: string;
+  assetLockRecordId: string;
+  episodeNo: number;
+  startLine: number;
+  endLine: number;
+  createdByUserId: string;
 }
 
 export interface RegisterInput {
