@@ -465,6 +465,22 @@ Remaining before API route:
 - Before a real route, move or wrap projection logic in an API/service-safe layer instead of importing UI directly from a route.
 - `source_changed` still needs a real source-binding or previous/current source comparison design; do not fake it from `changeType`.
 
+Main-conversation service-boundary action:
+
+- Moved projection helper/test out of `apps/web/app/ui` into `apps/web/app/asset-decision-timeline/projection.ts` and `projection.test.ts`; it still returns the existing UI view-model DTO, but the helper itself is no longer located under UI.
+- Added `apps/web/app/api/asset-decision-timeline/service.ts` as a read-only service selector. It reads through `readDeliveryImportWorkspace`, derives `viewerUserId` from `WorkspaceState.currentUserId`, checks project membership, checks current/previous package project and published status, and then builds the role-scoped projection.
+- Added `apps/web/app/api/asset-decision-timeline/service.test.ts` covering current member projection, unauthenticated user, non-member, wrong-project package, unpublished current/previous package, and creator assigned-episode isolation.
+- No `GET /api/asset-decision-timeline` route was added yet, and no mutation API was added.
+- Verification after service-boundary step:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 4 files / 25 tests.
+  - `npm.cmd run typecheck -w apps/web` passed.
+
+Next main-conversation work:
+
+- Do not wire UI yet.
+- Next low-conflict step is route-level tests plus a minimal GET route only if service-boundary review passes.
+- Any route must accept only `projectId`, `deliveryPackageId`, and optional `previousDeliveryPackageId`; it must not accept `viewerUserId`, `viewerRole`, or `assignedEpisodeNos`.
+
 ## Next Post-Merge Parallel Batch
 
 Use `main` at or after `0f00d3f Record final asset timeline visual pass` as the baseline. If this ledger has a newer commit, use the latest `main` commit. All sub-conversations are read-only unless the main conversation explicitly delegates implementation.

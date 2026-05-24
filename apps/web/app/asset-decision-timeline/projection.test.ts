@@ -10,7 +10,7 @@ import {
   deriveCreatorAssignedEpisodeWindow,
   deriveDecisionItemFromAssetLockRecord,
   deriveSourceExcerptsFromPackageEpisodes
-} from "./asset-decision-timeline-projection";
+} from "./projection";
 
 const now = "2026-05-24T00:00:00.000Z";
 

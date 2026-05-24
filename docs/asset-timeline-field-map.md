@@ -186,8 +186,9 @@ Do not add timeline-specific mutation routes until a real `AssetDecision`, `Asse
 1. Document field map and state-boundary decisions.
 2. Add pure projection tests using mock domain-like inputs.
 3. Implement projection helper functions without changing UI routing.
-4. Add a read-only API only if projection helpers are stable.
-5. Wire UI to projection last, in a separate commit.
+4. Add an API/service-safe selector that reads from `WorkspaceState`, enforces project/package/member boundaries, and calls the projection helper without exposing a route yet.
+5. Add a read-only API route only if service tests cover unauthenticated, non-member, project/package mismatch, published-package, and role-scope cases.
+6. Wire UI to projection last, in a separate commit.
 
 Run at least:
 

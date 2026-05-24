@@ -15,7 +15,7 @@ import {
   type PreviousVersionGhostComparison,
   type RoleScopedAssetTimelineViewModel,
   type ScriptSourceExcerpt
-} from "./asset-decision-timeline-data";
+} from "../ui/asset-decision-timeline-data";
 
 const CREATOR_SCOPE_RESPONSIBILITIES: Array<EpisodeAssignment["responsibility"]> = ["creator", "lead_creator"];
 const WRITER_SCOPE_RESPONSIBILITIES: Array<EpisodeAssignment["responsibility"]> = ["writer"];
