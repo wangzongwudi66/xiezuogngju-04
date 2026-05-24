@@ -650,6 +650,12 @@ Browser acceptance and final pre-merge hardening:
   - Server workspace refresh maintains the whitelist; prototype reset clears it.
   - Writer episode-window fix did not break creator empty assignment, creator-B isolation, or head-writer full view.
 - Main-conversation decision: skip the remaining P3-only integration test gap for now and proceed to merge preparation after final verification.
+- Final verification before merge preparation:
+  - Commit prepared: `a4442c6 Harden asset timeline real projection acceptance`.
+  - `npm.cmd run verify` passed.
+  - Web tests passed: 20 files / 144 tests.
+  - Domain tests passed: 5 files / 47 tests.
+  - Next production build passed with dynamic routes `/api/asset-decision-timeline` and `/api/workspace-session`.
 
 ## Next Post-Merge Parallel Batch
 
