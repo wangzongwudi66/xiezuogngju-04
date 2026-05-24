@@ -108,6 +108,7 @@ export function buildAssetDecisionTimelineProjectionFromWorkspace(
       deliveryPackageEpisodes: state.deliveryPackageEpisodes,
       episodes: state.episodes,
       assignments: state.assignments,
+      scriptSourceBindings: state.scriptSourceBindings ?? [],
       previousAssetLockRecords: state.assetLockRecords ?? []
     })
   };

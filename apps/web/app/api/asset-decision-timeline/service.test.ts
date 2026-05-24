@@ -7,6 +7,7 @@ import type {
   EpisodeAssignment,
   Project,
   ProjectMember,
+  ScriptSourceBinding,
   User,
   WorkspaceState
 } from "@aigc/domain";
@@ -36,6 +37,45 @@ describe("asset decision timeline service", () => {
         viewerRole: "coordinator",
         decisionQueue: [expect.objectContaining({ assetLockRecordId: "asset-lift" })],
         sourceExcerpts: [expect.objectContaining({ relatedAssetNames: ["Mine Lift"] })]
+      }
+    });
+  });
+
+  it("passes explicit source bindings into the projection before fallback matching", () => {
+    const state = buildWorkspace({
+      currentUserId: "user-coordinator",
+      members: [buildMember("user-coordinator", "coordinator")],
+      deliveryPackages: [buildPackage("delivery-current", "project-jincheng", "published")],
+      deliveryPackageEpisodes: [buildPackageEpisode(2, "Mine Map fallback line.\nMine Map second fallback.")],
+      assetLockRecords: [buildRecord({ id: "asset-map", assetName: "Mine Map", assetType: "prop", episodeNos: [2] })],
+      scriptSourceBindings: [
+        buildSourceBinding({
+          id: "binding-map",
+          assetLockRecordId: "asset-map",
+          episodeNo: 2,
+          startLine: 2,
+          endLine: 2,
+          excerptSnapshot: "  Bound source line  "
+        })
+      ]
+    });
+
+    const result = buildAssetDecisionTimelineProjectionFromWorkspace(state, {
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current"
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      projection: {
+        sourceExcerpts: [
+          expect.objectContaining({
+            id: "source-binding-binding-map",
+            excerpt: "  Bound source line  ",
+            relatedAssetNames: ["Mine Map"]
+          })
+        ],
+        decisionQueue: [expect.objectContaining({ sourceExcerptIds: ["source-binding-binding-map"] })]
       }
     });
   });
@@ -236,6 +276,117 @@ describe("asset decision timeline service", () => {
 
     expect(result.projection.tracks.flatMap((track) => track.clips).map((clip) => clip.assetLockRecordId)).toEqual(["asset-map"]);
   });
+
+  it("keeps creator explicit source bindings limited to assigned episodes", () => {
+    const state = buildWorkspace({
+      currentUserId: "user-creator",
+      members: [buildMember("user-creator", "creator")],
+      deliveryPackages: [buildPackage("delivery-current", "project-jincheng", "published")],
+      deliveryPackageEpisodes: [buildPackageEpisode(1, "Mine Map hidden line."), buildPackageEpisode(2, "Mine Map visible line.")],
+      episodes: [buildEpisode(1), buildEpisode(2)],
+      assignments: [buildAssignment("assignment-2", "episode-project-jincheng-2", "user-creator", "lead_creator")],
+      assetLockRecords: [buildRecord({ id: "asset-map", assetName: "Mine Map", assetType: "prop", episodeNos: [1, 2] })],
+      scriptSourceBindings: [
+        buildSourceBinding({ id: "binding-hidden", assetLockRecordId: "asset-map", episodeNo: 1, excerptSnapshot: "Hidden source" }),
+        buildSourceBinding({ id: "binding-visible", assetLockRecordId: "asset-map", episodeNo: 2, excerptSnapshot: "Visible source" })
+      ]
+    });
+
+    const result = buildAssetDecisionTimelineProjectionFromWorkspace(state, {
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current"
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      projection: {
+        sourceExcerpts: [expect.objectContaining({ id: "source-binding-binding-visible", excerpt: "Visible source" })],
+        decisionQueue: [expect.objectContaining({ sourceExcerptIds: ["source-binding-binding-visible"] })]
+      }
+    });
+  });
+
+  it("keeps writer explicit source bindings limited to writer assignments", () => {
+    const state = buildWorkspace({
+      currentUserId: "user-writer",
+      members: [buildMember("user-writer", "writer")],
+      deliveryPackages: [buildPackage("delivery-current", "project-jincheng", "published")],
+      deliveryPackageEpisodes: [
+        buildPackageEpisode(2, "Support Asset source should stay hidden."),
+        buildPackageEpisode(3, "Writer Asset source is visible.")
+      ],
+      episodes: [buildEpisode(2), buildEpisode(3)],
+      assignments: [
+        buildAssignment("assignment-support-2", "episode-project-jincheng-2", "user-writer", "support"),
+        buildAssignment("assignment-writer-3", "episode-project-jincheng-3", "user-writer", "writer")
+      ],
+      assetLockRecords: [
+        buildRecord({ id: "asset-support", assetName: "Support Asset", assetType: "prop", episodeNos: [2] }),
+        buildRecord({ id: "asset-writer", assetName: "Writer Asset", assetType: "scene", episodeNos: [3] })
+      ],
+      scriptSourceBindings: [
+        buildSourceBinding({
+          id: "binding-support",
+          assetLockRecordId: "asset-support",
+          episodeNo: 2,
+          excerptSnapshot: "Support source"
+        }),
+        buildSourceBinding({
+          id: "binding-writer",
+          assetLockRecordId: "asset-writer",
+          episodeNo: 3,
+          excerptSnapshot: "Writer source"
+        })
+      ]
+    });
+
+    const result = buildAssetDecisionTimelineProjectionFromWorkspace(state, {
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current"
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      projection: {
+        decisionQueue: [expect.objectContaining({ assetLockRecordId: "asset-writer", sourceExcerptIds: ["source-binding-binding-writer"] })],
+        sourceExcerpts: [expect.objectContaining({ id: "source-binding-binding-writer", excerpt: "Writer source" })]
+      }
+    });
+  });
+
+  it("ignores dirty persisted source bindings before returning projection excerpts", () => {
+    const state = buildWorkspace({
+      currentUserId: "user-coordinator",
+      members: [buildMember("user-coordinator", "coordinator")],
+      deliveryPackages: [buildPackage("delivery-current", "project-jincheng", "published")],
+      deliveryPackageEpisodes: [
+        buildPackageEpisode(2, "Mine Map valid fallback line."),
+        buildPackageEpisode(3, "Dirty outside-record source."),
+        buildPackageEpisode(4, "Dirty unconfirmed source.", "delivery-current", false)
+      ],
+      assetLockRecords: [buildRecord({ id: "asset-map", assetName: "Mine Map", assetType: "prop", episodeNos: [2] })],
+      scriptSourceBindings: [
+        buildSourceBinding({ id: "binding-cross-project", projectId: "project-tide", assetLockRecordId: "asset-map", episodeNo: 2 }),
+        buildSourceBinding({ id: "binding-cross-package", deliveryPackageId: "delivery-other", assetLockRecordId: "asset-map", episodeNo: 2 }),
+        buildSourceBinding({ id: "binding-wrong-record", assetLockRecordId: "asset-missing", episodeNo: 2 }),
+        buildSourceBinding({ id: "binding-unconfirmed", assetLockRecordId: "asset-map", episodeNo: 4 }),
+        buildSourceBinding({ id: "binding-outside-record", assetLockRecordId: "asset-map", episodeNo: 3 })
+      ]
+    });
+
+    const result = buildAssetDecisionTimelineProjectionFromWorkspace(state, {
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current"
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      projection: {
+        sourceExcerpts: [expect.objectContaining({ id: "delivery-current-ep2-line1", excerpt: "Mine Map valid fallback line." })],
+        decisionQueue: [expect.objectContaining({ sourceExcerptIds: ["delivery-current-ep2-line1"] })]
+      }
+    });
+  });
 });
 
 function buildWorkspace(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
@@ -244,6 +395,7 @@ function buildWorkspace(overrides: Partial<WorkspaceState> = {}): WorkspaceState
     users: [
       buildUser("user-coordinator", "coordinator"),
       buildUser("user-creator", "creator"),
+      buildUser("user-writer", "writer"),
       buildUser("user-multi", "creator")
     ],
     projects: [buildProject("project-jincheng"), buildProject("project-tide")],
@@ -340,14 +492,35 @@ function buildPackage(
   };
 }
 
-function buildPackageEpisode(episodeNo: number, content: string, deliveryPackageId = "delivery-current"): DeliveryPackageEpisode {
+function buildPackageEpisode(
+  episodeNo: number,
+  content: string,
+  deliveryPackageId = "delivery-current",
+  isConfirmedChange = true
+): DeliveryPackageEpisode {
   return {
     id: `package-episode-${deliveryPackageId}-${episodeNo}`,
     deliveryPackageId,
     episodeNo,
     title: `第 ${episodeNo} 集`,
     content,
-    isConfirmedChange: true
+    isConfirmedChange
+  };
+}
+
+function buildSourceBinding(overrides: Partial<ScriptSourceBinding>): ScriptSourceBinding {
+  return {
+    id: "binding-source",
+    projectId: "project-jincheng",
+    deliveryPackageId: "delivery-current",
+    assetLockRecordId: "asset-record",
+    episodeNo: 1,
+    startLine: 1,
+    endLine: 1,
+    excerptSnapshot: "Bound source line",
+    createdByUserId: "user-writer",
+    createdAt: now,
+    ...overrides
   };
 }
 

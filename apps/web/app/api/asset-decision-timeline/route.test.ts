@@ -86,6 +86,59 @@ describe("asset decision timeline route", () => {
     ).toEqual(["Mine Lift"]);
   });
 
+  it("returns only session-visible explicit source bindings", async () => {
+    const deliveryPackageId = await createPublishedPackage();
+    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-head-writer"));
+    const visible = await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Mine Lift", [1]));
+    const hidden = await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Far Signal", [9]));
+    await mutateDeliveryImportWorkspace((state) => ({
+      ...state,
+      scriptSourceBindings: [
+        {
+          id: "binding-visible",
+          projectId: "project-jincheng",
+          deliveryPackageId,
+          assetLockRecordId: visible.record.id,
+          episodeNo: 1,
+          startLine: 2,
+          endLine: 2,
+          excerptSnapshot: "Visible bound source",
+          createdByUserId: "user-head-writer",
+          createdAt: "2026-05-24T00:00:00.000Z"
+        },
+        {
+          id: "binding-hidden",
+          projectId: "project-jincheng",
+          deliveryPackageId,
+          assetLockRecordId: hidden.record.id,
+          episodeNo: 9,
+          startLine: 4,
+          endLine: 4,
+          excerptSnapshot: "Hidden bound source",
+          createdByUserId: "user-head-writer",
+          createdAt: "2026-05-24T00:00:00.000Z"
+        }
+      ]
+    }));
+    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-creator-a"));
+
+    const response = await GET(
+      new Request(
+        `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${deliveryPackageId}&viewerRole=coordinator&assignedEpisodeNos=9`
+      )
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.projection.sourceExcerpts).toEqual([
+      expect.objectContaining({
+        id: "source-binding-binding-visible",
+        excerpt: "Visible bound source"
+      })
+    ]);
+    expect(JSON.stringify(body)).not.toContain("Hidden bound source");
+  });
+
   it("maps service errors to stable HTTP statuses", async () => {
     const deliveryPackageId = await createPublishedPackage();
     const unauthenticated = await GET(

@@ -89,9 +89,10 @@ Passed after fast-forward merging `codex/asset-decision-timeline` into `main`:
 
 ## Active Feature Branch
 
-- Branch: none currently active after `codex/script-source-binding-plan` was fast-forward merged into `main`.
+- Branch: `codex/script-source-binding-service`.
+- Created from local `main` at `614eb15`.
+- Purpose: complete read-only service plumbing for `state.scriptSourceBindings ?? []` and harden dirty-binding projection filtering.
 - Last completed branch: `codex/script-source-binding-plan`, merged at `5f93cae`.
-- Next recommended branch: `codex/script-source-binding-service`, focused on read-only service plumbing for `state.scriptSourceBindings ?? []`.
 - Do not push unless the user explicitly asks.
 
 ## Script Source Binding Planning
@@ -111,7 +112,7 @@ Next implementation sequence after documentation review:
 
 1. Add domain-only `ScriptSourceBinding` helper and tests. Done on this branch after 01/02 review.
 2. Let timeline projection consume explicit bindings while preserving asset-name fallback. Done on this branch.
-3. Add read-only service plumbing for optional legacy-safe workspace bindings.
+3. Add read-only service plumbing for optional legacy-safe workspace bindings. In progress on `codex/script-source-binding-service`.
 4. Only then consider narrow `asset-lock-records` actions for bind/remove source.
 
 01/02 review decisions applied:
@@ -134,6 +135,18 @@ Verification after projection binding step:
 - Projection binding: `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 6 files / 41 tests.
 - Projection binding: `npm.cmd run typecheck -w apps/web` passed.
 - Pre-merge verification: `npm.cmd run verify` passed on `codex/script-source-binding-plan`.
+
+Verification after service read-only plumbing step:
+
+- Projection dirty-binding defense: `filterVisibleScriptSourceBindings` now requires `binding.episodeNo` to be included in the target `AssetLockRecord.episodeNos`.
+- `/api/asset-decision-timeline` service now passes `state.scriptSourceBindings ?? []` into the projection.
+- Route remains read-only and still ignores client-provided `viewerRole`, `viewerUserId`, and `assignedEpisodeNos`.
+- `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 6 files / 47 tests.
+- `npm.cmd run typecheck -w apps/web` passed.
+- `npm.cmd run verify` passed:
+  - web: 20 files / 154 tests.
+  - domain: 6 files / 58 tests.
+  - Next production build passed.
 
 ## Asset Lock Workbench Completion
 

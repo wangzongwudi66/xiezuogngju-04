@@ -153,6 +153,34 @@ describe("asset decision timeline projection", () => {
     ]);
   });
 
+  it("ignores dirty bindings outside the target record episode range and preserves fallback", () => {
+    const projection = buildAssetTimelineProjection({
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      viewerRole: "coordinator",
+      viewerUserId: "user-coordinator",
+      assetLockRecords: [buildRecord({ id: "asset-map", assetName: "Mine Map", assetType: "prop", episodeNos: [2] })],
+      deliveryPackageEpisodes: [
+        buildPackageEpisode(2, "Mine Map valid fallback line."),
+        buildPackageEpisode(3, "Dirty binding source must be ignored.")
+      ],
+      episodes,
+      assignments,
+      scriptSourceBindings: [
+        buildSourceBinding({
+          id: "binding-dirty",
+          assetLockRecordId: "asset-map",
+          episodeNo: 3,
+          excerptSnapshot: "Dirty binding source must be ignored."
+        })
+      ]
+    });
+
+    expect(projection.sourceExcerpts.map((excerpt) => excerpt.id)).toEqual(["delivery-current-ep2-line1"]);
+    expect(projection.sourceExcerpts.map((excerpt) => excerpt.excerpt)).toEqual(["Mine Map valid fallback line."]);
+    expect(projection.decisionQueue[0]?.sourceExcerptIds).toEqual(["delivery-current-ep2-line1"]);
+  });
+
   it("maps asset lock statuses to decision kind and queue tags", () => {
     expect(deriveDecisionItemFromAssetLockRecord(buildRecord({ id: "asset-writer", writerConfirmation: "pending" }))).toEqual(
       expect.objectContaining({

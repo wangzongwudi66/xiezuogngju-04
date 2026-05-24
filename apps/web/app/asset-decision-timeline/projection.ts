@@ -242,7 +242,7 @@ function filterVisibleScriptSourceBindings({
   records: AssetLockRecord[];
   roleEpisodeSet?: Set<number>;
 }) {
-  const recordIds = new Set(records.map((record) => record.id));
+  const recordById = new Map(records.map((record) => [record.id, record]));
   const packageEpisodeKeys = new Set(
     deliveryPackageEpisodes
       .filter((episode) => episode.deliveryPackageId === deliveryPackageId)
@@ -250,12 +250,18 @@ function filterVisibleScriptSourceBindings({
   );
 
   return bindings.filter(
-    (binding) =>
-      binding.projectId === projectId &&
-      binding.deliveryPackageId === deliveryPackageId &&
-      recordIds.has(binding.assetLockRecordId) &&
-      packageEpisodeKeys.has(`${binding.deliveryPackageId}:${binding.episodeNo}`) &&
-      (!isRoleScoped || roleEpisodeSet.has(binding.episodeNo))
+    (binding) => {
+      const record = recordById.get(binding.assetLockRecordId);
+
+      return (
+        binding.projectId === projectId &&
+        binding.deliveryPackageId === deliveryPackageId &&
+        !!record &&
+        record.episodeNos.includes(binding.episodeNo) &&
+        packageEpisodeKeys.has(`${binding.deliveryPackageId}:${binding.episodeNo}`) &&
+        (!isRoleScoped || roleEpisodeSet.has(binding.episodeNo))
+      );
+    }
   );
 }
 
