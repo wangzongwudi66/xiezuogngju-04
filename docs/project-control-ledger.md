@@ -481,6 +481,23 @@ Next main-conversation work:
 - Next low-conflict step is route-level tests plus a minimal GET route only if service-boundary review passes.
 - Any route must accept only `projectId`, `deliveryPackageId`, and optional `previousDeliveryPackageId`; it must not accept `viewerUserId`, `viewerRole`, or `assignedEpisodeNos`.
 
+Main-conversation route action:
+
+- Added `apps/web/app/api/asset-decision-timeline/route.ts` with a minimal read-only `GET` route.
+- The route accepts only `projectId`, `deliveryPackageId`, and optional `previousDeliveryPackageId`; client-supplied `viewerUserId`, `viewerRole`, and `assignedEpisodeNos` are ignored because service identity comes from `WorkspaceState.currentUserId`.
+- Added `apps/web/app/api/asset-decision-timeline/route.test.ts` covering missing query params, successful projection response, ignored client-controlled identity/scope fields, unauthenticated status `401`, and missing package status `404`.
+- No route-level `POST` or timeline mutation was added.
+- Verification after route step:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 5 files / 29 tests.
+  - `npm.cmd run typecheck -w apps/web` passed.
+  - `git diff --check` passed.
+
+Next main-conversation work:
+
+- Ask Branch A/B/C/D for read-only review of the new route/service boundary before wiring UI.
+- If the route review passes, the next implementation step should be UI integration in a separate commit with a demo fallback.
+- If review finds route/service P1 issues, fix those before touching `asset-decision-timeline.tsx`, `globals.css`, or `m1-dashboard.tsx`.
+
 ## Next Post-Merge Parallel Batch
 
 Use `main` at or after `0f00d3f Record final asset timeline visual pass` as the baseline. If this ledger has a newer commit, use the latest `main` commit. All sub-conversations are read-only unless the main conversation explicitly delegates implementation.
