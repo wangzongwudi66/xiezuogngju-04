@@ -432,6 +432,11 @@ Main-conversation action:
 
 - Created branch `codex/asset-timeline-field-map` from `main`.
 - Added `docs/asset-timeline-field-map.md` with field source mapping, non-goals, candidate future business objects, read-only projection API boundary, permission rules, minimum test plan, and commit sequence.
+- Added pure projection helpers in `apps/web/app/ui/asset-decision-timeline-projection.ts` without changing UI components or APIs.
+- Added `asset-decision-timeline-projection.test.ts` covering assignment-derived creator windows, source excerpts from package episode lines, asset-lock status to decision mapping, creator-scoped projection, and empty-assignment downgrade.
+- Targeted verification for this helper stage:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 3 files / 16 tests.
+  - `npm.cmd run typecheck -w apps/web` passed.
 
 ## Next Post-Merge Parallel Batch
 
