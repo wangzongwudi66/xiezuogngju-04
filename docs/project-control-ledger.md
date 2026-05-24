@@ -89,10 +89,31 @@ Passed after fast-forward merging `codex/asset-decision-timeline` into `main`:
 
 ## Active Feature Branch
 
-- Branch: none currently active after `codex/asset-lock-session-scope` was fast-forward merged into `main`.
+- Branch: `codex/script-source-binding-plan`.
+- Created from local `main` at `e803512`.
+- Purpose: define the minimal `ScriptSourceBinding` boundary before touching domain, store, API, or timeline UI.
+- Current stage: documentation-only source binding plan.
 - Last completed branch: `codex/asset-lock-session-scope`, merged at `aff5803`.
-- Next recommended branch: `codex/script-source-binding-plan`, focused on source traceability design and tests.
 - Do not push unless the user explicitly asks.
+
+## Script Source Binding Planning
+
+Started on branch `codex/script-source-binding-plan`.
+
+Scope:
+
+- Add `docs/script-source-binding.md` first.
+- Keep `/api/asset-decision-timeline` read-only.
+- Keep timeline tracks, clips, queues, ghost comparison, and drawer state as projection/UI.
+- Do not add `AssetDecision` or `AssetStateSegment`.
+- Do not persist source bindings until the minimal field contract, permissions, and tests are accepted.
+
+Next implementation sequence after documentation review:
+
+1. Add domain-only `ScriptSourceBinding` helper and tests.
+2. Let timeline projection consume explicit bindings while preserving asset-name fallback.
+3. Add read-only service plumbing for optional legacy-safe workspace bindings.
+4. Only then consider narrow `asset-lock-records` actions for bind/remove source.
 
 ## Asset Lock Workbench Completion
 
