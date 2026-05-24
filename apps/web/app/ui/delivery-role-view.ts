@@ -39,3 +39,13 @@ export function selectDefaultDeliveryPackageId(
 
   return deliveryPackages[0]?.id ?? null;
 }
+
+export function selectAssetTimelineDeliveryPackageId(
+  deliveryPackages: Array<{ id: string; status: DeliveryPackageStatus; createdAt: string; publishedAt?: string }>
+) {
+  return (
+    [...deliveryPackages]
+      .filter((deliveryPackage) => deliveryPackage.status === "published")
+      .sort((a, b) => (b.publishedAt ?? b.createdAt).localeCompare(a.publishedAt ?? a.createdAt))[0]?.id ?? undefined
+  );
+}

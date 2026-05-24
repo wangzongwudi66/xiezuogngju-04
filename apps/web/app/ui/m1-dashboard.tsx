@@ -87,6 +87,7 @@ import {
   canReviewDeliveryRole,
   canSubmitDeliveryRole,
   filterProjectItems,
+  selectAssetTimelineDeliveryPackageId,
   selectDefaultDeliveryPackageId
 } from "./delivery-role-view";
 import {
@@ -2048,7 +2049,7 @@ function ModuleWorkbench({
   setWordDeclaredRangeDraft: React.Dispatch<React.SetStateAction<string>>;
   setWordTextDraft: React.Dispatch<React.SetStateAction<string>>;
 }) {
-  const assetTimelineDeliveryPackageId = activeDeliveryPackage?.status === "published" ? activeDeliveryPackage.id : undefined;
+  const assetTimelineDeliveryPackageId = selectAssetTimelineDeliveryPackageId(deliveryPackageDetails);
 
   if (activeModule === "集工作台") {
     if (!episode) {

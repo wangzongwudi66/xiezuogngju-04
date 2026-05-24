@@ -9,6 +9,7 @@ import {
   canReviewDeliveryRole,
   canSubmitDeliveryRole,
   filterProjectItems,
+  selectAssetTimelineDeliveryPackageId,
   selectDefaultDeliveryPackageId
 } from "./delivery-role-view";
 import { filterAssetChanges, getMockAssetChanges, getNextAssetLockOwner, summarizeAssetLock } from "./asset-lock-workbench-data";
@@ -84,6 +85,28 @@ describe("coordinator delivery role view", () => {
     expect(selectDefaultDeliveryPackageId(packages, "coordinator", null)).toBe("pending-package");
     expect(selectDefaultDeliveryPackageId(packages, "head_writer", null)).toBe("draft-package");
     expect(selectDefaultDeliveryPackageId(packages, "coordinator", "published-package")).toBe("published-package");
+  });
+
+  it("selects the latest published package for the asset timeline independently from the active delivery package", () => {
+    const packages = [
+      { id: "draft-package", status: "draft" as const, createdAt: "2026-05-24T00:00:00.000Z" },
+      { id: "pending-package", status: "pending_review" as const, createdAt: "2026-05-25T00:00:00.000Z" },
+      {
+        id: "older-published-package",
+        status: "published" as const,
+        createdAt: "2026-05-20T00:00:00.000Z",
+        publishedAt: "2026-05-21T00:00:00.000Z"
+      },
+      {
+        id: "latest-published-package",
+        status: "published" as const,
+        createdAt: "2026-05-22T00:00:00.000Z",
+        publishedAt: "2026-05-23T00:00:00.000Z"
+      }
+    ];
+
+    expect(selectDefaultDeliveryPackageId(packages, "coordinator", null)).toBe("pending-package");
+    expect(selectAssetTimelineDeliveryPackageId(packages)).toBe("latest-published-package");
   });
 });
 

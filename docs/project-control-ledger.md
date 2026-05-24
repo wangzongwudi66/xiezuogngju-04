@@ -587,6 +587,28 @@ Next main-conversation work:
 - Ask branches to review HEAD after the verify commit; keep sub-conversations read-only.
 - Browser acceptance should happen after review or after any review-blocking fixes.
 
+Branch A/B/C/D read-only review of `4750f96`:
+
+- Branch A found one P1 product wiring risk: asset timeline used the active delivery package only, so if the active package was draft/pending while a published package existed, timeline could fall back to Demo instead of real projection.
+- Branch B found no P0/P1 permission leak; noted Demo fallback and future source-binding limitations as non-blocking risks.
+- Branch C reported `npm.cmd run verify` passed and found no blocker to browser acceptance.
+- Branch D recommended browser acceptance but listed the same published-package and fallback scenarios as key checks.
+
+Main-conversation package-selection fix:
+
+- Added `selectAssetTimelineDeliveryPackageId` in `apps/web/app/ui/delivery-role-view.ts` to choose the latest published package independently of the active delivery package.
+- Updated `m1-dashboard.tsx` so the asset timeline receives that latest published package id even when the active package for the delivery center is draft or pending.
+- Added `m1-dashboard.test.ts` coverage proving coordinators can keep a pending active package while the asset timeline selects the latest published package.
+- Verification after this fix:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline asset-decision-timeline-api m1-dashboard` passed: 7 files / 50 tests.
+  - `npm.cmd run typecheck -w apps/web` passed.
+  - `git diff --check` passed.
+
+Next main-conversation work:
+
+- Run browser acceptance for the asset timeline before merge preparation.
+- If browser acceptance passes, run full `npm.cmd run verify` again and consider merging `codex/asset-timeline-field-map` back to `main`.
+
 ## Next Post-Merge Parallel Batch
 
 Use `main` at or after `0f00d3f Record final asset timeline visual pass` as the baseline. If this ledger has a newer commit, use the latest `main` commit. All sub-conversations are read-only unless the main conversation explicitly delegates implementation.
