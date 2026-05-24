@@ -615,6 +615,21 @@ Full verification after package-selection fix:
 - Domain tests passed: 5 files / 47 tests.
 - Next production build passed and includes dynamic route `/api/asset-decision-timeline`.
 
+Main-conversation workspace session fix:
+
+- HTTP validation found that the real timeline route still returned `401 unauthenticated` in the running app because the M1 login flow only updated client/local workspace state while `/api/asset-decision-timeline` reads the server workspace `currentUserId`.
+- Added `/api/workspace-session` as a small workspace-session sync endpoint for the local prototype. This is not a timeline mutation; timeline mutations remain out of scope.
+- Added `syncWorkspaceCurrentUser` in the UI and gated the asset timeline's real projection request until the server workspace current user matches the local current user.
+- HTTP validation after the fix:
+  - `POST /api/workspace-session` with `user-owner` returned `200` and persisted `currentUserId=user-owner`.
+  - `GET /api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=delivery-jc-3-4-qmk20g` returned `200`, `viewer=user-owner`, `role=coordinator`, `queue=6`, `tracks=5`.
+- Verification after this fix:
+  - `npm.cmd run test -w apps/web -- workspace-session asset-decision-timeline asset-decision-timeline-api m1-dashboard` passed: 9 files / 55 tests.
+  - `npm.cmd run verify` passed.
+  - Web tests passed: 20 files / 141 tests.
+  - Domain tests passed: 5 files / 47 tests.
+  - Next production build passed and includes dynamic routes `/api/asset-decision-timeline` and `/api/workspace-session`.
+
 Next main-conversation work:
 
 - Run browser acceptance for the asset timeline before merge preparation.

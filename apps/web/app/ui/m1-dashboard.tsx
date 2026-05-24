@@ -100,6 +100,7 @@ import {
 } from "./delivery-import-api";
 import { clearM2WorkspacePersistence, readM2WorkspacePersistence, writeM2WorkspacePersistence } from "./workspace-persistence";
 import type { DeliveryImportJob } from "./workspace-persistence";
+import { syncWorkspaceCurrentUser } from "./workspace-session-api";
 import { AssetLockWorkbench } from "./asset-lock-workbench";
 import { AssetDecisionTimelinePrototype } from "./asset-decision-timeline";
 
@@ -360,6 +361,7 @@ function buildM2PrototypeWorkspace(): WorkspaceState {
 
 export function M1Dashboard() {
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [syncedServerUserId, setSyncedServerUserId] = useState<string | null>(null);
   const [state, setState] = useState<WorkspaceState>(seedWorkspace);
   const [selectedProjectId, setSelectedProjectId] = useState(seedWorkspace.projects[0].id);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -455,6 +457,35 @@ export function M1Dashboard() {
       cancelled = true;
     };
   }, [hasHydrated, selectedProjectId]);
+
+  useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+
+    const currentUserId = state.currentUserId;
+    let cancelled = false;
+
+    setSyncedServerUserId(null);
+
+    syncWorkspaceCurrentUser(currentUserId)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+
+        setSyncedServerUserId(result.ok ? result.currentUserId : null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSyncedServerUserId(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasHydrated, state.currentUserId]);
 
   useEffect(() => {
     const activeProjectIds = new Set(state.projects.filter((project) => project.status === "active").map((project) => project.id));
@@ -1330,6 +1361,7 @@ export function M1Dashboard() {
               assetLockSummary={assetLockSummary}
               assignedEpisodeNos={myEpisodes.map((episode) => episode.episodeNo)}
               assignmentSummary={assignmentSummary}
+              assetTimelineSessionReady={syncedServerUserId === currentUserId}
               canAccessAssetWorkflow={canAccessAssetWorkflow}
               canAccessDelivery={canAccessDelivery}
               canCreateDelivery={canCreateDelivery}
@@ -1951,6 +1983,7 @@ function ModuleWorkbench({
   assetLockMutating,
   assetLockRecords,
   assetLockSummary,
+  assetTimelineSessionReady,
   assignedEpisodeNos,
   assignmentSummary,
   canAccessAssetWorkflow,
@@ -2005,6 +2038,7 @@ function ModuleWorkbench({
   assetLockMutating: boolean;
   assetLockRecords: AssetLockRecord[];
   assetLockSummary: AssetLockRecordSummary | null;
+  assetTimelineSessionReady: boolean;
   assignedEpisodeNos: number[];
   assignmentSummary: AssignmentSummaryItem[];
   canAccessAssetWorkflow: boolean;
@@ -2049,7 +2083,7 @@ function ModuleWorkbench({
   setWordDeclaredRangeDraft: React.Dispatch<React.SetStateAction<string>>;
   setWordTextDraft: React.Dispatch<React.SetStateAction<string>>;
 }) {
-  const assetTimelineDeliveryPackageId = selectAssetTimelineDeliveryPackageId(deliveryPackageDetails);
+  const assetTimelineDeliveryPackageId = assetTimelineSessionReady ? selectAssetTimelineDeliveryPackageId(deliveryPackageDetails) : undefined;
 
   if (activeModule === "集工作台") {
     if (!episode) {
