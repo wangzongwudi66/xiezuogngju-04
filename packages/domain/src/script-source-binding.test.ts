@@ -74,6 +74,12 @@ describe("script source binding", () => {
     expect(extractScriptSourceExcerptSnapshot("Line 1\r\nLine 2\r\nLine 3", 2, 3)).toBe("Line 2\nLine 3");
   });
 
+  it("preserves selected range whitespace while using trim only for empty checks", () => {
+    expect(extractScriptSourceExcerptSnapshot("Line 1\n  indented line  \n\nLine 4", 2, 4)).toBe(
+      "  indented line  \n\nLine 4"
+    );
+  });
+
   it("rejects missing or mismatched project/package/record inputs", () => {
     expect(() => createScriptSourceBinding(buildState({ projects: [] }), buildInput())).toThrow("Project not found");
     expect(() => createScriptSourceBinding(buildState({ deliveryPackages: [] }), buildInput())).toThrow(
@@ -111,6 +117,12 @@ describe("script source binding", () => {
   it("rejects a source episode outside the asset record episode range", () => {
     expect(() => createScriptSourceBinding(buildState(), buildInput({ episodeNo: 3 }))).toThrow(
       "Source binding episode must intersect the asset lock record"
+    );
+  });
+
+  it("rejects a missing package episode after record episode range passes", () => {
+    expect(() => createScriptSourceBinding(buildState(), buildInput({ episodeNo: 2 }))).toThrow(
+      "Delivery package episode not found"
     );
   });
 

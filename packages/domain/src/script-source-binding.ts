@@ -112,9 +112,9 @@ export function extractScriptSourceExcerptSnapshot(content: string, startLine: n
     throw new Error("Line range exceeds script content");
   }
 
-  const excerptSnapshot = lines.slice(startLine - 1, endLine).join("\n").trim();
+  const excerptSnapshot = lines.slice(startLine - 1, endLine).join("\n");
 
-  if (!excerptSnapshot) {
+  if (!excerptSnapshot.trim()) {
     throw new Error("Source excerpt cannot be empty");
   }
 
