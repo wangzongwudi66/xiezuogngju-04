@@ -37,7 +37,7 @@ describe("asset decision timeline projection", () => {
   it("derives creator assigned windows from project assignments without cross-project leakage", () => {
     expect(
       deriveCreatorAssignedEpisodeWindow({
-        assignments,
+        assignments: [...assignments, buildAssignment("assignment-a-support-2", "episode-project-jincheng-2", "user-creator-a", "support")],
         episodes,
         projectId: "project-jincheng",
         userId: "user-creator-a"
@@ -140,7 +140,7 @@ describe("asset decision timeline projection", () => {
     expect(projection.creatorAssignedWindow?.episodeNos).toEqual([2]);
     expect(projection.decisionQueue.map((decision) => decision.assetLockRecordId)).toEqual(["asset-map"]);
     expect(projection.sourceExcerpts.map((excerpt) => excerpt.episodeNo)).toEqual([2]);
-    expect(projection.tracks.flatMap((track) => track.clips).find((clip) => clip.assetLockRecordId === "asset-scar")?.isDimmedByRoleScope).toBe(true);
+    expect(projection.tracks.flatMap((track) => track.clips).map((clip) => clip.assetLockRecordId)).toEqual(["asset-map"]);
   });
 
   it("does not invent creator work for empty assignments", () => {
@@ -158,7 +158,71 @@ describe("asset decision timeline projection", () => {
     expect(projection.creatorAssignedWindow).toBeUndefined();
     expect(projection.decisionQueue).toEqual([]);
     expect(projection.sourceExcerpts).toEqual([]);
-    expect(projection.tracks.flatMap((track) => track.clips).every((clip) => clip.isDimmedByRoleScope)).toBe(true);
+    expect(projection.tracks.flatMap((track) => track.clips)).toEqual([]);
+    expect(projection.selectedClipId).toBeUndefined();
+  });
+
+  it("scopes ordinary writers to writer assignments while head writers can inspect the full projection", () => {
+    const projectionInput = {
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      assetLockRecords: [
+        buildRecord({ id: "asset-support", assetName: "Support Asset", assetType: "prop", episodeNos: [2] }),
+        buildRecord({ id: "asset-writer", assetName: "Writer Asset", assetType: "scene", episodeNos: [3] })
+      ],
+      deliveryPackageEpisodes: [
+        buildPackageEpisode(2, "Support Asset remains out of writer scope."),
+        buildPackageEpisode(3, "Writer Asset needs a scene decision.")
+      ],
+      episodes,
+      assignments: [
+        ...assignments,
+        buildAssignment("assignment-writer-3", "episode-project-jincheng-3", "user-writer-a", "writer"),
+        buildAssignment("assignment-support-2", "episode-project-jincheng-2", "user-writer-a", "support")
+      ]
+    };
+
+    const writerProjection = buildAssetTimelineProjection({
+      ...projectionInput,
+      viewerRole: "writer",
+      viewerUserId: "user-writer-a"
+    });
+    const headWriterProjection = buildAssetTimelineProjection({
+      ...projectionInput,
+      viewerRole: "head_writer",
+      viewerUserId: "user-head-writer"
+    });
+
+    expect(writerProjection.permissions.canViewFullSeries).toBe(false);
+    expect(writerProjection.decisionQueue.map((decision) => decision.assetLockRecordId)).toEqual(["asset-writer"]);
+    expect(writerProjection.sourceExcerpts.map((excerpt) => excerpt.episodeNo)).toEqual([3]);
+    expect(writerProjection.tracks.flatMap((track) => track.clips).map((clip) => clip.assetLockRecordId)).toEqual(["asset-writer"]);
+    expect(headWriterProjection.permissions.canViewFullSeries).toBe(true);
+    expect(headWriterProjection.decisionQueue.map((decision) => decision.assetLockRecordId)).toEqual(["asset-support", "asset-writer"]);
+  });
+
+  it("filters current asset records by project and delivery package", () => {
+    const projection = buildAssetTimelineProjection({
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      viewerRole: "coordinator",
+      viewerUserId: "user-coordinator",
+      assetLockRecords: [
+        buildRecord({ id: "asset-current", assetName: "Current Asset", episodeNos: [1] }),
+        buildRecord({ id: "asset-other-project", assetName: "Other Project Asset", projectId: "project-tide", episodeNos: [2] }),
+        buildRecord({ id: "asset-other-package", assetName: "Other Package Asset", deliveryPackageId: "delivery-other", episodeNos: [3] })
+      ],
+      deliveryPackageEpisodes: [
+        buildPackageEpisode(1, "Current Asset appears."),
+        buildPackageEpisode(2, "Other Project Asset should be ignored."),
+        buildPackageEpisode(3, "Other Package Asset should be ignored.", "delivery-other")
+      ],
+      episodes,
+      assignments
+    });
+
+    expect(projection.decisionQueue.map((decision) => decision.assetLockRecordId)).toEqual(["asset-current"]);
+    expect(projection.sourceExcerpts.map((excerpt) => excerpt.relatedAssetNames)).toEqual([["Current Asset"]]);
   });
 
   it("does not let unrelated package episodes change the projected episode window", () => {
@@ -184,6 +248,7 @@ describe("asset decision timeline projection", () => {
     const projection = buildAssetTimelineProjection({
       projectId: "project-jincheng",
       deliveryPackageId: "delivery-current",
+      previousDeliveryPackageId: "delivery-previous",
       viewerRole: "coordinator",
       viewerUserId: "user-coordinator",
       assetLockRecords: [
@@ -195,6 +260,21 @@ describe("asset decision timeline projection", () => {
         })
       ],
       previousAssetLockRecords: [
+        buildRecord({
+          id: "asset-map-prev",
+          assetName: "Mine Map",
+          assetType: "prop",
+          projectId: "project-tide",
+          deliveryPackageId: "delivery-previous",
+          episodeNos: [9]
+        }),
+        buildRecord({
+          id: "asset-map-current-scope",
+          assetName: "Mine Map",
+          assetType: "prop",
+          deliveryPackageId: "delivery-current",
+          episodeNos: [8]
+        }),
         buildRecord({
           id: "asset-map-prev",
           assetName: "Mine Map",
@@ -219,6 +299,38 @@ describe("asset decision timeline projection", () => {
       })
     );
   });
+
+  it("does not match previous ghosts across projects or the current package", () => {
+    const projection = buildAssetTimelineProjection({
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      viewerRole: "coordinator",
+      viewerUserId: "user-coordinator",
+      assetLockRecords: [buildRecord({ id: "asset-map", assetName: "Mine Map", assetType: "prop", episodeNos: [2] })],
+      previousAssetLockRecords: [
+        buildRecord({
+          id: "asset-map-wrong-project",
+          assetName: "Mine Map",
+          assetType: "prop",
+          projectId: "project-tide",
+          deliveryPackageId: "delivery-previous",
+          episodeNos: [1]
+        }),
+        buildRecord({
+          id: "asset-map-current-package",
+          assetName: "Mine Map",
+          assetType: "prop",
+          deliveryPackageId: "delivery-current",
+          episodeNos: [1]
+        })
+      ],
+      deliveryPackageEpisodes: [buildPackageEpisode(2, "Mine Map is unfolded.")],
+      episodes,
+      assignments
+    });
+
+    expect(projection.tracks.flatMap((track) => track.clips)[0]?.ghost).toBeUndefined();
+  });
 });
 
 function buildEpisode(episodeNo: number, projectId: string): Episode {
@@ -234,12 +346,17 @@ function buildEpisode(episodeNo: number, projectId: string): Episode {
   };
 }
 
-function buildAssignment(id: string, episodeId: string, userId: string): EpisodeAssignment {
+function buildAssignment(
+  id: string,
+  episodeId: string,
+  userId: string,
+  responsibility: EpisodeAssignment["responsibility"] = "creator"
+): EpisodeAssignment {
   return {
     id,
     episodeId,
     userId,
-    responsibility: "creator",
+    responsibility,
     createdAt: now
   };
 }

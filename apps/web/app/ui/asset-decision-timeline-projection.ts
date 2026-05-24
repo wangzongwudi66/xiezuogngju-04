@@ -17,9 +17,13 @@ import {
   type ScriptSourceExcerpt
 } from "./asset-decision-timeline-data";
 
+const CREATOR_SCOPE_RESPONSIBILITIES: Array<EpisodeAssignment["responsibility"]> = ["creator", "lead_creator"];
+const WRITER_SCOPE_RESPONSIBILITIES: Array<EpisodeAssignment["responsibility"]> = ["writer"];
+
 export interface AssetTimelineProjectionInput {
   projectId: string;
   deliveryPackageId: string;
+  previousDeliveryPackageId?: string;
   viewerRole: ProjectRole;
   viewerUserId: string;
   assetLockRecords: AssetLockRecord[];
@@ -34,7 +38,6 @@ export function buildAssetTimelineProjection(input: AssetTimelineProjectionInput
     .filter((record) => record.projectId === input.projectId && record.deliveryPackageId === input.deliveryPackageId)
     .sort((a, b) => getEpisodeRange(a.episodeNos).from - getEpisodeRange(b.episodeNos).from || a.assetName.localeCompare(b.assetName));
   const currentPackageEpisodes = input.deliveryPackageEpisodes.filter((episode) => episode.deliveryPackageId === input.deliveryPackageId);
-  const assetNames = records.map((record) => record.assetName);
   const creatorAssignedWindow =
     input.viewerRole === "creator"
       ? deriveCreatorAssignedEpisodeWindow({
@@ -44,34 +47,47 @@ export function buildAssetTimelineProjection(input: AssetTimelineProjectionInput
           userId: input.viewerUserId
         })
       : undefined;
-  const creatorEpisodeSet = new Set(creatorAssignedWindow?.episodeNos ?? []);
+  const roleScopedEpisodeNos =
+    input.viewerRole === "creator"
+      ? creatorAssignedWindow?.episodeNos ?? []
+      : input.viewerRole === "writer"
+        ? deriveAssignedEpisodeNos({
+            assignments: input.assignments,
+            episodes: input.episodes,
+            projectId: input.projectId,
+            responsibilities: WRITER_SCOPE_RESPONSIBILITIES,
+            userId: input.viewerUserId
+          })
+        : undefined;
+  const isRoleScoped = roleScopedEpisodeNos !== undefined;
+  const roleEpisodeSet = new Set(roleScopedEpisodeNos ?? []);
+  const scopedRecords = isRoleScoped
+    ? records.filter((record) => record.episodeNos.some((episodeNo) => roleEpisodeSet.has(episodeNo)))
+    : records;
+  const assetNames = scopedRecords.map((record) => record.assetName);
   const sourceExcerpts = deriveSourceExcerptsFromPackageEpisodes({
     assetNames,
     deliveryPackageEpisodes: currentPackageEpisodes,
     deliveryPackageId: input.deliveryPackageId,
     projectId: input.projectId
-  }).filter((excerpt) => input.viewerRole !== "creator" || creatorEpisodeSet.has(excerpt.episodeNo));
-  const previousRecords = input.previousAssetLockRecords ?? [];
-  const segments = records.map((record) => buildAssetStateSegment(record, sourceExcerpts));
-  const decisions = records.map((record) => deriveDecisionItemFromAssetLockRecord(record, sourceExcerpts));
-  const clips = records.map((record, index) =>
+  }).filter((excerpt) => !isRoleScoped || roleEpisodeSet.has(excerpt.episodeNo));
+  const previousRecords = filterPreviousAssetLockRecords(input);
+  const segments = scopedRecords.map((record) => buildAssetStateSegment(record, sourceExcerpts));
+  const decisions = scopedRecords.map((record) => deriveDecisionItemFromAssetLockRecord(record, sourceExcerpts));
+  const clips = scopedRecords.map((record, index) =>
     buildTimelineClip({
-      creatorEpisodeSet,
+      roleEpisodeSet,
       decisionItemId: decisions[index].id,
-      isRoleScoped: input.viewerRole === "creator",
+      isRoleScoped,
       record,
       segment: segments[index],
       previousRecord: previousRecords.find((previous) => previous.assetName === record.assetName && previous.assetType === record.assetType)
     })
   );
-  const decisionQueue =
-    input.viewerRole === "creator"
-      ? decisions.filter((decision) => decision.episodeNos.some((episodeNo) => creatorEpisodeSet.has(episodeNo)))
-      : decisions;
   const packageEpisodeNos = normalizeEpisodeNos(currentPackageEpisodes.map((episode) => episode.episodeNo));
   const projectedEpisodeNos =
-    input.viewerRole === "creator" && creatorAssignedWindow
-      ? creatorAssignedWindow.episodeNos
+    roleScopedEpisodeNos !== undefined
+      ? roleScopedEpisodeNos
       : normalizeEpisodeNos([...packageEpisodeNos, ...records.flatMap((record) => record.episodeNos)]);
 
   return {
@@ -82,9 +98,9 @@ export function buildAssetTimelineProjection(input: AssetTimelineProjectionInput
     episodeWindow: buildEpisodeWindow(projectedEpisodeNos),
     creatorAssignedWindow,
     tracks: buildTracks(input.projectId, clips),
-    decisionQueue,
+    decisionQueue: decisions,
     sourceExcerpts,
-    selectedClipId: decisionQueue.find((decision) => decision.clipId)?.clipId,
+    selectedClipId: decisions.find((decision) => decision.clipId)?.clipId,
     permissions: buildTimelinePermissions(input.viewerRole)
   };
 }
@@ -100,9 +116,13 @@ export function deriveCreatorAssignedEpisodeWindow({
   projectId: string;
   userId: string;
 }): CreatorAssignedEpisodeWindow | undefined {
-  const projectEpisodeById = new Map(episodes.filter((episode) => episode.projectId === projectId).map((episode) => [episode.id, episode]));
-  const scopedAssignments = assignments.filter((assignment) => assignment.userId === userId && projectEpisodeById.has(assignment.episodeId));
-  const episodeNos = normalizeEpisodeNos(scopedAssignments.map((assignment) => projectEpisodeById.get(assignment.episodeId)?.episodeNo ?? 0));
+  const { episodeNos, scopedAssignments } = deriveScopedAssignments({
+    assignments,
+    episodes,
+    projectId,
+    responsibilities: CREATOR_SCOPE_RESPONSIBILITIES,
+    userId
+  });
 
   if (episodeNos.length === 0) {
     return undefined;
@@ -210,14 +230,14 @@ function buildAssetStateSegment(record: AssetLockRecord, sourceExcerpts: ScriptS
 }
 
 function buildTimelineClip({
-  creatorEpisodeSet,
+  roleEpisodeSet,
   decisionItemId,
   isRoleScoped,
   previousRecord,
   record,
   segment
 }: {
-  creatorEpisodeSet: Set<number>;
+  roleEpisodeSet: Set<number>;
   decisionItemId: string;
   isRoleScoped: boolean;
   previousRecord?: AssetLockRecord;
@@ -225,7 +245,7 @@ function buildTimelineClip({
   segment: AssetStateSegment;
 }): AssetTimelineClip {
   const range = getEpisodeRange(record.episodeNos);
-  const overlapsCreatorScope = record.episodeNos.some((episodeNo) => creatorEpisodeSet.has(episodeNo));
+  const overlapsRoleScope = !isRoleScoped || record.episodeNos.some((episodeNo) => roleEpisodeSet.has(episodeNo));
 
   return {
     id: `clip-${record.id}`,
@@ -238,9 +258,23 @@ function buildTimelineClip({
     currentSegment: segment,
     ghost: buildGhostComparison(record, previousRecord),
     decisionItemIds: [decisionItemId],
-    isInAssignedWindow: overlapsCreatorScope,
-    isDimmedByRoleScope: isRoleScoped && !overlapsCreatorScope
+    isInAssignedWindow: overlapsRoleScope,
+    isDimmedByRoleScope: isRoleScoped && !overlapsRoleScope
   };
+}
+
+function filterPreviousAssetLockRecords(input: AssetTimelineProjectionInput) {
+  return (input.previousAssetLockRecords ?? []).filter((previous) => {
+    if (previous.projectId !== input.projectId) {
+      return false;
+    }
+
+    if (input.previousDeliveryPackageId) {
+      return previous.deliveryPackageId === input.previousDeliveryPackageId;
+    }
+
+    return previous.deliveryPackageId !== input.deliveryPackageId;
+  });
 }
 
 function buildGhostComparison(record: AssetLockRecord, previousRecord?: AssetLockRecord): PreviousVersionGhostComparison | undefined {
@@ -367,6 +401,51 @@ function findSourceExcerptIdsForRecord(record: AssetLockRecord, sourceExcerpts: 
   return sourceExcerpts
     .filter((excerpt) => episodeNos.has(excerpt.episodeNo) && excerpt.relatedAssetNames.includes(record.assetName))
     .map((excerpt) => excerpt.id);
+}
+
+function deriveAssignedEpisodeNos({
+  assignments,
+  episodes,
+  projectId,
+  responsibilities,
+  userId
+}: {
+  assignments: EpisodeAssignment[];
+  episodes: Episode[];
+  projectId: string;
+  responsibilities: Array<EpisodeAssignment["responsibility"]>;
+  userId: string;
+}) {
+  return deriveScopedAssignments({
+    assignments,
+    episodes,
+    projectId,
+    responsibilities,
+    userId
+  }).episodeNos;
+}
+
+function deriveScopedAssignments({
+  assignments,
+  episodes,
+  projectId,
+  responsibilities,
+  userId
+}: {
+  assignments: EpisodeAssignment[];
+  episodes: Episode[];
+  projectId: string;
+  responsibilities: Array<EpisodeAssignment["responsibility"]>;
+  userId: string;
+}) {
+  const projectEpisodeById = new Map(episodes.filter((episode) => episode.projectId === projectId).map((episode) => [episode.id, episode]));
+  const scopedAssignments = assignments.filter(
+    (assignment) =>
+      assignment.userId === userId && responsibilities.includes(assignment.responsibility) && projectEpisodeById.has(assignment.episodeId)
+  );
+  const episodeNos = normalizeEpisodeNos(scopedAssignments.map((assignment) => projectEpisodeById.get(assignment.episodeId)?.episodeNo ?? 0));
+
+  return { episodeNos, scopedAssignments };
 }
 
 function getRecordStateLabel(record: AssetLockRecord) {

@@ -31,7 +31,8 @@ Support a real, read-only timeline projection first, then add the smallest set o
 The first real path should prove:
 
 - creators only see assets and decisions affecting their assigned episodes;
-- writers/coordinators can inspect the full project window;
+- head writers, coordinators, and owners can inspect the full project window;
+- ordinary writers are scoped to their `writer` episode assignments until broader visibility is explicitly approved;
 - the detail drawer uses real asset records, source excerpts, previous/current package comparison, and communication history placeholders or records;
 - mock data remains available only as demo fallback.
 
@@ -165,7 +166,7 @@ Do not add timeline-specific mutation routes until a real `AssetDecision`, `Asse
 - Creator projection must not leak full package text or unrelated episode excerpts.
 - Coordinator and owner can inspect full project timeline.
 - Head writer can inspect full project timeline and writer-decision items.
-- Ordinary writer visibility needs an explicit product decision before broad access.
+- Ordinary writers are limited to episodes where they have `EpisodeAssignment.responsibility = "writer"` until broader access is explicitly approved.
 - Every projection path must enforce `projectId`, `deliveryPackageId`, and record ownership consistency.
 
 ## Minimum Test Plan Before API Work

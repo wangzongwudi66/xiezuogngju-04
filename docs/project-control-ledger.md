@@ -442,6 +442,29 @@ Main-conversation action:
   - `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 3 files / 18 tests.
   - `npm.cmd run typecheck -w apps/web` passed.
 
+Branch A/B/C/D read-only review of `2961717`:
+
+- Branch A: no product P0/P1 in the helper direction, but ordinary `writer` versus `head_writer` visibility needed a product decision before API work.
+- Branch B: main data risks were creator projection leaking non-assigned clips, previous records matching across project/package boundaries, and creator assignment scope accepting non-creator responsibilities.
+- Branch C: asked for tests around current record filtering, previous record filtering, and stronger creator scope before any API route.
+- Branch D: recommended not adding `GET /api/asset-decision-timeline` yet; continue helper/test hardening and avoid route-to-UI coupling.
+
+Main-conversation action after the review:
+
+- Adopted conservative visibility: `owner`/`coordinator`/`head_writer` see the full projection; ordinary `writer` is scoped to `writer` episode assignments; `creator` is scoped to `creator`/`lead_creator` assignments.
+- Changed creator/writer scoped projections to filter clips/tracks/decisions/source excerpts instead of returning non-scope clips as dimmed data.
+- Added previous-record filtering by `projectId` and by explicit `previousDeliveryPackageId` when provided; otherwise current-package records are ignored as previous records.
+- Added tests for creator strict scope, empty creator scope, ordinary writer scope versus head-writer full visibility, current record project/package filtering, and previous ghost filtering.
+- Verification after this hardening step:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 3 files / 21 tests.
+  - `npm.cmd run typecheck -w apps/web` passed.
+
+Remaining before API route:
+
+- Do not add timeline mutations; keep using `asset-lock-records` transitions.
+- Before a real route, move or wrap projection logic in an API/service-safe layer instead of importing UI directly from a route.
+- `source_changed` still needs a real source-binding or previous/current source comparison design; do not fake it from `changeType`.
+
 ## Next Post-Merge Parallel Batch
 
 Use `main` at or after `0f00d3f Record final asset timeline visual pass` as the baseline. If this ledger has a newer commit, use the latest `main` commit. All sub-conversations are read-only unless the main conversation explicitly delegates implementation.
