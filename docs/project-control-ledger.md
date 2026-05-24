@@ -365,15 +365,17 @@ Main-conversation fixes after these reports:
 - Ordinary writer/non-full-series roles now show `当前工作窗口` instead of creator-specific `只看影响我的集`.
 - At `max-width: 1366px`, the detail drawer is now a static full-width second row instead of an absolute overlay over the timeline.
 - At `max-width: 760px`, shell/grid/stage/drawer widths are constrained and the wide timeline is contained in `.decision-track-scroll`; mobile second marker chips are hidden to reduce narrow clip crowding.
+- Branch B rechecked `e813e77` and still found the `390x844` full-page overflow P1: `documentElement.scrollWidth=613`, `clientWidth=375`, with the shell measuring about `577px`; track-internal scrolling remained synchronized.
+- Follow-up mobile overflow fix: at `max-width: 760px`, the asset/timeline shell and track stage now use `contain: inline-size` plus `overflow-x: hidden`, the timeline scroll container switches to block-level inline-size containment, and the wide ruler/track rows use a fixed internal scroll width so they cannot contribute to page-level intrinsic width.
 - Added `asset-decision-timeline-view.ts` for JSX-free UI helper tests and `asset-decision-timeline.test.ts` covering scoped muted class generation and reset-key changes.
 
 Verification after fixes:
 
 - `npm.cmd run test -w apps/web -- asset-decision-timeline m1-dashboard` passed: 3 files / 22 tests.
 - `npm.cmd run typecheck -w apps/web` passed.
-- `npm.cmd run verify` passed: web 14 files / 108 tests, domain 5 files / 47 tests, Next build passed.
+- `npm.cmd run verify` passed before and after the follow-up mobile overflow fix: web 14 files / 108 tests, domain 5 files / 47 tests, Next build passed.
 - `http://localhost:3000` returned 200.
-- In-app Browser control still lacks the required Node REPL tool in this thread, so Branch B should re-run the 390/1366 visual measurements or the user should manually confirm in the open browser before merge.
+- In-app Browser control still lacks the required Node REPL tool in this thread, so Branch B should re-run the `390x844` page-level overflow measurement before merge.
 
 ## Recovery Steps After Context Compression
 

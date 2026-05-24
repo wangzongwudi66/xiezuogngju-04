@@ -3344,12 +3344,33 @@ input[type="checkbox"] {
     max-width: 100%;
   }
 
+  .asset-lock-workbench,
+  .decision-timeline-shell,
+  .decision-track-stage {
+    contain: inline-size;
+    overflow-x: hidden;
+  }
+
+  .decision-timeline-controls {
+    justify-content: flex-start;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .decision-timeline-controls button {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+  }
+
   .decision-track-scroll {
+    display: block;
+    contain: inline-size;
     width: 100%;
     min-width: 0;
     max-width: 100%;
     overflow-x: auto;
-    overflow-y: visible;
+    overflow-y: hidden;
     overscroll-behavior-x: contain;
   }
 
@@ -3375,8 +3396,9 @@ input[type="checkbox"] {
 
   .decision-ruler-row,
   .decision-track-row {
-    width: max-content;
-    min-width: 100%;
+    width: 594px;
+    min-width: 594px;
+    max-width: none;
     grid-template-columns: 84px minmax(500px, 1fr);
   }
 
