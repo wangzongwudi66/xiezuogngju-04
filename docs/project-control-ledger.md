@@ -17,9 +17,10 @@ Read it first before making scheduling, branch, or merge decisions.
 
 - Branch: `main`
 - Remote tracking: `xiezuogongju-02/main`
-- Local `main` is ahead of remote by 15 commits as of 2026-05-24.
-- Latest local `main` commit before the next-stage branch: `05d018b Clean up delivery import test copy`.
+- Local `main` is ahead of remote by 30 commits as of 2026-05-24 before this ledger update.
+- Latest local `main` commit after merging the asset decision timeline branch: `0f00d3f Record final asset timeline visual pass`.
 - `codex/asset-lock-workbench` has been fast-forward merged into `main`.
+- `codex/asset-decision-timeline` has been fast-forward merged into `main`.
 
 Main currently includes:
 
@@ -37,6 +38,8 @@ Main currently includes:
 - `/api/asset-lock-attachments` for upload/list.
 - Asset candidate extraction from published delivery package episodes.
 - Asset lock frontend with records, confirmation, needs-info, dispute, final lock, attachments, and locked upload blocking.
+- Asset decision timeline static prototype in the main project flow.
+- Role-scoped asset timeline mock view model with creator assigned-episode scope, previous-version ghost clips, decision queues, aggregation, detail drawer, and visual acceptance fixes.
 
 Latest main verification:
 
@@ -44,19 +47,19 @@ Latest main verification:
 npm.cmd run verify
 ```
 
-Passed after merging asset lock workbench:
+Passed after fast-forward merging `codex/asset-decision-timeline` into `main`:
 
-- web: 12 test files / 96 tests passed.
-- domain: 5 test files / 44 tests passed.
+- web: 14 test files / 108 tests passed.
+- domain: 5 test files / 47 tests passed.
 - `next build` passed.
 
 ## Active Feature Branch
 
-- Branch: `codex/asset-decision-timeline`
-- Created from local `main` at `05d018b`.
-- Purpose: prototype the next core module, "资产决策剪辑轨道".
-- Current stage: static UI prototype committed and asset-lock mutation hardening cherry-picked onto the branch.
-- Do not push or merge until reviewed.
+- Branch: none currently active.
+- Current branch: `main`.
+- Last completed branch: `codex/asset-decision-timeline`, fast-forward merged into `main` at `0f00d3f`.
+- Next work should start from `main` on a new `codex/` branch only after the scope is chosen.
+- Do not push unless the user explicitly asks.
 
 ## Asset Lock Workbench Completion
 
@@ -279,11 +282,11 @@ Asset lock mutation hardening added on top of the timeline branch:
 ## Current Do Not Do List
 
 - Do not push unless the user explicitly asks.
-- Do not expand into real database work yet.
+- Do not expand asset decision timeline into real database work yet.
 - Do not start real session/auth unless explicitly chosen as a phase.
-- Do not build AI automatic asset parsing in the first timeline prototype.
+- Do not build AI automatic asset parsing yet.
 - Do not let multiple sub-conversations edit the same high-conflict files at the same time.
-- Avoid broad rewrites of `m1-dashboard.tsx` until the timeline prototype surface is chosen.
+- Avoid broad rewrites of `m1-dashboard.tsx`; the next stage should be field mapping and state-machine design before code-heavy UI/API changes.
 
 ## Replacement Sub-Conversation Plan
 
@@ -378,6 +381,7 @@ Verification after fixes:
 - `npm.cmd run verify` passed before and after both follow-up mobile overflow fixes: web 14 files / 108 tests, domain 5 files / 47 tests, Next build passed.
 - `http://localhost:3000` returned 200.
 - Branch B rechecked `8bd353d`: `390x844` passed with `documentElement.scrollWidth=375` and `clientWidth=375`; `.decision-track-scroll` remained synchronized (`scrollLeft 0 -> 54`, ruler and track both moved `-54px`). Branch B returned "无剩余 P1，可进入合并准备".
+- `codex/asset-decision-timeline` was fast-forward merged into `main` at `0f00d3f`; final `npm.cmd run verify` passed on `main`.
 
 ## Recovery Steps After Context Compression
 
@@ -392,8 +396,8 @@ Get-Content docs/asset-decision-timeline.md -Raw
 
 Then:
 
-- If current branch is `codex/asset-decision-timeline`, continue the timeline design/prototype stage.
-- If current branch is `main`, confirm whether to switch back to `codex/asset-decision-timeline`.
+- If current branch is `main`, continue post-merge planning from the latest `main`.
+- If current branch is `codex/asset-decision-timeline`, switch back to `main` before starting new work unless the user explicitly wants to inspect the old feature branch.
 - Before committing any implementation stage, run targeted tests.
 - Before merge decisions, run:
 
@@ -403,12 +407,63 @@ npm.cmd run verify
 
 ## Immediate Next Decision
 
-Prepare to merge `codex/asset-decision-timeline` into `main`.
+Start the post-merge planning stage for asset timeline formalization.
 
 Recommended first actions:
 
-1. Confirm whether `main` has moved since the branch split.
-2. If `main` has not moved, fast-forward merge `codex/asset-decision-timeline` into `main`.
-3. Keep timeline types in `apps/web/app/ui/asset-decision-timeline-data.ts` until product/UI validation is complete.
-4. Do not add database, real auth/session, AI parsing, or new timeline APIs yet.
-5. After merge, run `npm.cmd run verify` on `main`.
+1. Create a new branch from `main` only after choosing the next scope; suggested branch name: `codex/asset-timeline-field-map`.
+2. First deliverable should be a mapping/design document, not production API code.
+3. Map every mock timeline field to one of: `AssetLockRecord`, `DeliveryPackage/EpisodeRevision`, `EpisodeAssignment`, or pure UI-derived state.
+4. Define the minimum state transitions needed before any timeline mutation/API work.
+5. Keep the current UI mock working while the mapping is reviewed.
+
+## Next Post-Merge Parallel Batch
+
+Use `main` at or after `0f00d3f Record final asset timeline visual pass` as the baseline. If this ledger has a newer commit, use the latest `main` commit. All sub-conversations are read-only unless the main conversation explicitly delegates implementation.
+
+Conflict-control rule:
+
+- Branch A/B/C/D are read-only planning/review branches.
+- They must not edit, stage, commit, push, rebase, or merge.
+- Main conversation owns any new branch, implementation, documentation edits, commits, and final merge decisions.
+- The next phase is design/mapping first; do not write real timeline APIs yet.
+
+Branch A prompt:
+
+```text
+你是分支 A，只做只读产品/业务对象复审。请确认当前基线为 main 最新提交（至少包含 0f00d3f 资产决策剪辑轨道合并）。不要改文件、不要 stage、不要提交、不要 push。
+
+任务：基于现有资产决策剪辑轨道静态原型，判断哪些能力应该进入下一阶段，哪些仍应后置。重点回答：创作者、编剧、统筹在下一阶段最需要真实化的 3-5 个动作是什么；哪些只是 UI 展示；“决策项”“状态段”“沟通记录”“剧本来源绑定”哪些应成为业务对象，哪些暂时仍可派生。
+
+请输出：1）下一阶段产品目标一句话；2）必须真实化的业务对象/动作；3）仍应保留 mock/UI 派生的内容；4）合并后下一阶段验收标准。只读，不要修改代码。
+```
+
+Branch B prompt:
+
+```text
+你是分支 B，只做只读数据来源映射复审。请确认当前基线为 main 最新提交（至少包含 0f00d3f 资产决策剪辑轨道合并）。不要改文件、不要 stage、不要提交、不要 push。
+
+任务：逐项审查 apps/web/app/ui/asset-decision-timeline-data.ts 中的 mock 类型和字段，给出字段来源映射建议。每个字段归类为：AssetLockRecord 派生、DeliveryPackage/EpisodeRevision 派生、EpisodeAssignment 派生、纯 UI 派生、暂不应保留。重点识别哪些字段不能直接下沉 domain，哪些字段已经有 domain 来源。
+
+请输出：1）字段映射表；2）可下沉 domain 的最小字段集；3）必须保持 UI 派生的字段；4）进入 API 前必须补的测试。只读，不要修改代码。
+```
+
+Branch C prompt:
+
+```text
+你是分支 C，只做只读 domain/API 边界复审。请确认当前基线为 main 最新提交（至少包含 0f00d3f 资产决策剪辑轨道合并）。不要改文件、不要 stage、不要提交、不要 push。
+
+任务：检查 packages/domain/src/types.ts、store.ts、apps/web/app/api/asset-lock-records/service.ts，以及资产 timeline mock，判断下一阶段是否需要新增 domain 类型或 API。优先考虑复用 AssetLockRecord、DeliveryPackage、EpisodeRevision、EpisodeAssignment。不要提出大而全 API；只提出最小 projection / transition 方案。
+
+请输出：1）是否需要新 domain 类型；2）是否需要只读 projection API；3）哪些 mutation 继续走现有 asset-lock API；4）权限/隔离风险；5）最小测试计划。只读，不要修改代码。
+```
+
+Branch D prompt:
+
+```text
+你是分支 D，只做只读工程计划/风险复审。请确认当前基线为 main 最新提交（至少包含 0f00d3f 资产决策剪辑轨道合并）。不要改文件、不要 stage、不要提交、不要 push。
+
+任务：为下一阶段制定低冲突执行计划。重点看哪些文件高冲突、哪些文档应先写、哪些测试可以先落地，如何拆成主对话与子对话任务。请避免建议多个分支同时修改 asset-decision-timeline.tsx / globals.css / m1-dashboard.tsx。
+
+请输出：1）推荐分支数量和每个分支职责；2）建议先改文档还是代码；3）最高风险文件；4）最小可提交序列；5）回滚/暂停条件。只读，不要修改代码。
+```
