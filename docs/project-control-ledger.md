@@ -656,6 +656,13 @@ Browser acceptance and final pre-merge hardening:
   - Web tests passed: 20 files / 144 tests.
   - Domain tests passed: 5 files / 47 tests.
   - Next production build passed with dynamic routes `/api/asset-decision-timeline` and `/api/workspace-session`.
+- Main fast-forward merge:
+  - `codex/asset-timeline-field-map` was fast-forward merged into `main`.
+  - Merged HEAD on `main`: `d730d4b Record asset timeline merge readiness`.
+  - Post-merge `npm.cmd run verify` passed on `main`.
+  - Web tests passed: 20 files / 144 tests.
+  - Domain tests passed: 5 files / 47 tests.
+  - Next production build passed with dynamic routes `/api/asset-decision-timeline` and `/api/workspace-session`.
 
 ## Next Post-Merge Parallel Batch
 
