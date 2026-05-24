@@ -556,6 +556,22 @@ Next main-conversation work:
 - Only after this commit should `m1-dashboard.tsx` pass a published `deliveryPackageId` into `AssetDecisionTimelinePrototype`.
 - Keep the dashboard change to a single prop wiring; do not change CSS, navigation, permissions, or asset-lock mutations in that commit.
 
+Main-conversation dashboard wiring action:
+
+- Updated `apps/web/app/ui/m1-dashboard.tsx` so `AssetDecisionTimelinePrototype` receives `deliveryPackageId` only when the active delivery package is `published`.
+- This is a prop-only wiring step: no CSS, navigation, permissions, package selection policy, asset-lock mutation, or timeline mutation changes.
+- Because the UI still does not pass `previousDeliveryPackageId`, real API projections will show current package data without ghost comparison until previous-package selection is designed.
+- Verification after dashboard wiring:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline asset-decision-timeline-api m1-dashboard` passed: 7 files / 49 tests.
+  - `npm.cmd run typecheck -w apps/web` passed.
+  - `git diff --check` passed.
+
+Next main-conversation work:
+
+- Run full `npm.cmd run verify` before considering merge back to `main`.
+- Ask Branch A/B/C/D for read-only review of the UI wiring and browser acceptance scope.
+- Browser acceptance should cover asset timeline with no published package, with a published package, creator scope, writer/head_writer/coordinator scope, and fallback behavior when the API returns an error.
+
 ## Next Post-Merge Parallel Batch
 
 Use `main` at or after `0f00d3f Record final asset timeline visual pass` as the baseline. If this ledger has a newer commit, use the latest `main` commit. All sub-conversations are read-only unless the main conversation explicitly delegates implementation.

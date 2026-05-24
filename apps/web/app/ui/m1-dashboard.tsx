@@ -2048,6 +2048,8 @@ function ModuleWorkbench({
   setWordDeclaredRangeDraft: React.Dispatch<React.SetStateAction<string>>;
   setWordTextDraft: React.Dispatch<React.SetStateAction<string>>;
 }) {
+  const assetTimelineDeliveryPackageId = activeDeliveryPackage?.status === "published" ? activeDeliveryPackage.id : undefined;
+
   if (activeModule === "集工作台") {
     if (!episode) {
       return (
@@ -2236,6 +2238,7 @@ function ModuleWorkbench({
         actorRole={actorRole}
         actorUserId={actorUserId}
         assignedEpisodeNos={assignedEpisodeNos}
+        deliveryPackageId={assetTimelineDeliveryPackageId}
         projectId={projectId}
         projectName={projectName}
       />
