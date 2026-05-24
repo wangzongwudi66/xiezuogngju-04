@@ -101,9 +101,66 @@ describe("asset decision timeline route", () => {
     expect(missingPackage.status).toBe(404);
     await expect(missingPackage.json()).resolves.toEqual({ ok: false, error: "delivery_package_not_found" });
   });
+
+  it("maps member and package-boundary errors to stable HTTP statuses", async () => {
+    const draftPackageId = await createPackage({ publish: false });
+    const publishedPackageId = await createPublishedPackage();
+    await mutateDeliveryImportWorkspace((state) => ({
+      ...loginAsUser(state, "user-owner"),
+      currentUserId: "user-outsider",
+      users: [
+        ...state.users,
+        {
+          id: "user-outsider",
+          name: "Outsider",
+          defaultRole: "creator",
+          avatarTone: "gray"
+        }
+      ]
+    }));
+    const nonMember = await GET(
+      new Request(
+        `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}`
+      )
+    );
+    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-owner"));
+    const missingProject = await GET(
+      new Request(
+        `http://localhost/api/asset-decision-timeline?projectId=missing-project&deliveryPackageId=${publishedPackageId}`
+      )
+    );
+    const unpublishedPackage = await GET(
+      new Request(`http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${draftPackageId}`)
+    );
+    const missingPreviousPackage = await GET(
+      new Request(
+        `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}&previousDeliveryPackageId=missing-previous`
+      )
+    );
+    const draftPreviousPackage = await GET(
+      new Request(
+        `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}&previousDeliveryPackageId=${draftPackageId}`
+      )
+    );
+
+    expect(nonMember.status).toBe(403);
+    await expect(nonMember.json()).resolves.toEqual({ ok: false, error: "project_member_required" });
+    expect(missingProject.status).toBe(404);
+    await expect(missingProject.json()).resolves.toEqual({ ok: false, error: "project_not_found" });
+    expect(unpublishedPackage.status).toBe(409);
+    await expect(unpublishedPackage.json()).resolves.toEqual({ ok: false, error: "delivery_package_not_published" });
+    expect(missingPreviousPackage.status).toBe(404);
+    await expect(missingPreviousPackage.json()).resolves.toEqual({ ok: false, error: "previous_delivery_package_not_found" });
+    expect(draftPreviousPackage.status).toBe(409);
+    await expect(draftPreviousPackage.json()).resolves.toEqual({ ok: false, error: "previous_delivery_package_not_published" });
+  });
 });
 
 async function createPublishedPackage() {
+  return createPackage({ publish: true });
+}
+
+async function createPackage({ publish }: { publish: boolean }) {
   const result = await createDeliveryImportJob({
     source: "text",
     projectId: "project-jincheng",
@@ -118,6 +175,10 @@ async function createPublishedPackage() {
   }
 
   const deliveryPackageId = result.job.deliveryPackageId;
+
+  if (!publish) {
+    return deliveryPackageId;
+  }
 
   await mutateDeliveryPackage({
     action: "submit",

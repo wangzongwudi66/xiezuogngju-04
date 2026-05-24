@@ -37,7 +37,9 @@ export function buildAssetTimelineProjection(input: AssetTimelineProjectionInput
   const records = input.assetLockRecords
     .filter((record) => record.projectId === input.projectId && record.deliveryPackageId === input.deliveryPackageId)
     .sort((a, b) => getEpisodeRange(a.episodeNos).from - getEpisodeRange(b.episodeNos).from || a.assetName.localeCompare(b.assetName));
-  const currentPackageEpisodes = input.deliveryPackageEpisodes.filter((episode) => episode.deliveryPackageId === input.deliveryPackageId);
+  const currentPackageEpisodes = input.deliveryPackageEpisodes.filter(
+    (episode) => episode.deliveryPackageId === input.deliveryPackageId && episode.isConfirmedChange
+  );
   const creatorAssignedWindow =
     input.viewerRole === "creator"
       ? deriveCreatorAssignedEpisodeWindow({
@@ -264,16 +266,16 @@ function buildTimelineClip({
 }
 
 function filterPreviousAssetLockRecords(input: AssetTimelineProjectionInput) {
+  if (!input.previousDeliveryPackageId) {
+    return [];
+  }
+
   return (input.previousAssetLockRecords ?? []).filter((previous) => {
     if (previous.projectId !== input.projectId) {
       return false;
     }
 
-    if (input.previousDeliveryPackageId) {
-      return previous.deliveryPackageId === input.previousDeliveryPackageId;
-    }
-
-    return previous.deliveryPackageId !== input.deliveryPackageId;
+    return previous.deliveryPackageId === input.previousDeliveryPackageId;
   });
 }
 

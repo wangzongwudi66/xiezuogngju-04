@@ -498,6 +498,31 @@ Next main-conversation work:
 - If the route review passes, the next implementation step should be UI integration in a separate commit with a demo fallback.
 - If review finds route/service P1 issues, fix those before touching `asset-decision-timeline.tsx`, `globals.css`, or `m1-dashboard.tsx`.
 
+Branch A/B/C/D read-only review of `1c237d9`:
+
+- Branch A: route/service direction is correct, but UI wiring should wait until previous-package ghost behavior and multi-role `viewerRole` selection are deterministic.
+- Branch B: main P1 was previous records matching arbitrary non-current packages when `previousDeliveryPackageId` is omitted; source excerpts also needed a confirmed/revision-backed constraint.
+- Branch C: requested tests for previous package behavior, stable role selection, broader route status mapping, writer scope, and empty/source edge cases.
+- Branch D: UI wiring can be planned as a separate step after API boundary fixes; it should be minimal, preserve mock fallback, avoid CSS, and avoid timeline mutations.
+
+Main-conversation API-boundary hardening:
+
+- Changed projection behavior so previous ghost comparison is generated only when an explicit `previousDeliveryPackageId` is provided.
+- Changed service role selection to use domain `selectPrimaryRole` after confirming the viewer is a project member, avoiding array-order role selection.
+- Added service validation that an explicit previous package must be same project, published, and published before the current package.
+- Restricted projection source excerpt input to confirmed package episodes via `DeliveryPackageEpisode.isConfirmedChange`.
+- Added/updated tests for multi-role primary role selection, no implicit previous ghost, explicit earlier previous package ghost, later previous package rejection, route error status matrix, and confirmed-only source excerpts.
+- Verification after API-boundary hardening:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 5 files / 33 tests.
+  - `npm.cmd run typecheck -w apps/web` passed.
+  - `git diff --check` passed.
+
+Next main-conversation work:
+
+- Route/service P1s from A/B/C are addressed; the next low-conflict implementation step can be UI API client helper only.
+- Do not wire the large timeline component and dashboard in the same commit as the helper.
+- Keep `previousDeliveryPackageId` optional in UI and omit it at first; this means no ghost on real API projection until previous-package selection is designed.
+
 ## Next Post-Merge Parallel Batch
 
 Use `main` at or after `0f00d3f Record final asset timeline visual pass` as the baseline. If this ledger has a newer commit, use the latest `main` commit. All sub-conversations are read-only unless the main conversation explicitly delegates implementation.

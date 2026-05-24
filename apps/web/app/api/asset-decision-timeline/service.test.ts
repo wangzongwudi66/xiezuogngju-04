@@ -115,6 +115,94 @@ describe("asset decision timeline service", () => {
     ).toEqual({ ok: false, error: "previous_delivery_package_not_published" });
   });
 
+  it("uses the primary project role when a user has multiple roles", () => {
+    const state = buildWorkspace({
+      currentUserId: "user-multi",
+      members: [buildMember("user-multi", "creator"), buildMember("user-multi", "head_writer")],
+      deliveryPackages: [buildPackage("delivery-current", "project-jincheng", "published")],
+      deliveryPackageEpisodes: [buildPackageEpisode(1, "Mine Lift appears."), buildPackageEpisode(2, "Mine Map appears.")],
+      assetLockRecords: [
+        buildRecord({ id: "asset-lift", assetName: "Mine Lift", episodeNos: [1] }),
+        buildRecord({ id: "asset-map", assetName: "Mine Map", assetType: "prop", episodeNos: [2] })
+      ]
+    });
+
+    const result = buildAssetDecisionTimelineProjectionFromWorkspace(state, {
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current"
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      projection: {
+        viewerRole: "head_writer",
+        decisionQueue: [
+          expect.objectContaining({ assetLockRecordId: "asset-lift" }),
+          expect.objectContaining({ assetLockRecordId: "asset-map" })
+        ]
+      }
+    });
+  });
+
+  it("does not generate previous ghosts unless an explicit earlier previous package is provided", () => {
+    const state = buildWorkspace({
+      currentUserId: "user-coordinator",
+      members: [buildMember("user-coordinator", "coordinator")],
+      deliveryPackages: [
+        buildPackage("delivery-current", "project-jincheng", "published", "2026-05-24T12:00:00.000Z"),
+        buildPackage("delivery-previous", "project-jincheng", "published", "2026-05-23T12:00:00.000Z"),
+        buildPackage("delivery-later", "project-jincheng", "published", "2026-05-25T12:00:00.000Z")
+      ],
+      deliveryPackageEpisodes: [buildPackageEpisode(2, "Mine Map is unfolded.")],
+      assetLockRecords: [
+        buildRecord({ id: "asset-map", assetName: "Mine Map", assetType: "prop", episodeNos: [2] }),
+        buildRecord({
+          id: "asset-map-prev",
+          assetName: "Mine Map",
+          assetType: "prop",
+          deliveryPackageId: "delivery-previous",
+          episodeNos: [1]
+        }),
+        buildRecord({
+          id: "asset-map-later",
+          assetName: "Mine Map",
+          assetType: "prop",
+          deliveryPackageId: "delivery-later",
+          episodeNos: [9]
+        })
+      ]
+    });
+    const withoutPrevious = buildAssetDecisionTimelineProjectionFromWorkspace(state, {
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current"
+    });
+    const withPrevious = buildAssetDecisionTimelineProjectionFromWorkspace(state, {
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      previousDeliveryPackageId: "delivery-previous"
+    });
+    const withLaterPrevious = buildAssetDecisionTimelineProjectionFromWorkspace(state, {
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      previousDeliveryPackageId: "delivery-later"
+    });
+
+    expect(withoutPrevious).toMatchObject({ ok: true });
+    if (withoutPrevious.ok) {
+      expect(withoutPrevious.projection.tracks.flatMap((track) => track.clips)[0]?.ghost).toBeUndefined();
+    }
+    expect(withPrevious).toMatchObject({ ok: true });
+    if (withPrevious.ok) {
+      expect(withPrevious.projection.tracks.flatMap((track) => track.clips)[0]?.ghost).toEqual(
+        expect.objectContaining({
+          previousDeliveryPackageId: "delivery-previous",
+          previousEpisodeFrom: 1
+        })
+      );
+    }
+    expect(withLaterPrevious).toEqual({ ok: false, error: "previous_delivery_package_not_before_current" });
+  });
+
   it("keeps creator projection limited to assigned episodes", () => {
     const state = buildWorkspace({
       currentUserId: "user-creator",
@@ -153,7 +241,11 @@ describe("asset decision timeline service", () => {
 function buildWorkspace(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
   return {
     currentUserId: "user-coordinator",
-    users: [buildUser("user-coordinator", "coordinator")],
+    users: [
+      buildUser("user-coordinator", "coordinator"),
+      buildUser("user-creator", "creator"),
+      buildUser("user-multi", "creator")
+    ],
     projects: [buildProject("project-jincheng"), buildProject("project-tide")],
     members: [buildMember("user-coordinator", "coordinator")],
     memberPermissions: [],
@@ -231,7 +323,8 @@ function buildAssignment(
 function buildPackage(
   id: string,
   projectId: string,
-  status: DeliveryPackage["status"]
+  status: DeliveryPackage["status"],
+  publishedAt = status === "published" ? now : undefined
 ): DeliveryPackage {
   return {
     id,
@@ -243,7 +336,7 @@ function buildPackage(
     status,
     uploadedByUserId: "user-head-writer",
     createdAt: now,
-    publishedAt: status === "published" ? now : undefined
+    publishedAt
   };
 }
 

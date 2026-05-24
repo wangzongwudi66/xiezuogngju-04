@@ -244,6 +244,30 @@ describe("asset decision timeline projection", () => {
     expect(projection.decisionQueue).toEqual([]);
   });
 
+  it("uses only confirmed package episode content for source excerpts", () => {
+    const projection = buildAssetTimelineProjection({
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      viewerRole: "coordinator",
+      viewerUserId: "user-coordinator",
+      assetLockRecords: [
+        buildRecord({ id: "asset-confirmed", assetName: "Confirmed Asset", episodeNos: [1] }),
+        buildRecord({ id: "asset-unconfirmed", assetName: "Unconfirmed Asset", episodeNos: [2] })
+      ],
+      deliveryPackageEpisodes: [
+        buildPackageEpisode(1, "Confirmed Asset appears."),
+        buildPackageEpisode(2, "Unconfirmed Asset appears.", "delivery-current", false)
+      ],
+      episodes,
+      assignments
+    });
+
+    expect(projection.sourceExcerpts.map((excerpt) => excerpt.relatedAssetNames)).toEqual([["Confirmed Asset"]]);
+    expect(
+      projection.decisionQueue.find((decision) => decision.assetLockRecordId === "asset-unconfirmed")?.sourceExcerptIds
+    ).toEqual([]);
+  });
+
   it("projects previous-version ghost markers from matching previous asset locks", () => {
     const projection = buildAssetTimelineProjection({
       projectId: "project-jincheng",
@@ -361,14 +385,19 @@ function buildAssignment(
   };
 }
 
-function buildPackageEpisode(episodeNo: number, content: string, deliveryPackageId = "delivery-current"): DeliveryPackageEpisode {
+function buildPackageEpisode(
+  episodeNo: number,
+  content: string,
+  deliveryPackageId = "delivery-current",
+  isConfirmedChange = true
+): DeliveryPackageEpisode {
   return {
     id: `package-episode-${deliveryPackageId}-${episodeNo}`,
     deliveryPackageId,
     episodeNo,
     title: `第 ${episodeNo} 集`,
     content,
-    isConfirmedChange: true
+    isConfirmedChange
   };
 }
 

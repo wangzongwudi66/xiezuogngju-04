@@ -1,4 +1,5 @@
-import type { ProjectRole, WorkspaceState } from "@aigc/domain";
+import { selectPrimaryRole } from "@aigc/domain";
+import type { WorkspaceState } from "@aigc/domain";
 import { buildAssetTimelineProjection } from "../../asset-decision-timeline/projection";
 import type { RoleScopedAssetTimelineViewModel } from "../../ui/asset-decision-timeline-data";
 import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
@@ -12,7 +13,8 @@ export type AssetDecisionTimelineProjectionError =
   | "delivery_package_not_published"
   | "previous_delivery_package_not_found"
   | "previous_delivery_package_project_mismatch"
-  | "previous_delivery_package_not_published";
+  | "previous_delivery_package_not_published"
+  | "previous_delivery_package_not_before_current";
 
 export interface AssetDecisionTimelineProjectionRequest {
   projectId: string;
@@ -52,11 +54,13 @@ export function buildAssetDecisionTimelineProjectionFromWorkspace(
     return { ok: false, error: "project_not_found" };
   }
 
-  const viewerRole = selectProjectRole(state, input.projectId, viewerUserId);
+  const isProjectMember = state.members.some((member) => member.projectId === input.projectId && member.userId === viewerUserId);
 
-  if (!viewerRole) {
+  if (!isProjectMember) {
     return { ok: false, error: "project_member_required" };
   }
+
+  const viewerRole = selectPrimaryRole(state, viewerUserId, input.projectId);
 
   const deliveryPackage = state.deliveryPackages.find((item) => item.id === input.deliveryPackageId);
 
@@ -88,6 +92,10 @@ export function buildAssetDecisionTimelineProjectionFromWorkspace(
     return { ok: false, error: "previous_delivery_package_not_published" };
   }
 
+  if (previousPackage && !isPreviousPackageBeforeCurrent(previousPackage.publishedAt, deliveryPackage.publishedAt)) {
+    return { ok: false, error: "previous_delivery_package_not_before_current" };
+  }
+
   return {
     ok: true,
     projection: buildAssetTimelineProjection({
@@ -105,6 +113,6 @@ export function buildAssetDecisionTimelineProjectionFromWorkspace(
   };
 }
 
-function selectProjectRole(state: WorkspaceState, projectId: string, userId: string): ProjectRole | undefined {
-  return state.members.find((member) => member.projectId === projectId && member.userId === userId)?.role;
+function isPreviousPackageBeforeCurrent(previousPublishedAt?: string, currentPublishedAt?: string) {
+  return Boolean(previousPublishedAt && currentPublishedAt && previousPublishedAt < currentPublishedAt);
 }

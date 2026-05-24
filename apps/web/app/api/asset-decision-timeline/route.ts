@@ -38,6 +38,8 @@ function statusForProjectionError(error: AssetDecisionTimelineProjectionError) {
     case "delivery_package_not_published":
     case "previous_delivery_package_not_published":
       return 409;
+    case "previous_delivery_package_not_before_current":
+      return 409;
     case "delivery_package_project_mismatch":
     case "previous_delivery_package_project_mismatch":
       return 400;
