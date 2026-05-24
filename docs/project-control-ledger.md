@@ -523,6 +523,22 @@ Next main-conversation work:
 - Do not wire the large timeline component and dashboard in the same commit as the helper.
 - Keep `previousDeliveryPackageId` optional in UI and omit it at first; this means no ghost on real API projection until previous-package selection is designed.
 
+Main-conversation UI client helper action:
+
+- Added `apps/web/app/ui/asset-decision-timeline-api.ts` with `fetchAssetDecisionTimelineProjection` and fallback-oriented error formatting.
+- Added `apps/web/app/ui/asset-decision-timeline-api.test.ts` covering query encoding, server-side error preservation, malformed response normalization, and fallback message formatting.
+- No timeline component, dashboard, CSS, or mutation wiring was changed in this step.
+- Verification after UI API helper step:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline asset-decision-timeline-api` passed: 6 files / 37 tests.
+  - `npm.cmd run typecheck -w apps/web` passed.
+  - `git diff --check` passed.
+
+Next main-conversation work:
+
+- Next implementation step can be a small `asset-decision-timeline.tsx` integration that prefers API projection when `deliveryPackageId` is present and otherwise keeps mock fallback.
+- Do not touch `m1-dashboard.tsx` until the component-level fetch/fallback behavior is tested.
+- Do not pass `previousDeliveryPackageId` from UI yet.
+
 ## Next Post-Merge Parallel Batch
 
 Use `main` at or after `0f00d3f Record final asset timeline visual pass` as the baseline. If this ledger has a newer commit, use the latest `main` commit. All sub-conversations are read-only unless the main conversation explicitly delegates implementation.
