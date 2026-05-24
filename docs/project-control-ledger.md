@@ -572,6 +572,21 @@ Next main-conversation work:
 - Ask Branch A/B/C/D for read-only review of the UI wiring and browser acceptance scope.
 - Browser acceptance should cover asset timeline with no published package, with a published package, creator scope, writer/head_writer/coordinator scope, and fallback behavior when the API returns an error.
 
+Full verification after route, API client, component, and dashboard wiring:
+
+- `npm.cmd run verify` passed on `codex/asset-timeline-field-map`.
+- Web typecheck passed.
+- Domain typecheck passed.
+- Web tests passed: 18 files / 135 tests.
+- Domain tests passed: 5 files / 47 tests.
+- Next production build passed and includes dynamic route `/api/asset-decision-timeline`.
+
+Next main-conversation work:
+
+- Do not merge yet without one read-only review batch and browser acceptance.
+- Ask branches to review HEAD after the verify commit; keep sub-conversations read-only.
+- Browser acceptance should happen after review or after any review-blocking fixes.
+
 ## Next Post-Merge Parallel Batch
 
 Use `main` at or after `0f00d3f Record final asset timeline visual pass` as the baseline. If this ledger has a newer commit, use the latest `main` commit. All sub-conversations are read-only unless the main conversation explicitly delegates implementation.
