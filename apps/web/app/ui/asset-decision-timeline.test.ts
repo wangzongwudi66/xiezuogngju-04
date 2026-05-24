@@ -38,4 +38,25 @@ describe("asset decision timeline component helpers", () => {
 
     expect(firstKey).not.toBe(secondKey);
   });
+
+  it("changes reset keys when the view-model source changes", () => {
+    const demoKey = buildTimelineResetKey({
+      actorRole: "coordinator",
+      actorUserId: "user-owner",
+      defaultQueueTag: "due_today",
+      projectId: "project-jincheng",
+      selectedClipId: "clip-map",
+      viewModelSourceKey: "demo"
+    });
+    const realKey = buildTimelineResetKey({
+      actorRole: "coordinator",
+      actorUserId: "user-owner",
+      defaultQueueTag: "due_today",
+      projectId: "project-jincheng",
+      selectedClipId: "clip-map",
+      viewModelSourceKey: "real:delivery-current"
+    });
+
+    expect(demoKey).not.toBe(realKey);
+  });
 });

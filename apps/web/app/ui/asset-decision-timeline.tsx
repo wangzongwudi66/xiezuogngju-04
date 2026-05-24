@@ -4,6 +4,7 @@ import { AlertTriangle, ChevronRight, Clock3, Layers3, PanelRightOpen, Sparkles 
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type { ProjectRole } from "@aigc/domain";
+import { fetchAssetDecisionTimelineProjection, formatAssetDecisionTimelineError } from "./asset-decision-timeline-api";
 import {
   buildMockAssetDecisionTimelineViewModel,
   filterDecisionItemsByQueue,
@@ -21,7 +22,8 @@ import type {
   AssetDecisionGroupSummary,
   AssetDecisionItem,
   AssetTimelineClip,
-  AssetTimelineQueueTag
+  AssetTimelineQueueTag,
+  RoleScopedAssetTimelineViewModel
 } from "./asset-decision-timeline-data";
 import { buildTimelineResetKey, getClipChangeMarkers, getDecisionClipClassName } from "./asset-decision-timeline-view";
 
@@ -54,16 +56,18 @@ export function AssetDecisionTimelinePrototype({
   actorRole,
   actorUserId,
   assignedEpisodeNos,
+  deliveryPackageId,
   projectId,
   projectName
 }: {
   actorRole: ProjectRole;
   actorUserId: string;
   assignedEpisodeNos?: number[];
+  deliveryPackageId?: string;
   projectId: string;
   projectName: string;
 }) {
-  const viewModel = useMemo(
+  const mockViewModel = useMemo(
     () =>
       buildMockAssetDecisionTimelineViewModel({
         projectId,
@@ -73,14 +77,76 @@ export function AssetDecisionTimelinePrototype({
       }),
     [actorRole, actorUserId, assignedEpisodeNos, projectId]
   );
+  const [remoteProjection, setRemoteProjection] = useState<{
+    deliveryPackageId?: string;
+    errorText?: string;
+    status: "demo" | "fallback" | "loading" | "real";
+    viewModel?: RoleScopedAssetTimelineViewModel;
+  }>({ status: "demo" });
+
+  useEffect(() => {
+    if (!deliveryPackageId) {
+      setRemoteProjection({ status: "demo" });
+      return;
+    }
+
+    let cancelled = false;
+    setRemoteProjection({ deliveryPackageId, status: "loading" });
+
+    fetchAssetDecisionTimelineProjection({ deliveryPackageId, projectId })
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (result.ok) {
+          setRemoteProjection({ deliveryPackageId, status: "real", viewModel: result.projection });
+          return;
+        }
+
+        setRemoteProjection({
+          deliveryPackageId,
+          errorText: formatAssetDecisionTimelineError(result),
+          status: "fallback"
+        });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
+        setRemoteProjection({
+          deliveryPackageId,
+          errorText: formatAssetDecisionTimelineError(error) || "真实资产决策轨道加载失败，已显示 Demo 数据。",
+          status: "fallback"
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [deliveryPackageId, projectId]);
+
+  const viewModel = remoteProjection.status === "real" && remoteProjection.viewModel ? remoteProjection.viewModel : mockViewModel;
+  const viewModelSourceKey = `${remoteProjection.status}:${remoteProjection.deliveryPackageId ?? "demo"}`;
+  const viewModelSourceLabel =
+    remoteProjection.status === "real"
+      ? "真实投影"
+      : remoteProjection.status === "loading"
+        ? "加载真实投影"
+        : remoteProjection.status === "fallback"
+          ? "Demo fallback"
+          : "静态原型";
+  const viewModelSourceText = remoteProjection.errorText || viewModelSourceLabel;
   const defaultQueueTag: AssetTimelineQueueTag = viewModel.creatorAssignedWindow ? "affects_my_episodes" : "due_today";
   const timelineResetKey = buildTimelineResetKey({
-    actorRole,
-    actorUserId,
-    assignedEpisodeNos,
+    actorRole: viewModel.viewerRole,
+    actorUserId: viewModel.viewerUserId,
+    assignedEpisodeNos: viewModel.creatorAssignedWindow?.episodeNos ?? assignedEpisodeNos,
     defaultQueueTag,
     projectId,
-    selectedClipId: viewModel.selectedClipId
+    selectedClipId: viewModel.selectedClipId,
+    viewModelSourceKey
   });
   const [activeQueueTag, setActiveQueueTag] = useState<AssetTimelineQueueTag>(defaultQueueTag);
   const [selectedClipId, setSelectedClipId] = useState(viewModel.selectedClipId ?? "");
@@ -172,12 +238,12 @@ export function AssetDecisionTimelinePrototype({
 
   const queueScopeDescription = viewModel.creatorAssignedWindow
     ? `当前默认聚焦第 ${viewModel.creatorAssignedWindow.episodeFrom}-${viewModel.creatorAssignedWindow.episodeTo} 集。`
-    : actorRole === "creator"
+    : viewModel.viewerRole === "creator"
       ? "当前账号暂无分配集数，暂不显示创作者待处理决策。"
       : "统筹/编剧可查看当前工作窗口内的全部决策压力。";
   const scopeControlLabel = viewModel.permissions.canViewFullSeries
     ? "全剧视角"
-    : actorRole === "creator"
+    : viewModel.viewerRole === "creator"
       ? "只看影响我的集"
       : "当前工作窗口";
 
@@ -185,7 +251,7 @@ export function AssetDecisionTimelinePrototype({
     <section className="decision-timeline-shell">
       <div className="decision-timeline-topbar">
         <div>
-          <span>{projectName} · 静态原型</span>
+          <span>{projectName} · {viewModelSourceText}</span>
           <h2>资产决策剪辑轨道</h2>
         </div>
         <div className="decision-timeline-controls" aria-label="资产轨道视图控制">

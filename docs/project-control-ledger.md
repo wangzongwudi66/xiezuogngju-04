@@ -539,6 +539,23 @@ Next main-conversation work:
 - Do not touch `m1-dashboard.tsx` until the component-level fetch/fallback behavior is tested.
 - Do not pass `previousDeliveryPackageId` from UI yet.
 
+Main-conversation component integration action:
+
+- Updated `apps/web/app/ui/asset-decision-timeline.tsx` to accept optional `deliveryPackageId`.
+- When `deliveryPackageId` is present, the component requests the read-only projection through `fetchAssetDecisionTimelineProjection`; successful responses replace the mock view model, while loading/failure/no package keeps the mock fallback.
+- The component labels the source as real projection, loading, static prototype, or Demo fallback; no CSS, dashboard, navigation, or mutation wiring was changed.
+- Updated `buildTimelineResetKey` to include a view-model source key so switching between mock/loading/real/fallback resets stale selection state.
+- Added helper test coverage for source-key reset behavior.
+- Verification after component integration:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline asset-decision-timeline-api` passed: 6 files / 38 tests.
+  - `npm.cmd run typecheck -w apps/web` passed.
+  - `git diff --check` passed.
+
+Next main-conversation work:
+
+- Only after this commit should `m1-dashboard.tsx` pass a published `deliveryPackageId` into `AssetDecisionTimelinePrototype`.
+- Keep the dashboard change to a single prop wiring; do not change CSS, navigation, permissions, or asset-lock mutations in that commit.
+
 ## Next Post-Merge Parallel Batch
 
 Use `main` at or after `0f00d3f Record final asset timeline visual pass` as the baseline. If this ledger has a newer commit, use the latest `main` commit. All sub-conversations are read-only unless the main conversation explicitly delegates implementation.

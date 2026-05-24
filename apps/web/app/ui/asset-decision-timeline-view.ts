@@ -7,7 +7,8 @@ export function buildTimelineResetKey({
   assignedEpisodeNos,
   defaultQueueTag,
   projectId,
-  selectedClipId
+  selectedClipId,
+  viewModelSourceKey
 }: {
   actorRole: ProjectRole;
   actorUserId: string;
@@ -15,10 +16,11 @@ export function buildTimelineResetKey({
   defaultQueueTag: AssetTimelineQueueTag;
   projectId: string;
   selectedClipId?: string;
+  viewModelSourceKey?: string;
 }) {
   const assignedScope = assignedEpisodeNos === undefined ? "demo" : assignedEpisodeNos.join(",");
 
-  return [projectId, actorRole, actorUserId, assignedScope, defaultQueueTag, selectedClipId ?? ""].join("|");
+  return [projectId, actorRole, actorUserId, assignedScope, defaultQueueTag, selectedClipId ?? "", viewModelSourceKey ?? "demo"].join("|");
 }
 
 export function getClipChangeMarkers(clip: AssetTimelineClip) {
