@@ -604,10 +604,21 @@ Main-conversation package-selection fix:
   - `npm.cmd run typecheck -w apps/web` passed.
   - `git diff --check` passed.
 
+Full verification after package-selection fix:
+
+- Current branch: `codex/asset-timeline-field-map`.
+- Current HEAD: `709c7bd Select published package for asset timeline`.
+- `npm.cmd run verify` passed after the package-selection fix.
+- Web typecheck passed.
+- Domain typecheck passed.
+- Web tests passed: 18 files / 136 tests.
+- Domain tests passed: 5 files / 47 tests.
+- Next production build passed and includes dynamic route `/api/asset-decision-timeline`.
+
 Next main-conversation work:
 
 - Run browser acceptance for the asset timeline before merge preparation.
-- If browser acceptance passes, run full `npm.cmd run verify` again and consider merging `codex/asset-timeline-field-map` back to `main`.
+- If browser acceptance passes, update this ledger with browser results and consider merging `codex/asset-timeline-field-map` back to `main`.
 
 ## Next Post-Merge Parallel Batch
 
