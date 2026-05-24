@@ -17,8 +17,8 @@ Read it first before making scheduling, branch, or merge decisions.
 
 - Branch: `main`
 - Remote tracking: `xiezuogongju-02/main`
-- Local `main` is ahead of remote by 31 commits as of 2026-05-24 before the field-map branch.
-- Latest local `main` commit after planning the post-merge timeline work: `2b665a3 Plan post-merge asset timeline work`.
+- Local `main` is ahead of remote; do not push unless the user explicitly asks.
+- Latest local implementation commit before this ledger-only update: `aff5803 Scope asset lock records to workspace session`.
 - `codex/asset-lock-workbench` has been fast-forward merged into `main`.
 - `codex/asset-decision-timeline` has been fast-forward merged into `main`.
 
@@ -40,12 +40,46 @@ Main currently includes:
 - Asset lock frontend with records, confirmation, needs-info, dispute, final lock, attachments, and locked upload blocking.
 - Asset decision timeline static prototype in the main project flow.
 - Role-scoped asset timeline mock view model with creator assigned-episode scope, previous-version ghost clips, decision queues, aggregation, detail drawer, and visual acceptance fixes.
+- Real read-only `/api/asset-decision-timeline` projection wired into the UI with mock fallback.
+- Session-scoped `/api/asset-lock-records` reads and writes: actor identity comes from `WorkspaceState.currentUserId`, and creator/writer reads are episode-assignment scoped.
 
 Latest main verification:
 
 ```powershell
 npm.cmd run verify
 ```
+
+## Asset Lock Session Scope Main Merge
+
+Timestamp: `2026-05-25 01:17:07 +08:00`.
+
+Baseline:
+
+- Previous `main`: `64ffe73 Record asset timeline main merge`.
+- Implementation branch: `codex/asset-lock-session-scope`.
+- Merged commit: `aff5803 Scope asset lock records to workspace session`.
+
+Actions completed:
+
+- Fast-forward merged `codex/asset-lock-session-scope` into `main`.
+- Kept `/api/asset-decision-timeline` read-only; no timeline mutation route was added.
+- Confirmed `/api/asset-lock-records` now derives actor identity from `WorkspaceState.currentUserId` instead of client-supplied user id fields.
+- Confirmed `/api/asset-lock-records` GET is scoped by server session role and episode assignments for creator/writer views.
+- Left next domain work out of this merge: no `AssetDecision`, no `AssetStateSegment`, no `ScriptSourceBinding` yet.
+
+Post-merge verification:
+
+- `npm.cmd run verify` passed on `main`.
+- Web tests passed: 20 files / 146 tests.
+- Domain tests passed: 5 files / 47 tests.
+- Next production build passed, including dynamic routes `/api/asset-decision-timeline`, `/api/asset-lock-records`, and `/api/workspace-session`.
+
+Next recommended work:
+
+- Start a new small branch for source traceability design and tests.
+- First target should be a minimal `ScriptSourceBinding` plan around `AssetLockRecord`, `DeliveryPackageEpisode`, and confirmed package content.
+- Keep timeline tracks, clips, queues, ghost comparison, and drawer state as projection/UI.
+- Continue to reject client-provided identity/scope fields in write APIs.
 
 Passed after fast-forward merging `codex/asset-decision-timeline` into `main`:
 
@@ -55,12 +89,9 @@ Passed after fast-forward merging `codex/asset-decision-timeline` into `main`:
 
 ## Active Feature Branch
 
-- Branch: `codex/asset-timeline-field-map`.
-- Created from local `main` at `2b665a3`.
-- Purpose: document asset timeline field sources, projection boundaries, and next implementation sequence.
-- Current stage: documentation-only field map.
-- Last completed branch: `codex/asset-decision-timeline`, fast-forward merged into `main` at `0f00d3f`.
-- Do not add API/domain implementation on this branch until the mapping document is reviewed.
+- Branch: none currently active after `codex/asset-lock-session-scope` was fast-forward merged into `main`.
+- Last completed branch: `codex/asset-lock-session-scope`, merged at `aff5803`.
+- Next recommended branch: `codex/script-source-binding-plan`, focused on source traceability design and tests.
 - Do not push unless the user explicitly asks.
 
 ## Asset Lock Workbench Completion
@@ -81,8 +112,8 @@ Completed and merged into `main`:
 
 Known asset lock risks intentionally deferred:
 
-- Prototype actor identity still comes from request body (`actorUserId`, `uploadedByUserId`).
-- Real multi-user deployment needs a separate session/auth phase.
+- Asset-lock-record actor identity is now server-session scoped; the remaining deployment risk is that this is still a prototype workspace session, not external auth.
+- Real multi-user deployment still needs a separate auth/session phase.
 - Attachment download, preview, and delete routes are not implemented yet.
 - The current asset candidate extraction is conservative keyword logic, not AI parsing.
 
