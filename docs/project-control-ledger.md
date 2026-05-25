@@ -3,6 +3,62 @@
 This file is the handoff source for the main control conversation after context compression.
 Read it first before making scheduling, branch, or merge decisions.
 
+## API Switch Handoff Snapshot
+
+Timestamp: `2026-05-25 21:17:03 +08:00`.
+
+If the current conversation is lost, start here:
+
+- Current branch: `codex/script-source-binding-service`.
+- Current HEAD: `a3e417d Pass source bindings into timeline service`.
+- Worktree at last check: clean after commit.
+- Branch relation at last check: this branch is one commit ahead of `main` and can be fast-forward merged after review.
+- Do not push unless the user explicitly asks.
+
+Current branch includes:
+
+- Projection dirty-binding defense: explicit `ScriptSourceBinding` is ignored unless its `episodeNo` belongs to the target `AssetLockRecord.episodeNos`.
+- `/api/asset-decision-timeline` service read-only plumbing: passes `state.scriptSourceBindings ?? []` into `buildAssetTimelineProjection`.
+- Route remains GET-only/read-only and still ignores client-provided `viewerRole`, `viewerUserId`, and `assignedEpisodeNos`.
+- Tests cover explicit binding priority, creator/writer scope, dirty persisted bindings, route-level hidden binding filtering, and legacy-safe behavior.
+
+Verification already run on this branch:
+
+- `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 6 files / 47 tests.
+- `npm.cmd run typecheck -w apps/web` passed.
+- `npm.cmd run verify` passed:
+  - web: 20 files / 154 tests.
+  - domain: 6 files / 58 tests.
+  - Next production build passed.
+
+Recommended next action:
+
+1. Ask 01/02 for a quick read-only review of `a3e417d`.
+2. If no P0/P1, run `git status --short --branch`, `git rev-list --left-right --count main...HEAD`, and optionally `npm.cmd run verify`.
+3. Fast-forward merge `codex/script-source-binding-service` into `main`.
+4. Update this ledger with the merge result.
+5. Only after that, plan the next branch for narrow `asset-lock-records` source-binding mutations.
+
+01 read-only review prompt:
+
+```text
+你是 01 产品/权限复审分支，基线为 codex/script-source-binding-service 的 HEAD a3e417d。只读复审，不要改文件、不要 stage、不要 commit、不要 push。
+
+任务：复审 ScriptSourceBinding service 只读透传。重点看 /api/asset-decision-timeline 是否仍只读、creator/writer 是否只看到自己范围内的 explicit source binding、dirty persisted binding 是否会泄漏 sourceExcerpts。
+
+请输出：1）P0/P1/P2/P3；2）权限和审计边界是否安全；3）是否可以合并回 main；4）进入下一阶段 bind_source/remove_source_binding 前必须补的产品/权限测试。
+```
+
+02 read-only review prompt:
+
+```text
+你是 02 工程/测试复审分支，基线为 codex/script-source-binding-service 的 HEAD a3e417d。只读复审，不要改文件、不要 stage、不要 commit、不要 push。
+
+任务：复审 ScriptSourceBinding service 只读透传的工程质量。重点看 projection dirty-binding defense、service.ts 透传 state.scriptSourceBindings ?? []、service/route tests 是否覆盖足够，以及是否有高冲突文件或回归风险。
+
+请输出：1）P0/P1/P2/P3；2）测试覆盖是否足够；3）是否适合 fast-forward merge 回 main；4）下一阶段 source-binding mutation 的低冲突提交序列。
+```
+
 ## User And Operating Mode
 
 - The user acts as the customer manager, not a technical implementer.
