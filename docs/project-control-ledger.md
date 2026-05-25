@@ -47,8 +47,13 @@ Targeted verification passed:
 
 Next action:
 
-1. Commit the P1 hardening follow-up.
-2. After commit, request read-only review before UI binding controls.
+1. 07/08 read-only reviews confirmed no P0/P1 and approved merge preparation.
+2. Merge-prep `npm.cmd run verify` passed:
+   - web: 20 files / 162 tests.
+   - domain: 6 files / 63 tests.
+   - Next production build passed.
+3. Fast-forward merged `codex/script-source-binding-mutations` into `main` through `0e44776 Harden source binding removal checks`.
+4. Next recommended phase: browser/API smoke for bind/remove source behavior, then decide whether to add a minimal UI source-binding control or keep UI deferred.
 
 ## API Switch Handoff Snapshot
 
