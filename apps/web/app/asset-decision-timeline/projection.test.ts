@@ -118,6 +118,46 @@ describe("asset decision timeline projection", () => {
     ]);
   });
 
+  it("falls back to asset-name source matching after explicit bindings are removed", () => {
+    const baseInput = {
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      viewerRole: "coordinator" as const,
+      viewerUserId: "user-coordinator",
+      assetLockRecords: [buildRecord({ id: "asset-map", assetName: "Mine Map", assetType: "prop", episodeNos: [2] })],
+      deliveryPackageEpisodes: [buildPackageEpisode(2, "Mine Map fallback line.\nMine Map second fallback.")],
+      episodes,
+      assignments
+    };
+    const explicitProjection = buildAssetTimelineProjection({
+      ...baseInput,
+      scriptSourceBindings: [
+        buildSourceBinding({
+          id: "binding-map",
+          assetLockRecordId: "asset-map",
+          episodeNo: 2,
+          startLine: 2,
+          endLine: 2,
+          excerptSnapshot: "Selected source line"
+        })
+      ]
+    });
+    const fallbackProjection = buildAssetTimelineProjection({
+      ...baseInput,
+      scriptSourceBindings: []
+    });
+
+    expect(explicitProjection.sourceExcerpts.map((excerpt) => excerpt.id)).toEqual(["source-binding-binding-map"]);
+    expect(fallbackProjection.sourceExcerpts.map((excerpt) => excerpt.id)).toEqual([
+      "delivery-current-ep2-line1",
+      "delivery-current-ep2-line2"
+    ]);
+    expect(fallbackProjection.decisionQueue[0]?.sourceExcerptIds).toEqual([
+      "delivery-current-ep2-line1",
+      "delivery-current-ep2-line2"
+    ]);
+  });
+
   it("scopes explicit source bindings before attaching source excerpt ids", () => {
     const projection = buildAssetTimelineProjection({
       projectId: "project-jincheng",

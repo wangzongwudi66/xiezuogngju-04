@@ -3,6 +3,51 @@
 This file is the handoff source for the main control conversation after context compression.
 Read it first before making scheduling, branch, or merge decisions.
 
+## Script Source Binding Mutation Progress
+
+Timestamp: `2026-05-25 22:15:31 +08:00`.
+
+Active branch:
+
+- Branch: `codex/script-source-binding-mutations`.
+- Baseline HEAD: `f9b7b1c Record script source binding service merge`.
+- Scope: narrow `asset-lock-records` source-binding writes only.
+- Do not push unless the user explicitly asks.
+
+Implemented so far:
+
+- Added domain `removeScriptSourceBinding` helper.
+- Added `/api/asset-lock-records` mutation actions:
+  - `bind_source`
+  - `remove_source_binding`
+- Service derives actor identity from `WorkspaceState.currentUserId`; client `createdByUserId`, `actorUserId`, `excerptSnapshot`, `viewerRole`, and `assignedEpisodeNos` are ignored for source binding writes.
+- Writer source-binding permission is checked against the exact binding `episodeNo`; creator remains read-only.
+- Locked asset records reject bind/remove source binding.
+- `mutateAssetLockRecord` returns optional `sourceBinding` or `removedSourceBindingId` for UI follow-up without changing existing record/list response behavior.
+- Added projection regression that explicit binding priority is preserved and fallback source matching returns after explicit bindings are removed.
+- No changes to `asset-decision-timeline.tsx`, `globals.css`, or `m1-dashboard.tsx`.
+
+Targeted verification passed:
+
+- `npm.cmd run test -w packages/domain -- script-source-binding`: 1 file / 15 tests.
+- `npm.cmd run test -w apps/web -- app/api/asset-lock-records/service.test.ts`: 1 file / 22 tests.
+- `npm.cmd run test -w apps/web -- app/api/asset-lock-records/route.test.ts`: 1 file / 11 tests.
+- `npm.cmd run test -w apps/web -- app/asset-decision-timeline/projection.test.ts`: 1 file / 16 tests.
+- `npm.cmd run test -w apps/web -- app/api/asset-decision-timeline/service.test.ts app/api/asset-decision-timeline/route.test.ts`: 2 files / 16 tests.
+- `npm.cmd run test -w apps/web -- asset-lock-records asset-decision-timeline`: 8 files / 81 tests.
+- `npm.cmd run typecheck`: passed for web and domain.
+- `git diff --check`: passed.
+
+Next action:
+
+1. Run full `npm.cmd run verify`.
+2. Commit in low-conflict slices if verify passes:
+   - domain helper/tests;
+   - service mutation/tests;
+   - route parser/tests;
+   - projection regression plus ledger update.
+3. After commits, request read-only review before UI binding controls.
+
 ## API Switch Handoff Snapshot
 
 Timestamp: `2026-05-25 21:17:03 +08:00`.
