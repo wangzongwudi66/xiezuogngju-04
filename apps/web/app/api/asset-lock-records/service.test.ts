@@ -279,6 +279,115 @@ describe("asset lock record service", () => {
     });
   });
 
+  it("binds script source lines using the server session user and persists the snapshot", async () => {
+    const deliveryPackageId = await createDraft();
+    const record = (await createAssetRecord(deliveryPackageId)).record;
+    const result = await mutateAssetLockRecord({
+      action: "bind_source",
+      assetLockRecordId: record.id,
+      deliveryPackageId,
+      episodeNo: 1,
+      startLine: 1,
+      endLine: 1,
+      createdByUserId: "user-owner",
+      actorUserId: "user-owner",
+      excerptSnapshot: "client supplied source"
+    } as Parameters<typeof mutateAssetLockRecord>[0]);
+    const persisted = await getDeliveryImportWorkspace();
+
+    expect(result.record).toEqual(record);
+    expect(result.sourceBinding).toEqual(
+      expect.objectContaining({
+        projectId: "project-jincheng",
+        deliveryPackageId,
+        assetLockRecordId: record.id,
+        episodeNo: 1,
+        startLine: 1,
+        endLine: 1,
+        createdByUserId: "user-head-writer"
+      })
+    );
+    expect(result.sourceBinding?.excerptSnapshot).toBeTruthy();
+    expect(result.sourceBinding?.excerptSnapshot).not.toBe("client supplied source");
+    expect(persisted.state.scriptSourceBindings).toContainEqual(result.sourceBinding);
+  });
+
+  it("removes source bindings while preserving the mutated asset record response", async () => {
+    const deliveryPackageId = await createDraft();
+    const record = (await createAssetRecord(deliveryPackageId)).record;
+    const bound = await bindSource(record.id, deliveryPackageId);
+
+    expect(bound.sourceBinding).toBeTruthy();
+
+    const removed = await mutateAssetLockRecord({
+      action: "remove_source_binding",
+      scriptSourceBindingId: bound.sourceBinding?.id ?? ""
+    });
+    const persisted = await getDeliveryImportWorkspace();
+
+    expect(removed.record).toEqual(record);
+    expect(removed.removedSourceBindingId).toBe(bound.sourceBinding?.id);
+    expect(persisted.state.scriptSourceBindings ?? []).toEqual([]);
+  });
+
+  it("allows writers to bind only their assigned source episodes", async () => {
+    const deliveryPackageId = await createDraft();
+    const record = (await createAssetRecord(deliveryPackageId)).record;
+
+    await login("user-writer");
+    await expect(bindSource(record.id, deliveryPackageId, { episodeNo: 1 })).resolves.toMatchObject({
+      sourceBinding: expect.objectContaining({
+        episodeNo: 1,
+        createdByUserId: "user-writer"
+      })
+    });
+
+    const outOfScopeDeliveryPackageId = await createDraftForRange(21, 22);
+    const outOfScopeRecord = (await createAssetRecord(outOfScopeDeliveryPackageId, "Episode Twenty One Asset", [21])).record;
+    await login("user-writer");
+    await expect(bindSource(outOfScopeRecord.id, outOfScopeDeliveryPackageId, { episodeNo: 21 })).rejects.toThrow(
+      "asset_lock_episode_scope_forbidden"
+    );
+  });
+
+  it("rejects creators and locked records for source binding mutations", async () => {
+    const deliveryPackageId = await createDraft();
+    const record = (await createAssetRecord(deliveryPackageId)).record;
+
+    await login("user-creator-a");
+    await expect(bindSource(record.id, deliveryPackageId)).rejects.toThrow("asset_lock_action_forbidden");
+
+    await login("user-head-writer");
+    const bound = await bindSource(record.id, deliveryPackageId);
+    await mutateAssetLockRecord({
+      action: "writer_confirm",
+      assetLockRecordId: record.id,
+      confirmedByUserId: "user-head-writer"
+    });
+    await login("user-creator-a");
+    await mutateAssetLockRecord({
+      action: "production_confirm",
+      assetLockRecordId: record.id,
+      confirmedByUserId: "user-creator-a"
+    });
+    await login("user-owner");
+    await mutateAssetLockRecord({
+      action: "final_lock",
+      assetLockRecordId: record.id,
+      lockedByUserId: "user-owner"
+    });
+
+    await expect(
+      mutateAssetLockRecord({
+        action: "remove_source_binding",
+        scriptSourceBindingId: bound.sourceBinding?.id ?? ""
+      })
+    ).rejects.toThrow("Locked asset lock records cannot change source bindings");
+    await expect(bindSource(record.id, deliveryPackageId, { startLine: 2, endLine: 2 })).rejects.toThrow(
+      "Locked asset lock records cannot change source bindings"
+    );
+  });
+
   it("marks records as needing information or disputed", async () => {
     const needsInfoRecord = (await createAssetRecord(await createDraft())).record;
     await login("user-creator-a");
@@ -570,19 +679,68 @@ async function createCandidateDraft(input: { publish?: boolean } = {}) {
   return deliveryPackageId;
 }
 
-async function createAssetRecord(deliveryPackageId: string, assetName = "Mine Lift") {
+async function createDraftForRange(episodeFrom: number, episodeTo: number) {
+  const rawText = Array.from({ length: episodeTo - episodeFrom + 1 }, (_, index) => {
+    const episodeNo = episodeFrom + index;
+    return `第 ${episodeNo} 集\nEpisode ${episodeNo} source line`;
+  }).join("\n");
+  const result = await createDeliveryImportJob({
+    source: "text",
+    projectId: "project-jincheng",
+    uploadedByUserId: "user-head-writer",
+    declaredRangeText: `${episodeFrom}-${episodeTo}`,
+    rawText
+  });
+
+  expect(result.ok).toBe(true);
+  if (!result.ok || !result.job.deliveryPackageId) {
+    throw new Error("delivery package draft was not created");
+  }
+
+  const deliveryPackageId = result.job.deliveryPackageId;
+
+  await mutateDeliveryPackage({
+    action: "submit",
+    deliveryPackageId,
+    actorUserId: "user-head-writer"
+  });
+  await mutateDeliveryPackage({
+    action: "publish",
+    deliveryPackageId,
+    actorUserId: "user-owner"
+  });
+
+  return deliveryPackageId;
+}
+
+async function createAssetRecord(deliveryPackageId: string, assetName = "Mine Lift", episodeNos = [1, 2]) {
   await login("user-head-writer");
   return mutateAssetLockRecord({
     action: "create",
     projectId: "project-jincheng",
     deliveryPackageId,
-    episodeNos: [1, 2],
+    episodeNos,
     assetName,
     assetType: "scene",
     changeType: "new",
     createdByUserId: "user-head-writer",
     risk: "attention",
     writerNote: "writer note"
+  });
+}
+
+async function bindSource(
+  assetLockRecordId: string,
+  deliveryPackageId: string,
+  input: { endLine?: number; episodeNo?: number; startLine?: number } = {}
+) {
+  return mutateAssetLockRecord({
+    action: "bind_source",
+    assetLockRecordId,
+    deliveryPackageId,
+    episodeNo: input.episodeNo ?? 1,
+    startLine: input.startLine ?? 1,
+    endLine: input.endLine ?? input.startLine ?? 1
   });
 }
 

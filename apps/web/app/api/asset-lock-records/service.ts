@@ -3,11 +3,13 @@
   confirmAssetLockRecordByWriter,
   createAssetLockRecord,
   createDeliveryPackageDraft,
+  createScriptSourceBinding,
   extractAssetLockCandidatesFromDeliveryEpisodes,
   finalLockAssetRecord,
   markAssetLockRecordDisputed,
   markAssetLockRecordNeedsInfo,
   publishDeliveryPackage,
+  removeScriptSourceBinding,
   selectPrimaryRole,
   submitDeliveryPackageForReview
 } from "@aigc/domain";
@@ -18,6 +20,7 @@ import type {
   AssetType,
   EpisodeAssignment,
   ProjectRole,
+  ScriptSourceBinding,
   WorkspaceState
 } from "@aigc/domain";
 import { mutateDeliveryImportWorkspace, readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
@@ -66,6 +69,18 @@ export type AssetLockRecordMutationRequest =
       lockedByUserId?: string;
     }
   | {
+      action: "bind_source";
+      assetLockRecordId: string;
+      deliveryPackageId: string;
+      episodeNo: number;
+      startLine: number;
+      endLine: number;
+    }
+  | {
+      action: "remove_source_binding";
+      scriptSourceBindingId: string;
+    }
+  | {
       action: "prepare_demo";
       projectId: string;
       actorUserId?: string;
@@ -84,6 +99,8 @@ export interface AssetLockRecordListResponse {
 
 export interface AssetLockRecordMutationResponse extends AssetLockRecordListResponse {
   record: AssetLockRecord;
+  sourceBinding?: ScriptSourceBinding;
+  removedSourceBindingId?: string;
 }
 
 export interface AssetLockRecordSummary {
@@ -106,15 +123,34 @@ export async function listAssetLockRecords(projectId?: string): Promise<AssetLoc
 }
 
 export async function mutateAssetLockRecord(input: AssetLockRecordMutationRequest): Promise<AssetLockRecordMutationResponse> {
-  const snapshot = await mutateDeliveryImportWorkspace((state) => applyAssetLockRecordMutation(state, input));
-  const record = findMutatedRecord(snapshot.state, input);
+  let sourceBinding: ScriptSourceBinding | undefined;
+  let removedSourceBindingId: string | undefined;
+  let removedSourceBindingRecordId: string | undefined;
+  const snapshot = await mutateDeliveryImportWorkspace((state) => {
+    if (input.action === "remove_source_binding") {
+      const binding = requireScriptSourceBindingForService(state, input.scriptSourceBindingId);
+      removedSourceBindingRecordId = binding.assetLockRecordId;
+      removedSourceBindingId = binding.id;
+    }
+
+    const nextState = applyAssetLockRecordMutation(state, input);
+
+    if (input.action === "bind_source") {
+      sourceBinding = findCreatedSourceBinding(nextState, input);
+    }
+
+    return nextState;
+  });
+  const record = findMutatedRecord(snapshot.state, input, removedSourceBindingRecordId);
   const viewerUserId = requireCurrentUserId(snapshot.state);
   const records = selectAssetLockRecords(snapshot.state, record.projectId, viewerUserId);
 
   return {
     record,
     records,
-    summary: summarizeAssetLockRecords(records)
+    summary: summarizeAssetLockRecords(records),
+    sourceBinding,
+    removedSourceBindingId
   };
 }
 
@@ -165,6 +201,27 @@ function applyAssetLockRecordMutation(state: WorkspaceState, input: AssetLockRec
         assetLockRecordId: input.assetLockRecordId,
         lockedByUserId: actorUserId
       });
+    case "bind_source": {
+      const record = requireAssetLockRecordForService(state, input.assetLockRecordId);
+      const sourceBinding = createScriptSourceBinding(state, {
+        projectId: record.projectId,
+        deliveryPackageId: input.deliveryPackageId,
+        assetLockRecordId: input.assetLockRecordId,
+        episodeNo: input.episodeNo,
+        startLine: input.startLine,
+        endLine: input.endLine,
+        createdByUserId: actorUserId
+      });
+
+      return {
+        ...state,
+        scriptSourceBindings: [...(state.scriptSourceBindings ?? []), sourceBinding]
+      };
+    }
+    case "remove_source_binding":
+      return removeScriptSourceBinding(state, {
+        scriptSourceBindingId: input.scriptSourceBindingId
+      });
     case "prepare_demo":
       return prepareAssetLockDemoRecords(state, input.projectId, actorUserId);
     case "generate_from_package":
@@ -177,7 +234,7 @@ function applyAssetLockRecordMutation(state: WorkspaceState, input: AssetLockRec
   }
 }
 
-function findMutatedRecord(state: WorkspaceState, input: AssetLockRecordMutationRequest) {
+function findMutatedRecord(state: WorkspaceState, input: AssetLockRecordMutationRequest, removedSourceBindingRecordId?: string) {
   const records = state.assetLockRecords ?? [];
 
   if (input.action === "create") {
@@ -207,6 +264,26 @@ function findMutatedRecord(state: WorkspaceState, input: AssetLockRecordMutation
 
     if (!record) {
       throw new Error("asset_lock_record_not_created");
+    }
+
+    return record;
+  }
+
+  if (input.action === "bind_source") {
+    const record = records.find((item) => item.id === input.assetLockRecordId);
+
+    if (!record) {
+      throw new Error("asset_lock_record_not_found");
+    }
+
+    return record;
+  }
+
+  if (input.action === "remove_source_binding") {
+    const record = records.find((item) => item.id === removedSourceBindingRecordId);
+
+    if (!record) {
+      throw new Error("asset_lock_record_not_found");
     }
 
     return record;
@@ -416,12 +493,25 @@ function assertAssetLockMutationPermission(state: WorkspaceState, input: AssetLo
         throw new Error("asset_lock_action_forbidden");
       }
       return;
+    case "bind_source":
+      assertCanMutateSourceBindingEpisode(state, input.assetLockRecordId, input.episodeNo, actorUserId, role);
+      return;
+    case "remove_source_binding": {
+      const binding = requireScriptSourceBindingForService(state, input.scriptSourceBindingId);
+      assertCanMutateSourceBindingEpisode(state, binding.assetLockRecordId, binding.episodeNo, actorUserId, role);
+      return;
+    }
   }
 }
 
 function getMutationProjectId(state: WorkspaceState, input: AssetLockRecordMutationRequest) {
   if (input.action === "create" || input.action === "generate_from_package" || input.action === "prepare_demo") {
     return input.projectId;
+  }
+
+  if (input.action === "remove_source_binding") {
+    const binding = requireScriptSourceBindingForService(state, input.scriptSourceBindingId);
+    return requireAssetLockRecordForService(state, binding.assetLockRecordId).projectId;
   }
 
   return requireAssetLockRecordForService(state, input.assetLockRecordId).projectId;
@@ -492,6 +582,30 @@ function assertCanMutateExistingRecord(
   throw new Error("asset_lock_episode_scope_forbidden");
 }
 
+function assertCanMutateSourceBindingEpisode(
+  state: WorkspaceState,
+  assetLockRecordId: string,
+  episodeNo: number,
+  actorUserId: string,
+  role: ProjectRole
+) {
+  const record = requireAssetLockRecordForService(state, assetLockRecordId);
+
+  if (role === "owner" || role === "coordinator" || role === "head_writer") {
+    return;
+  }
+
+  if (role !== "writer") {
+    throw new Error("asset_lock_action_forbidden");
+  }
+
+  if (getAssignedEpisodeNos(state, record.projectId, actorUserId, ["writer"]).includes(episodeNo)) {
+    return;
+  }
+
+  throw new Error("asset_lock_episode_scope_forbidden");
+}
+
 function hasFullAssetLockAccess(role: ProjectRole) {
   return role === "owner" || role === "coordinator" || role === "head_writer";
 }
@@ -526,6 +640,30 @@ function requireAssetLockRecordForService(state: WorkspaceState, assetLockRecord
   }
 
   return record;
+}
+
+function requireScriptSourceBindingForService(state: WorkspaceState, scriptSourceBindingId: string) {
+  const binding = (state.scriptSourceBindings ?? []).find((item) => item.id === scriptSourceBindingId);
+
+  if (!binding) {
+    throw new Error("script_source_binding_not_found");
+  }
+
+  return binding;
+}
+
+function findCreatedSourceBinding(
+  state: WorkspaceState,
+  input: Extract<AssetLockRecordMutationRequest, { action: "bind_source" }>
+) {
+  return (state.scriptSourceBindings ?? []).find(
+    (binding) =>
+      binding.assetLockRecordId === input.assetLockRecordId &&
+      binding.deliveryPackageId === input.deliveryPackageId &&
+      binding.episodeNo === input.episodeNo &&
+      binding.startLine === input.startLine &&
+      binding.endLine === input.endLine
+  );
 }
 
 function summarizeAssetLockRecords(records: AssetLockRecord[]): AssetLockRecordSummary {
