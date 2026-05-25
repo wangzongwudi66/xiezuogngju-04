@@ -11,7 +11,7 @@ Active branch:
 
 - Branch: `codex/source-binding-ui`.
 - Baseline main: `58071eb Record source binding mutation merge` plus CSS-only `d7355cc Stabilize narrow asset UI layout`.
-- Current committed UI-branch base: `91d6687 Expose source bindings with asset lock records`.
+- Current committed UI-branch base: `a14d38f Connect source binding panel to asset lock workbench`.
 - Do not push unless the user explicitly asks.
 
 External checks:
@@ -22,7 +22,7 @@ External checks:
 - 10 UI direction: first write entry belongs in `asset-lock-workbench` detail panel near source paragraphs; asset timeline remains read-only.
 - 11 CSS boundary: avoid `asset-decision-timeline.tsx` and broad CSS work while source-binding UI is in flight.
 
-Implemented in current uncommitted slice:
+Implemented in source-binding UI slice:
 
 - `asset-lock-api.ts` now exposes `bindAssetSource` / `removeAssetSourceBinding`, source-binding response types, default `sourceBindings: []` for legacy responses, and Chinese error mapping for source-binding failures.
 - Added `asset-lock-api.test.ts`.
@@ -30,8 +30,12 @@ Implemented in current uncommitted slice:
 - Added `asset-source-binding-panel.tsx` with existing-binding display, episode/start/end inputs, creator read-only copy, locked disabled copy, and remove buttons.
 - Wired the panel into `asset-lock-workbench.tsx` only in the selected asset detail panel.
 - Wired `m1-dashboard.tsx` narrowly for state/prop flow: `scriptSourceBindings` from API responses and workspace snapshots, plus bind/remove callbacks. No asset timeline write controls were added.
+- Removed the asset timeline detail drawer's static prototype action buttons so the timeline remains clearly read-only.
+- Added `m1-dashboard-source-bindings.ts` to keep the workbench-visible source-binding cache scoped by `{ projectId, userId }`.
+- Fixed source-binding visibility so `AssetLockWorkbench` consumes only `/api/asset-lock-records` scoped source bindings, not persisted workspace or delivery workspace snapshot full bindings.
+- User/project changes clear the visible cache, asset-lock fetch waits for `syncedServerUserId === state.currentUserId`, and manual refresh has the same session guard.
 
-Verification passed in current uncommitted slice:
+Verification passed:
 
 - `npm.cmd run test -w apps/web -- asset-lock-api asset-source-binding-data`: 2 files / 8 tests.
 - `npm.cmd run typecheck -w apps/web`: passed.
@@ -40,16 +44,23 @@ Verification passed in current uncommitted slice:
 - `npm.cmd run test -w apps/web -- asset-lock-records asset-decision-timeline`: 8 files / 83 tests.
 - `npm.cmd run test -w apps/web`: 22 files / 171 tests.
 - `npm.cmd run typecheck -w apps/web`: passed.
+- 15 final read-only review after cache scoping reported no P0/P1/P2 and approved merge if the untracked helper is committed.
+- 16 browser/visual review reported no P0/P1. It verified source-binding controls in asset lock at 1366/1440, creator read-only state, and no source-binding/static action controls in asset timeline. Locked-record visual coverage remains P2 because the current dataset had no locked record to inspect.
+- Full `npm.cmd run verify` passed on `2026-05-26`:
+  - web: 22 files / 173 tests.
+  - domain: 6 files / 63 tests.
+  - Next production build passed.
 
 Browser note:
 
-- In-app browser smoke against `http://localhost:3000/` was attempted but blocked by the browser surface with `net::ERR_BLOCKED_BY_CLIENT`; do not count browser visual QA as complete yet.
+- Initial browser smoke against `http://localhost:3000/` failed before the dev server was restarted.
+- Dev server is available at `http://127.0.0.1:3000/` during the current local session.
 
 Next action:
 
-1. Commit this UI slice if the worktree review is clean.
-2. Ask 12/13 read-only reviews to inspect UI scope and source-binding UX.
-3. After review, run browser visual QA again or use an approved fallback if the in-app browser remains blocked.
+1. Commit the current source-binding UI visibility fix, including `m1-dashboard-source-bindings.ts`.
+2. Fast-forward merge `codex/source-binding-ui` into `main` if the worktree remains clean.
+3. Do not push unless the user explicitly asks.
 
 ## Script Source Binding Mutation Progress
 

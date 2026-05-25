@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ChevronRight, Clock3, Layers3, PanelRightOpen, Sparkles } from "lucide-react";
+import { AlertTriangle, Clock3, Layers3, PanelRightOpen, Sparkles } from "lucide-react";
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type { ProjectRole } from "@aigc/domain";
@@ -594,13 +594,6 @@ function AssetTimelineDetailDrawer({
         </article>
       </div>
 
-      <div className="decision-detail-actions">
-        <button className="secondary-button" type="button">我已了解</button>
-        <button className="primary-button" type="button">
-          确认可执行
-          <ChevronRight size={15} />
-        </button>
-      </div>
     </aside>
   );
 }

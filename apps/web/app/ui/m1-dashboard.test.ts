@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { ScriptSourceBinding } from "@aigc/domain";
 import { registerUser, seedWorkspace, selectMyEpisodes } from "@aigc/domain";
 import { buildTodayTasks } from "./dashboard-tasks";
+import { selectAssetLockWorkbenchSourceBindings } from "./m1-dashboard-source-bindings";
 import { canRetryDeliveryImportJob, formatDeliveryImportError } from "./delivery-import-feedback";
 import {
   canAccessAssetWorkflowRole,
@@ -221,6 +223,51 @@ describe("delivery import retry affordance", () => {
 });
 
 describe("asset lock workbench model", () => {
+  it("uses only scoped asset source bindings for the workbench visible list", () => {
+    const scopedBinding = buildSourceBinding({ id: "binding-scoped", projectId: "project-jincheng" });
+    const hiddenSameProjectBinding = buildSourceBinding({
+      id: "binding-hidden-same-project",
+      assetLockRecordId: "record-hidden",
+      projectId: "project-jincheng"
+    });
+    const otherProjectBinding = buildSourceBinding({ id: "binding-other-project", projectId: "project-tide" });
+
+    expect(
+      selectAssetLockWorkbenchSourceBindings({
+        assetSourceBindings: [scopedBinding],
+        cacheScope: { projectId: "project-jincheng", userId: "user-writer" },
+        currentUserId: "user-writer",
+        projectId: "project-jincheng",
+        scriptSourceBindings: [scopedBinding, hiddenSameProjectBinding, otherProjectBinding],
+        syncedServerUserId: "user-writer"
+      }).map((binding) => binding.id)
+    ).toEqual(["binding-scoped"]);
+  });
+
+  it("does not reuse previous user source binding cache after current user changes", () => {
+    const previousUserBinding = buildSourceBinding({ id: "binding-previous-user", projectId: "project-jincheng" });
+
+    expect(
+      selectAssetLockWorkbenchSourceBindings({
+        assetSourceBindings: [previousUserBinding],
+        cacheScope: { projectId: "project-jincheng", userId: "user-writer" },
+        currentUserId: "user-creator-a",
+        projectId: "project-jincheng",
+        syncedServerUserId: "user-writer"
+      })
+    ).toEqual([]);
+
+    expect(
+      selectAssetLockWorkbenchSourceBindings({
+        assetSourceBindings: [previousUserBinding],
+        cacheScope: { projectId: "project-jincheng", userId: "user-writer" },
+        currentUserId: "user-creator-a",
+        projectId: "project-jincheng",
+        syncedServerUserId: null
+      })
+    ).toEqual([]);
+  });
+
   it("summarizes pending confirmations and blockers", () => {
     const summary = summarizeAssetLock(getMockAssetChanges());
 
@@ -249,3 +296,19 @@ describe("asset lock workbench model", () => {
     expect(getNextAssetLockOwner(getMockAssetChanges())).toBe("统筹协调争议项");
   });
 });
+
+function buildSourceBinding(patch: Partial<ScriptSourceBinding> = {}): ScriptSourceBinding {
+  return {
+    id: "binding-1",
+    projectId: "project-jincheng",
+    deliveryPackageId: "delivery-1",
+    assetLockRecordId: "record-1",
+    episodeNo: 1,
+    startLine: 1,
+    endLine: 1,
+    excerptSnapshot: "source excerpt",
+    createdByUserId: "user-writer",
+    createdAt: "2026-05-25T00:00:00.000Z",
+    ...patch
+  };
+}

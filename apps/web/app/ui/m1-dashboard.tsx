@@ -111,6 +111,11 @@ import type { DeliveryImportJob } from "./workspace-persistence";
 import { syncWorkspaceCurrentUser } from "./workspace-session-api";
 import { AssetLockWorkbench } from "./asset-lock-workbench";
 import { AssetDecisionTimelinePrototype } from "./asset-decision-timeline";
+import {
+  clearProjectAssetSourceBindings,
+  selectAssetLockWorkbenchSourceBindings
+} from "./m1-dashboard-source-bindings";
+import type { AssetSourceBindingCacheScope } from "./m1-dashboard-source-bindings";
 
 const roleLabels: Record<ProjectRole, string> = {
   owner: "项目所有者",
@@ -400,6 +405,7 @@ export function M1Dashboard() {
   const [serverDeliveryPackageIds, setServerDeliveryPackageIds] = useState<string[]>([]);
   const [assetLockRecords, setAssetLockRecords] = useState<AssetLockRecord[]>([]);
   const [assetSourceBindings, setAssetSourceBindings] = useState<ScriptSourceBinding[]>([]);
+  const [assetSourceBindingCacheScope, setAssetSourceBindingCacheScope] = useState<AssetSourceBindingCacheScope>(null);
   const [assetLockSummary, setAssetLockSummary] = useState<AssetLockRecordSummary | null>(null);
   const [assetLockError, setAssetLockError] = useState<string | null>(null);
   const [assetLockLoading, setAssetLockLoading] = useState(false);
@@ -418,7 +424,7 @@ export function M1Dashboard() {
       const persistedState = normalizeWorkspaceState(persistedWorkspace.state);
       setState(persistedState);
       setAssetLockRecords(persistedState.assetLockRecords ?? []);
-      setAssetSourceBindings(persistedState.scriptSourceBindings ?? []);
+      setAssetSourceBindings([]);
       setDeliveryParseIssuesByPackageId(persistedWorkspace.deliveryParseIssuesByPackageId);
       setDeliveryImportJobs(persistedWorkspace.deliveryImportJobs);
       setSelectedProjectId(persistedWorkspace.selectedProjectId ?? seedWorkspace.projects[0].id);
@@ -478,6 +484,8 @@ export function M1Dashboard() {
     let cancelled = false;
 
     setSyncedServerUserId(null);
+    setAssetSourceBindingCacheScope(null);
+    setAssetSourceBindings((current) => clearProjectAssetSourceBindings(current, selectedProjectId));
 
     syncWorkspaceCurrentUser(currentUserId)
       .then((result) => {
@@ -496,7 +504,7 @@ export function M1Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [hasHydrated, state.currentUserId]);
+  }, [hasHydrated, selectedProjectId, state.currentUserId]);
 
   useEffect(() => {
     const activeProjectIds = new Set(state.projects.filter((project) => project.status === "active").map((project) => project.id));
@@ -514,6 +522,13 @@ export function M1Dashboard() {
       return;
     }
 
+    if (!state.currentUserId || syncedServerUserId !== state.currentUserId) {
+      setAssetSourceBindingCacheScope(null);
+      setAssetSourceBindings((current) => clearProjectAssetSourceBindings(current, selectedProjectId));
+      return;
+    }
+
+    const currentUserId = state.currentUserId;
     let cancelled = false;
     setAssetLockLoading(true);
     setAssetLockError(null);
@@ -524,7 +539,7 @@ export function M1Dashboard() {
           return;
         }
 
-        applyAssetLockResponse(response);
+        applyAssetLockResponse(response, { projectId: selectedProjectId, userId: currentUserId });
       })
       .catch((error) => {
         if (!cancelled) {
@@ -540,7 +555,7 @@ export function M1Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [activeModule, hasHydrated, selectedProjectId]);
+  }, [activeModule, hasHydrated, selectedProjectId, state.currentUserId, syncedServerUserId]);
 
   if (!hasHydrated) {
     return <AuthGate state={seedWorkspace} setState={setState} />;
@@ -606,9 +621,14 @@ export function M1Dashboard() {
   const projectAssetLockRecords = mergeById(state.assetLockRecords ?? [], assetLockRecords).filter(
     (record) => record.projectId === selectedProject.id
   );
-  const projectAssetSourceBindings = mergeById(state.scriptSourceBindings ?? [], assetSourceBindings).filter(
-    (binding) => binding.projectId === selectedProject.id
-  );
+  const projectAssetSourceBindings = selectAssetLockWorkbenchSourceBindings({
+    assetSourceBindings,
+    cacheScope: assetSourceBindingCacheScope,
+    currentUserId,
+    projectId: selectedProject.id,
+    scriptSourceBindings: state.scriptSourceBindings ?? [],
+    syncedServerUserId
+  });
   const pendingDeliveryPackages = deliveryPackageDetails.filter((deliveryPackage) => deliveryPackage.status === "pending_review");
   const recentPublishedDeliveryPackages = deliveryPackageDetails
     .filter((deliveryPackage) => deliveryPackage.status === "published")
@@ -634,7 +654,8 @@ export function M1Dashboard() {
     setDeliveryImportJobs([]);
     setDeliveryParseIssuesByPackageId({});
     setAssetLockRecords(next.assetLockRecords ?? []);
-    setAssetSourceBindings(next.scriptSourceBindings ?? []);
+    setAssetSourceBindings([]);
+    setAssetSourceBindingCacheScope(null);
     setAssetLockSummary(null);
     setAssetLockError(null);
     setWordParseFeedback(null);
@@ -676,29 +697,43 @@ export function M1Dashboard() {
     setDeliveryImportJobs((items) => mergeDeliveryImportJobs(items, [job]));
   }
 
-  function applyAssetLockResponse(response: {
-    records: AssetLockRecord[];
-    sourceBindings?: ScriptSourceBinding[];
-    summary: AssetLockRecordSummary;
-  }) {
+  function applyAssetLockResponse(
+    response: {
+      records: AssetLockRecord[];
+      removedSourceBindingId?: string;
+      sourceBinding?: ScriptSourceBinding;
+      sourceBindings?: ScriptSourceBinding[];
+      summary: AssetLockRecordSummary;
+    },
+    cacheScope: Exclude<AssetSourceBindingCacheScope, null> = { projectId: selectedProjectId, userId: state.currentUserId ?? "" }
+  ) {
     setAssetLockRecords((current) => mergeProjectScopedItems(current, response.records, selectedProjectId));
     setAssetSourceBindings((current) => mergeProjectScopedItems(current, response.sourceBindings ?? [], selectedProjectId));
+    setAssetSourceBindingCacheScope(cacheScope);
     setAssetLockSummary(response.summary);
     setAssetLockError(null);
     setState((current) => ({
       ...current,
       assetLockRecords: mergeProjectScopedItems(current.assetLockRecords ?? [], response.records, selectedProjectId),
-      scriptSourceBindings: mergeProjectScopedItems(current.scriptSourceBindings ?? [], response.sourceBindings ?? [], selectedProjectId)
+      scriptSourceBindings: mergeAssetLockResponseSourceBindings(current.scriptSourceBindings ?? [], response)
     }));
   }
 
   async function refreshAssetLockRecordsFromServer() {
+    if (!state.currentUserId || syncedServerUserId !== state.currentUserId) {
+      setAssetSourceBindingCacheScope(null);
+      setAssetSourceBindings((current) => clearProjectAssetSourceBindings(current, selectedProjectId));
+      setAssetLockError("正在同步当前用户会话，请稍后再刷新资产定版记录。");
+      return;
+    }
+
+    const currentUserId = state.currentUserId;
     setAssetLockLoading(true);
     setAssetLockError(null);
 
     try {
       const response = await fetchAssetLockRecords(selectedProject.id);
-      applyAssetLockResponse(response);
+      applyAssetLockResponse(response, { projectId: selectedProject.id, userId: currentUserId });
     } catch (error) {
       const message = formatAssetLockError(error) || "资产定版记录加载失败，请稍后重试。";
       setAssetLockError(message);
@@ -871,7 +906,6 @@ export function M1Dashboard() {
       notifications: mergeById(current.notifications, snapshot.state.notifications)
     }));
     setAssetLockRecords((current) => mergeById(current, snapshot.state.assetLockRecords ?? []));
-    setAssetSourceBindings((current) => mergeById(current, snapshot.state.scriptSourceBindings ?? []));
   }
 
   async function refreshDeliveryWorkspaceFromServer() {
@@ -3497,6 +3531,17 @@ function mergeById<T extends { id: string }>(current: T[], incoming: T[]) {
 
 function mergeProjectScopedItems<T extends { projectId: string }>(current: T[], incoming: T[], projectId: string) {
   return [...current.filter((item) => item.projectId !== projectId), ...incoming];
+}
+
+function mergeAssetLockResponseSourceBindings(
+  current: ScriptSourceBinding[],
+  response: { removedSourceBindingId?: string; sourceBinding?: ScriptSourceBinding }
+) {
+  const withoutRemoved = response.removedSourceBindingId
+    ? current.filter((binding) => binding.id !== response.removedSourceBindingId)
+    : current;
+
+  return response.sourceBinding ? mergeById(withoutRemoved, [response.sourceBinding]) : withoutRemoved;
 }
 
 function mergeDeliveryImportJobs(current: DeliveryImportJob[], incoming: DeliveryImportJob[]) {
