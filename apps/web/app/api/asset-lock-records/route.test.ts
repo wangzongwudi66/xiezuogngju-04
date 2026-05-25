@@ -246,6 +246,7 @@ describe("asset lock record route", () => {
     });
     expect(bound.sourceBinding.excerptSnapshot).toBeTruthy();
     expect(bound.sourceBinding.excerptSnapshot).not.toBe("client supplied source");
+    expect(bound.sourceBindings).toEqual([bound.sourceBinding]);
 
     const removeResponse = await POST(
       jsonRequest({
@@ -261,6 +262,7 @@ describe("asset lock record route", () => {
       record: {
         id: created.record.id
       },
+      sourceBindings: [],
       removedSourceBindingId: bound.sourceBinding.id
     });
   });

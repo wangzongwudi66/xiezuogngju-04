@@ -94,6 +94,7 @@ export type AssetLockRecordMutationRequest =
 
 export interface AssetLockRecordListResponse {
   records: AssetLockRecord[];
+  sourceBindings: ScriptSourceBinding[];
   summary: AssetLockRecordSummary;
 }
 
@@ -118,6 +119,7 @@ export async function listAssetLockRecords(projectId?: string): Promise<AssetLoc
 
   return {
     records,
+    sourceBindings: selectVisibleScriptSourceBindings(workspace.state, records, viewerUserId),
     summary: summarizeAssetLockRecords(records)
   };
 }
@@ -148,6 +150,7 @@ export async function mutateAssetLockRecord(input: AssetLockRecordMutationReques
   return {
     record,
     records,
+    sourceBindings: selectVisibleScriptSourceBindings(snapshot.state, records, viewerUserId),
     summary: summarizeAssetLockRecords(records),
     sourceBinding,
     removedSourceBindingId
@@ -422,6 +425,42 @@ function selectAssetLockRecords(state: WorkspaceState, projectId: string | undef
     .filter((record) => !projectId || record.projectId === projectId)
     .filter((record) => canViewAssetLockRecord(state, record, viewerUserId))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function selectVisibleScriptSourceBindings(state: WorkspaceState, records: AssetLockRecord[], viewerUserId: string) {
+  const recordsById = new Map(records.map((record) => [record.id, record]));
+
+  return (state.scriptSourceBindings ?? []).filter((binding) => {
+    const record = recordsById.get(binding.assetLockRecordId);
+
+    if (!record) {
+      return false;
+    }
+
+    if (
+      binding.projectId !== record.projectId ||
+      binding.deliveryPackageId !== record.deliveryPackageId ||
+      !record.episodeNos.includes(binding.episodeNo)
+    ) {
+      return false;
+    }
+
+    const role = selectPrimaryRole(state, viewerUserId, record.projectId);
+
+    if (hasFullAssetLockAccess(role)) {
+      return true;
+    }
+
+    if (role === "writer") {
+      return getAssignedEpisodeNos(state, record.projectId, viewerUserId, ["writer"]).includes(binding.episodeNo);
+    }
+
+    if (role === "creator") {
+      return getAssignedEpisodeNos(state, record.projectId, viewerUserId, ["creator", "lead_creator"]).includes(binding.episodeNo);
+    }
+
+    return false;
+  });
 }
 
 function requireCurrentUserId(state: WorkspaceState) {

@@ -330,6 +330,24 @@ describe("asset lock record service", () => {
     expect(persisted.state.scriptSourceBindings ?? []).toEqual([]);
   });
 
+  it("lists source bindings visible to the current viewer", async () => {
+    const deliveryPackageId = await createDraftForRange(1, 21);
+    const record = (await createAssetRecord(deliveryPackageId, "Wide Range Source", [1, 21])).record;
+    const inScope = await bindSource(record.id, deliveryPackageId, { episodeNo: 1 });
+    await login("user-head-writer");
+    const outOfScope = await bindSource(record.id, deliveryPackageId, { episodeNo: 21 });
+
+    await login("user-writer");
+    const writerList = await listAssetLockRecords("project-jincheng");
+    expect(writerList.sourceBindings.map((binding) => binding.id)).toEqual([inScope.sourceBinding?.id]);
+
+    await login("user-head-writer");
+    const headWriterList = await listAssetLockRecords("project-jincheng");
+    expect(headWriterList.sourceBindings.map((binding) => binding.id).sort()).toEqual(
+      [inScope.sourceBinding?.id, outOfScope.sourceBinding?.id].sort()
+    );
+  });
+
   it("allows writers to bind only their assigned source episodes", async () => {
     const deliveryPackageId = await createDraft();
     const record = (await createAssetRecord(deliveryPackageId)).record;
