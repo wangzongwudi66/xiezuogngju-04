@@ -49,7 +49,8 @@ button {
 
 button:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
   outline: 3px solid rgba(52, 120, 246, 0.18);
   outline-offset: 2px;
 }
@@ -1837,6 +1838,7 @@ select:focus-visible {
 .decision-timeline-topbar span,
 .decision-queue-panel p,
 .decision-detail-card p,
+.source-excerpt p,
 .source-excerpt span {
   color: var(--muted);
   font-size: 12px;
@@ -2205,6 +2207,7 @@ select:focus-visible {
 .decision-clip small {
   position: relative;
   z-index: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2306,6 +2309,18 @@ select:focus-visible {
   border-radius: var(--radius);
   background: var(--surface-soft);
   padding: 10px;
+}
+
+.decision-detail-card p,
+.decision-item small,
+.source-excerpt p,
+.source-excerpt span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.source-excerpt p {
+  margin: 0;
 }
 
 .decision-detail-card.hero {
@@ -2617,6 +2632,11 @@ select:focus-visible {
   color: var(--ink);
   padding: 10px;
   text-align: left;
+}
+
+.asset-row .asset-tag,
+.asset-row .risk-dot {
+  min-width: 0;
 }
 
 .asset-row.active {
@@ -3319,8 +3339,26 @@ input[type="checkbox"] {
     grid-template-columns: 1fr;
   }
 
+  .asset-lock-top {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .asset-lock-top-actions {
+    justify-content: flex-start;
+  }
+
+  .asset-lock-top-actions .primary-button,
+  .asset-lock-top-actions .secondary-button {
+    flex: 1 1 148px;
+    min-width: 0;
+  }
+
   .asset-row {
     grid-template-columns: 18px minmax(0, 1fr);
+    align-items: start;
+    gap: 7px 9px;
   }
 
   .asset-lock-actions {
@@ -3410,6 +3448,13 @@ input[type="checkbox"] {
     max-height: none;
   }
 
+  .decision-drawer-tab {
+    position: static;
+    justify-content: center;
+    width: 100%;
+    margin-bottom: 4px;
+  }
+
   .decision-ruler-row,
   .decision-track-row {
     width: 594px;
@@ -3428,14 +3473,42 @@ input[type="checkbox"] {
     display: none;
   }
 
+  .decision-clip {
+    min-height: 64px;
+    padding: 24px 7px 7px;
+  }
+
+  .decision-clip span,
+  .decision-clip strong,
+  .decision-clip small {
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .decision-change-chip {
+    top: 5px;
+    right: 5px;
+    max-width: calc(100% - 10px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .asset-row .asset-tag,
+  .asset-row .risk-dot,
   .asset-owner {
     grid-column: 2;
     text-align: left;
   }
 
+  .asset-row .asset-tag,
   .risk-dot {
     margin-left: 0;
+    width: fit-content;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .topbar-actions {
