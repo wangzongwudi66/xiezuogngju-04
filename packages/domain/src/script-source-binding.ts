@@ -5,6 +5,10 @@ export interface CreateScriptSourceBindingOptions {
   createdAt?: string;
 }
 
+export interface RemoveScriptSourceBindingInput {
+  scriptSourceBindingId: string;
+}
+
 export function createScriptSourceBinding(
   state: WorkspaceState,
   input: ScriptSourceBindingInput,
@@ -90,6 +94,29 @@ export function createScriptSourceBinding(
     excerptSnapshot,
     createdByUserId: input.createdByUserId,
     createdAt: options.createdAt ?? new Date().toISOString()
+  };
+}
+
+export function removeScriptSourceBinding(state: WorkspaceState, input: RemoveScriptSourceBindingInput): WorkspaceState {
+  const binding = (state.scriptSourceBindings ?? []).find((item) => item.id === input.scriptSourceBindingId);
+
+  if (!binding) {
+    throw new Error("Script source binding not found");
+  }
+
+  const record = (state.assetLockRecords ?? []).find((item) => item.id === binding.assetLockRecordId);
+
+  if (!record) {
+    throw new Error("Asset lock record not found");
+  }
+
+  if (record.status === "locked") {
+    throw new Error("Locked asset lock records cannot change source bindings");
+  }
+
+  return {
+    ...state,
+    scriptSourceBindings: (state.scriptSourceBindings ?? []).filter((item) => item.id !== binding.id)
   };
 }
 

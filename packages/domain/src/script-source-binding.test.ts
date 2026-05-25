@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createScriptSourceBinding, extractScriptSourceExcerptSnapshot } from "./script-source-binding";
+import {
+  createScriptSourceBinding,
+  extractScriptSourceExcerptSnapshot,
+  removeScriptSourceBinding
+} from "./script-source-binding";
 import type {
   AssetLockRecord,
   DeliveryPackage,
@@ -181,6 +185,54 @@ describe("script source binding", () => {
       id: "binding-legacy",
       excerptSnapshot: "Mine map appears."
     });
+  });
+
+  it("removes a binding from the workspace", () => {
+    const binding = buildBinding({ id: "binding-remove" });
+    const otherBinding = buildBinding({ id: "binding-keep", startLine: 1, endLine: 1 });
+    const nextState = removeScriptSourceBinding(buildState({ scriptSourceBindings: [binding, otherBinding] }), {
+      scriptSourceBindingId: binding.id
+    });
+
+    expect(nextState.scriptSourceBindings).toEqual([otherBinding]);
+  });
+
+  it("rejects missing bindings or missing asset records on remove", () => {
+    expect(() =>
+      removeScriptSourceBinding(buildState({ scriptSourceBindings: [] }), {
+        scriptSourceBindingId: "missing-binding"
+      })
+    ).toThrow("Script source binding not found");
+    expect(() =>
+      removeScriptSourceBinding(buildState({ assetLockRecords: [], scriptSourceBindings: [buildBinding()] }), {
+        scriptSourceBindingId: "binding-existing"
+      })
+    ).toThrow("Asset lock record not found");
+  });
+
+  it("rejects removing bindings from locked asset records", () => {
+    expect(() =>
+      removeScriptSourceBinding(
+        buildState({
+          assetLockRecords: [{ ...assetRecord, status: "locked" }],
+          scriptSourceBindings: [buildBinding()]
+        }),
+        {
+          scriptSourceBindingId: "binding-existing"
+        }
+      )
+    ).toThrow("Locked asset lock records cannot change source bindings");
+  });
+
+  it("keeps legacy workspaces without scriptSourceBindings stable on remove errors", () => {
+    const legacyState = buildState();
+    delete legacyState.scriptSourceBindings;
+
+    expect(() =>
+      removeScriptSourceBinding(legacyState, {
+        scriptSourceBindingId: "missing-binding"
+      })
+    ).toThrow("Script source binding not found");
   });
 });
 
