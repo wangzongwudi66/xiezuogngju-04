@@ -209,6 +209,86 @@ describe("asset lock record route", () => {
     });
   });
 
+  it("binds and removes script source bindings without trusting client-controlled source fields", async () => {
+    const deliveryPackageId = await createDraft();
+    const createResponse = await POST(jsonRequest(buildCreateBody(deliveryPackageId)));
+    const created = await createResponse.json();
+    const bindResponse = await POST(
+      jsonRequest({
+        action: "bind_source",
+        assetLockRecordId: created.record.id,
+        deliveryPackageId,
+        episodeNo: 1,
+        startLine: 1,
+        endLine: 1,
+        createdByUserId: "user-owner",
+        actorUserId: "user-owner",
+        excerptSnapshot: "client supplied source",
+        viewerRole: "coordinator",
+        assignedEpisodeNos: [99]
+      })
+    );
+    const bound = await bindResponse.json();
+
+    expect(bindResponse.status).toBe(200);
+    expect(bound).toMatchObject({
+      record: {
+        id: created.record.id
+      },
+      sourceBinding: {
+        assetLockRecordId: created.record.id,
+        deliveryPackageId,
+        episodeNo: 1,
+        startLine: 1,
+        endLine: 1,
+        createdByUserId: "user-head-writer"
+      }
+    });
+    expect(bound.sourceBinding.excerptSnapshot).toBeTruthy();
+    expect(bound.sourceBinding.excerptSnapshot).not.toBe("client supplied source");
+
+    const removeResponse = await POST(
+      jsonRequest({
+        action: "remove_source_binding",
+        scriptSourceBindingId: bound.sourceBinding.id,
+        actorUserId: "user-owner"
+      })
+    );
+    const removed = await removeResponse.json();
+
+    expect(removeResponse.status).toBe(200);
+    expect(removed).toMatchObject({
+      record: {
+        id: created.record.id
+      },
+      removedSourceBindingId: bound.sourceBinding.id
+    });
+  });
+
+  it("rejects malformed source binding requests", async () => {
+    const invalidBind = await POST(
+      jsonRequest({
+        action: "bind_source",
+        assetLockRecordId: "asset-lock-1",
+        deliveryPackageId: "delivery-1",
+        episodeNo: 1,
+        startLine: 2,
+        endLine: 1.5
+      })
+    );
+    const invalidRemove = await POST(
+      jsonRequest({
+        action: "remove_source_binding",
+        scriptSourceBindingId: " "
+      })
+    );
+
+    expect(invalidBind.status).toBe(400);
+    await expect(invalidBind.json()).resolves.toEqual({ error: "invalid_asset_lock_record_request" });
+    expect(invalidRemove.status).toBe(400);
+    await expect(invalidRemove.json()).resolves.toEqual({ error: "invalid_asset_lock_record_request" });
+  });
+
   it("prepares demo records for acceptance testing when no published package exists", async () => {
     await login("user-owner");
     const response = await POST(

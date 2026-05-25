@@ -135,6 +135,35 @@ function parseMutationRequest(body: unknown): AssetLockRecordMutationRequest | n
         assetLockRecordId
       };
     }
+    case "bind_source": {
+      const assetLockRecordId = readString(body.assetLockRecordId);
+      const deliveryPackageId = readString(body.deliveryPackageId);
+
+      if (!assetLockRecordId || !deliveryPackageId || !isEpisodeNo(body.episodeNo) || !isEpisodeNo(body.startLine) || !isEpisodeNo(body.endLine)) {
+        return null;
+      }
+
+      return {
+        action: body.action,
+        assetLockRecordId,
+        deliveryPackageId,
+        episodeNo: body.episodeNo,
+        startLine: body.startLine,
+        endLine: body.endLine
+      };
+    }
+    case "remove_source_binding": {
+      const scriptSourceBindingId = readString(body.scriptSourceBindingId);
+
+      if (!scriptSourceBindingId) {
+        return null;
+      }
+
+      return {
+        action: body.action,
+        scriptSourceBindingId
+      };
+    }
     case "prepare_demo": {
       const projectId = readString(body.projectId);
 
