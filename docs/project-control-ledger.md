@@ -17,11 +17,13 @@ Active branch:
 Implemented so far:
 
 - Added domain `removeScriptSourceBinding` helper.
+- Hardened domain `removeScriptSourceBinding` so removal revalidates project, published package, record/package relationship, record episode membership, confirmed package episode, and locked-record state.
 - Added `/api/asset-lock-records` mutation actions:
   - `bind_source`
   - `remove_source_binding`
 - Service derives actor identity from `WorkspaceState.currentUserId`; client `createdByUserId`, `actorUserId`, `excerptSnapshot`, `viewerRole`, and `assignedEpisodeNos` are ignored for source binding writes.
 - Writer source-binding permission is checked against the exact binding `episodeNo`; creator remains read-only.
+- Added service regression coverage proving a writer cannot remove a binding for an out-of-assignment episode even when the same asset record spans an in-scope episode.
 - Locked asset records reject bind/remove source binding.
 - `mutateAssetLockRecord` returns optional `sourceBinding` or `removedSourceBindingId` for UI follow-up without changing existing record/list response behavior.
 - Added projection regression that explicit binding priority is preserved and fallback source matching returns after explicit bindings are removed.
@@ -29,24 +31,24 @@ Implemented so far:
 
 Targeted verification passed:
 
-- `npm.cmd run test -w packages/domain -- script-source-binding`: 1 file / 15 tests.
-- `npm.cmd run test -w apps/web -- app/api/asset-lock-records/service.test.ts`: 1 file / 22 tests.
+- `npm.cmd run test -w packages/domain -- script-source-binding`: 1 file / 16 tests.
+- `npm.cmd run test -w apps/web -- app/api/asset-lock-records/service.test.ts`: 1 file / 23 tests.
 - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/route.test.ts`: 1 file / 11 tests.
 - `npm.cmd run test -w apps/web -- app/asset-decision-timeline/projection.test.ts`: 1 file / 16 tests.
 - `npm.cmd run test -w apps/web -- app/api/asset-decision-timeline/service.test.ts app/api/asset-decision-timeline/route.test.ts`: 2 files / 16 tests.
-- `npm.cmd run test -w apps/web -- asset-lock-records asset-decision-timeline`: 8 files / 81 tests.
+- `npm.cmd run test -w apps/web -- asset-lock-records asset-decision-timeline`: 8 files / 82 tests.
 - `npm.cmd run typecheck`: passed for web and domain.
+- `npm.cmd run typecheck -w apps/web`: passed.
 - `git diff --check`: passed.
+- Full `npm.cmd run verify` passed:
+  - web: 20 files / 162 tests.
+  - domain: 6 files / 63 tests.
+  - Next production build passed.
 
 Next action:
 
-1. Run full `npm.cmd run verify`.
-2. Commit in low-conflict slices if verify passes:
-   - domain helper/tests;
-   - service mutation/tests;
-   - route parser/tests;
-   - projection regression plus ledger update.
-3. After commits, request read-only review before UI binding controls.
+1. Commit the P1 hardening follow-up.
+2. After commit, request read-only review before UI binding controls.
 
 ## API Switch Handoff Snapshot
 

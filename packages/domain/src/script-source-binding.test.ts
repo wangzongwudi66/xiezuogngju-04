@@ -210,6 +210,74 @@ describe("script source binding", () => {
     ).toThrow("Asset lock record not found");
   });
 
+  it("revalidates project, package, record, episode, and package episode on remove", () => {
+    expect(() =>
+      removeScriptSourceBinding(
+        buildState({
+          projects: [],
+          scriptSourceBindings: [buildBinding()]
+        }),
+        {
+          scriptSourceBindingId: "binding-existing"
+        }
+      )
+    ).toThrow("Project not found");
+    expect(() =>
+      removeScriptSourceBinding(
+        buildState({
+          deliveryPackages: [],
+          scriptSourceBindings: [buildBinding()]
+        }),
+        {
+          scriptSourceBindingId: "binding-existing"
+        }
+      )
+    ).toThrow("Delivery package not found");
+    expect(() =>
+      removeScriptSourceBinding(
+        buildState({
+          deliveryPackages: [{ ...publishedPackage, status: "draft" }],
+          scriptSourceBindings: [buildBinding()]
+        }),
+        {
+          scriptSourceBindingId: "binding-existing"
+        }
+      )
+    ).toThrow("Delivery package must be published");
+    expect(() =>
+      removeScriptSourceBinding(
+        buildState({
+          assetLockRecords: [{ ...assetRecord, deliveryPackageId: "delivery-other" }],
+          scriptSourceBindings: [buildBinding()]
+        }),
+        {
+          scriptSourceBindingId: "binding-existing"
+        }
+      )
+    ).toThrow("Asset lock record package mismatch");
+    expect(() =>
+      removeScriptSourceBinding(
+        buildState({
+          scriptSourceBindings: [buildBinding({ episodeNo: 3 })]
+        }),
+        {
+          scriptSourceBindingId: "binding-existing"
+        }
+      )
+    ).toThrow("Source binding episode must intersect the asset lock record");
+    expect(() =>
+      removeScriptSourceBinding(
+        buildState({
+          deliveryPackageEpisodes: [{ ...packageEpisode, isConfirmedChange: false }],
+          scriptSourceBindings: [buildBinding()]
+        }),
+        {
+          scriptSourceBindingId: "binding-existing"
+        }
+      )
+    ).toThrow("Delivery package episode must be confirmed");
+  });
+
   it("rejects removing bindings from locked asset records", () => {
     expect(() =>
       removeScriptSourceBinding(

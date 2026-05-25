@@ -350,6 +350,30 @@ describe("asset lock record service", () => {
     );
   });
 
+  it("checks writer remove permissions against the exact binding episode", async () => {
+    const deliveryPackageId = await createDraftForRange(1, 21);
+    const record = (await createAssetRecord(deliveryPackageId, "Wide Range Asset", [1, 21])).record;
+    const inScopeBinding = await bindSource(record.id, deliveryPackageId, { episodeNo: 1, startLine: 1, endLine: 1 });
+    await login("user-head-writer");
+    const outOfScopeBinding = await bindSource(record.id, deliveryPackageId, { episodeNo: 21, startLine: 1, endLine: 1 });
+
+    await login("user-writer");
+    await expect(
+      mutateAssetLockRecord({
+        action: "remove_source_binding",
+        scriptSourceBindingId: outOfScopeBinding.sourceBinding?.id ?? ""
+      })
+    ).rejects.toThrow("asset_lock_episode_scope_forbidden");
+    await expect(
+      mutateAssetLockRecord({
+        action: "remove_source_binding",
+        scriptSourceBindingId: inScopeBinding.sourceBinding?.id ?? ""
+      })
+    ).resolves.toMatchObject({
+      removedSourceBindingId: inScopeBinding.sourceBinding?.id
+    });
+  });
+
   it("rejects creators and locked records for source binding mutations", async () => {
     const deliveryPackageId = await createDraft();
     const record = (await createAssetRecord(deliveryPackageId)).record;

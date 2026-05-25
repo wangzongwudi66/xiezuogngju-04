@@ -104,14 +104,58 @@ export function removeScriptSourceBinding(state: WorkspaceState, input: RemoveSc
     throw new Error("Script source binding not found");
   }
 
+  const project = state.projects.find((item) => item.id === binding.projectId);
+
+  if (!project) {
+    throw new Error("Project not found");
+  }
+
+  const deliveryPackage = state.deliveryPackages.find((item) => item.id === binding.deliveryPackageId);
+
+  if (!deliveryPackage) {
+    throw new Error("Delivery package not found");
+  }
+
+  if (deliveryPackage.projectId !== binding.projectId) {
+    throw new Error("Delivery package project mismatch");
+  }
+
+  if (deliveryPackage.status !== "published") {
+    throw new Error("Delivery package must be published");
+  }
+
   const record = (state.assetLockRecords ?? []).find((item) => item.id === binding.assetLockRecordId);
 
   if (!record) {
     throw new Error("Asset lock record not found");
   }
 
+  if (record.projectId !== binding.projectId) {
+    throw new Error("Asset lock record project mismatch");
+  }
+
+  if (record.deliveryPackageId !== binding.deliveryPackageId) {
+    throw new Error("Asset lock record package mismatch");
+  }
+
   if (record.status === "locked") {
     throw new Error("Locked asset lock records cannot change source bindings");
+  }
+
+  if (!record.episodeNos.includes(binding.episodeNo)) {
+    throw new Error("Source binding episode must intersect the asset lock record");
+  }
+
+  const packageEpisode = state.deliveryPackageEpisodes.find(
+    (item) => item.deliveryPackageId === binding.deliveryPackageId && item.episodeNo === binding.episodeNo
+  );
+
+  if (!packageEpisode) {
+    throw new Error("Delivery package episode not found");
+  }
+
+  if (!packageEpisode.isConfirmedChange) {
+    throw new Error("Delivery package episode must be confirmed");
   }
 
   return {
