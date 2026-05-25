@@ -1,15 +1,23 @@
 import type { AssetLockRecordMutationRequest, AssetLockRecordSummary } from "../api/asset-lock-records/service";
-import type { AssetLockRecord } from "@aigc/domain";
+import type { AssetLockRecord, ScriptSourceBinding } from "@aigc/domain";
 
 export type AssetLockRecordListResponse = {
   records: AssetLockRecord[];
+  sourceBindings: ScriptSourceBinding[];
   summary: AssetLockRecordSummary;
 };
 
 export type AssetLockRecordMutationInput = AssetLockRecordMutationRequest;
+export type AssetLockRecordMutationResponse = AssetLockRecordListResponse & {
+  record: AssetLockRecord;
+  sourceBinding?: ScriptSourceBinding;
+  removedSourceBindingId?: string;
+};
 
 export type AssetLockCreateDraft = Omit<Extract<AssetLockRecordMutationRequest, { action: "create" }>, "action" | "projectId" | "createdByUserId">;
 export type AssetLockPrepareDemoInput = Omit<Extract<AssetLockRecordMutationRequest, { action: "prepare_demo" }>, "action" | "actorUserId">;
+export type AssetSourceBindInput = Omit<Extract<AssetLockRecordMutationRequest, { action: "bind_source" }>, "action">;
+export type AssetSourceRemoveInput = Omit<Extract<AssetLockRecordMutationRequest, { action: "remove_source_binding" }>, "action">;
 
 export type { AssetLockRecordSummary };
 
@@ -20,10 +28,10 @@ export async function fetchAssetLockRecords(projectId: string): Promise<AssetLoc
     throw new Error(await readAssetLockApiError(response, "asset_lock_records_request_failed"));
   }
 
-  return (await response.json()) as AssetLockRecordListResponse;
+  return withDefaultSourceBindings((await response.json()) as AssetLockRecordListResponse);
 }
 
-export async function mutateAssetLockRecord(input: AssetLockRecordMutationInput): Promise<AssetLockRecordListResponse> {
+export async function mutateAssetLockRecord(input: AssetLockRecordMutationInput): Promise<AssetLockRecordMutationResponse> {
   const response = await fetch("/api/asset-lock-records", {
     method: "POST",
     headers: {
@@ -36,12 +44,33 @@ export async function mutateAssetLockRecord(input: AssetLockRecordMutationInput)
     throw new Error(await readAssetLockApiError(response, "asset_lock_record_mutation_request_failed"));
   }
 
-  return (await response.json()) as AssetLockRecordListResponse;
+  const payload = (await response.json()) as AssetLockRecordMutationResponse;
+
+  return {
+    ...withDefaultSourceBindings(payload),
+    record: payload.record,
+    sourceBinding: payload.sourceBinding,
+    removedSourceBindingId: payload.removedSourceBindingId
+  };
 }
 
 export async function prepareAssetLockDemo(input: AssetLockPrepareDemoInput): Promise<AssetLockRecordListResponse> {
   return mutateAssetLockRecord({
     action: "prepare_demo",
+    ...input
+  });
+}
+
+export async function bindAssetSource(input: AssetSourceBindInput): Promise<AssetLockRecordMutationResponse> {
+  return mutateAssetLockRecord({
+    action: "bind_source",
+    ...input
+  });
+}
+
+export async function removeAssetSourceBinding(input: AssetSourceRemoveInput): Promise<AssetLockRecordMutationResponse> {
+  return mutateAssetLockRecord({
+    action: "remove_source_binding",
     ...input
   });
 }
@@ -65,6 +94,22 @@ export function formatAssetLockError(error: unknown) {
     return "没有找到这条资产定版记录，请刷新后重试。";
   }
 
+  if (message.includes("asset_lock_action_forbidden") || message.includes("asset_lock_episode_scope_forbidden")) {
+    return "当前角色没有权限修改这条剧本来源绑定。";
+  }
+
+  if (message.includes("Script source binding already exists")) {
+    return "这段剧本来源已经绑定过了。";
+  }
+
+  if (
+    message.includes("Line range") ||
+    message.includes("Source excerpt cannot be empty") ||
+    message.includes("Delivery package episode")
+  ) {
+    return "剧本来源行号无效，请确认集数和起止行号。";
+  }
+
   if (message.includes("资产已定版")) {
     return "这条资产已定版，不能继续修改。";
   }
@@ -85,6 +130,13 @@ export function formatAssetLockError(error: unknown) {
   }
 
   return "";
+}
+
+function withDefaultSourceBindings<T extends AssetLockRecordListResponse>(response: T): T {
+  return {
+    ...response,
+    sourceBindings: response.sourceBindings ?? []
+  };
 }
 
 async function readAssetLockApiError(response: Response, fallback: string) {

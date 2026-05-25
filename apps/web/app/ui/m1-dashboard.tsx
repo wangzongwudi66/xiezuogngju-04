@@ -73,12 +73,20 @@ import type {
   EpisodeProductionStatus,
   PermissionKey,
   ProjectRole,
+  ScriptSourceBinding,
   WordDeliveryIssue,
   WorkspaceState
 } from "@aigc/domain";
 import { buildTodayTasks } from "./dashboard-tasks";
-import { fetchAssetLockRecords, formatAssetLockError, mutateAssetLockRecord, prepareAssetLockDemo } from "./asset-lock-api";
-import type { AssetLockCreateDraft, AssetLockRecordSummary } from "./asset-lock-api";
+import {
+  bindAssetSource,
+  fetchAssetLockRecords,
+  formatAssetLockError,
+  mutateAssetLockRecord,
+  prepareAssetLockDemo,
+  removeAssetSourceBinding
+} from "./asset-lock-api";
+import type { AssetLockCreateDraft, AssetLockRecordSummary, AssetSourceBindInput, AssetSourceRemoveInput } from "./asset-lock-api";
 import { canRetryDeliveryImportJob, formatDeliveryImportError } from "./delivery-import-feedback";
 import {
   canAccessAssetWorkflowRole,
@@ -391,6 +399,7 @@ export function M1Dashboard() {
   const [deliveryImportJobs, setDeliveryImportJobs] = useState<DeliveryImportJob[]>([]);
   const [serverDeliveryPackageIds, setServerDeliveryPackageIds] = useState<string[]>([]);
   const [assetLockRecords, setAssetLockRecords] = useState<AssetLockRecord[]>([]);
+  const [assetSourceBindings, setAssetSourceBindings] = useState<ScriptSourceBinding[]>([]);
   const [assetLockSummary, setAssetLockSummary] = useState<AssetLockRecordSummary | null>(null);
   const [assetLockError, setAssetLockError] = useState<string | null>(null);
   const [assetLockLoading, setAssetLockLoading] = useState(false);
@@ -409,6 +418,7 @@ export function M1Dashboard() {
       const persistedState = normalizeWorkspaceState(persistedWorkspace.state);
       setState(persistedState);
       setAssetLockRecords(persistedState.assetLockRecords ?? []);
+      setAssetSourceBindings(persistedState.scriptSourceBindings ?? []);
       setDeliveryParseIssuesByPackageId(persistedWorkspace.deliveryParseIssuesByPackageId);
       setDeliveryImportJobs(persistedWorkspace.deliveryImportJobs);
       setSelectedProjectId(persistedWorkspace.selectedProjectId ?? seedWorkspace.projects[0].id);
@@ -596,6 +606,9 @@ export function M1Dashboard() {
   const projectAssetLockRecords = mergeById(state.assetLockRecords ?? [], assetLockRecords).filter(
     (record) => record.projectId === selectedProject.id
   );
+  const projectAssetSourceBindings = mergeById(state.scriptSourceBindings ?? [], assetSourceBindings).filter(
+    (binding) => binding.projectId === selectedProject.id
+  );
   const pendingDeliveryPackages = deliveryPackageDetails.filter((deliveryPackage) => deliveryPackage.status === "pending_review");
   const recentPublishedDeliveryPackages = deliveryPackageDetails
     .filter((deliveryPackage) => deliveryPackage.status === "published")
@@ -621,6 +634,7 @@ export function M1Dashboard() {
     setDeliveryImportJobs([]);
     setDeliveryParseIssuesByPackageId({});
     setAssetLockRecords(next.assetLockRecords ?? []);
+    setAssetSourceBindings(next.scriptSourceBindings ?? []);
     setAssetLockSummary(null);
     setAssetLockError(null);
     setWordParseFeedback(null);
@@ -662,13 +676,19 @@ export function M1Dashboard() {
     setDeliveryImportJobs((items) => mergeDeliveryImportJobs(items, [job]));
   }
 
-  function applyAssetLockResponse(response: { records: AssetLockRecord[]; summary: AssetLockRecordSummary }) {
+  function applyAssetLockResponse(response: {
+    records: AssetLockRecord[];
+    sourceBindings?: ScriptSourceBinding[];
+    summary: AssetLockRecordSummary;
+  }) {
     setAssetLockRecords((current) => mergeProjectScopedItems(current, response.records, selectedProjectId));
+    setAssetSourceBindings((current) => mergeProjectScopedItems(current, response.sourceBindings ?? [], selectedProjectId));
     setAssetLockSummary(response.summary);
     setAssetLockError(null);
     setState((current) => ({
       ...current,
-      assetLockRecords: mergeProjectScopedItems(current.assetLockRecords ?? [], response.records, selectedProjectId)
+      assetLockRecords: mergeProjectScopedItems(current.assetLockRecords ?? [], response.records, selectedProjectId),
+      scriptSourceBindings: mergeProjectScopedItems(current.scriptSourceBindings ?? [], response.sourceBindings ?? [], selectedProjectId)
     }));
   }
 
@@ -700,6 +720,42 @@ export function M1Dashboard() {
       const message = formatAssetLockError(error) || "资产定版操作失败，请稍后重试。";
       setAssetLockError(message);
       setActionMessage({ tone: "error", text: message });
+    } finally {
+      setAssetLockMutating(false);
+    }
+  }
+
+  async function bindAssetSourceFromServer(input: AssetSourceBindInput) {
+    setAssetLockMutating(true);
+    setAssetLockError(null);
+
+    try {
+      const response = await bindAssetSource(input);
+      applyAssetLockResponse(response);
+      setActionMessage({ tone: "success", text: "剧本来源绑定已更新。" });
+    } catch (error) {
+      const message = formatAssetLockError(error) || "剧本来源绑定失败，请检查集数和行号后重试。";
+      setAssetLockError(message);
+      setActionMessage({ tone: "error", text: message });
+      throw new Error(message);
+    } finally {
+      setAssetLockMutating(false);
+    }
+  }
+
+  async function removeAssetSourceBindingFromServer(input: AssetSourceRemoveInput) {
+    setAssetLockMutating(true);
+    setAssetLockError(null);
+
+    try {
+      const response = await removeAssetSourceBinding(input);
+      applyAssetLockResponse(response);
+      setActionMessage({ tone: "success", text: "剧本来源绑定已移除。" });
+    } catch (error) {
+      const message = formatAssetLockError(error) || "剧本来源绑定移除失败，请稍后重试。";
+      setAssetLockError(message);
+      setActionMessage({ tone: "error", text: message });
+      throw new Error(message);
     } finally {
       setAssetLockMutating(false);
     }
@@ -811,9 +867,11 @@ export function M1Dashboard() {
       episodeCurrents: mergeById(current.episodeCurrents, snapshot.state.episodeCurrents),
       assetLockRecords: mergeById(current.assetLockRecords ?? [], snapshot.state.assetLockRecords ?? []),
       assetAttachments: mergeById(current.assetAttachments ?? [], snapshot.state.assetAttachments ?? []),
+      scriptSourceBindings: mergeById(current.scriptSourceBindings ?? [], snapshot.state.scriptSourceBindings ?? []),
       notifications: mergeById(current.notifications, snapshot.state.notifications)
     }));
     setAssetLockRecords((current) => mergeById(current, snapshot.state.assetLockRecords ?? []));
+    setAssetSourceBindings((current) => mergeById(current, snapshot.state.scriptSourceBindings ?? []));
   }
 
   async function refreshDeliveryWorkspaceFromServer() {
@@ -1355,6 +1413,7 @@ export function M1Dashboard() {
               assetLockMutating={assetLockMutating}
               assetLockRecords={projectAssetLockRecords}
               assetLockSummary={assetLockSummary}
+              assetSourceBindings={projectAssetSourceBindings}
               assignedEpisodeNos={myEpisodes.map((episode) => episode.episodeNo)}
               assignmentSummary={assignmentSummary}
               assetTimelineSessionReady={syncedServerUserId === currentUserId}
@@ -1373,11 +1432,13 @@ export function M1Dashboard() {
               handleRejectDelivery={handleRejectDelivery}
               handleRetryDeliveryImportJob={handleRetryDeliveryImportJob}
               handleCreateAssetLockRecord={handleCreateAssetLockRecord}
+              handleBindAssetSource={bindAssetSourceFromServer}
               handleFinalLockAsset={handleFinalLockAsset}
               handleMarkAssetLockDispute={handleMarkAssetLockDispute}
               handleMarkAssetLockNeedsInfo={handleMarkAssetLockNeedsInfo}
               handlePrepareAssetLockDemo={handlePrepareAssetLockDemo}
               handleProductionConfirmAssetLock={handleProductionConfirmAssetLock}
+              handleRemoveAssetSourceBinding={removeAssetSourceBindingFromServer}
               handleWriterConfirmAssetLock={handleWriterConfirmAssetLock}
               handleSubmitDeliveryForReview={handleSubmitDeliveryForReview}
               handleUpdateConfirmedEpisode={handleUpdateConfirmedEpisode}
@@ -1980,6 +2041,7 @@ function ModuleWorkbench({
   assetLockMutating,
   assetLockRecords,
   assetLockSummary,
+  assetSourceBindings,
   assetTimelineSessionReady,
   assignedEpisodeNos,
   assignmentSummary,
@@ -1998,11 +2060,13 @@ function ModuleWorkbench({
   handleRejectDelivery,
   handleRetryDeliveryImportJob,
   handleCreateAssetLockRecord,
+  handleBindAssetSource,
   handleFinalLockAsset,
   handleMarkAssetLockDispute,
   handleMarkAssetLockNeedsInfo,
   handlePrepareAssetLockDemo,
   handleProductionConfirmAssetLock,
+  handleRemoveAssetSourceBinding,
   handleWriterConfirmAssetLock,
   handleSubmitDeliveryForReview,
   handleUpdateConfirmedEpisode,
@@ -2036,6 +2100,7 @@ function ModuleWorkbench({
   assetLockMutating: boolean;
   assetLockRecords: AssetLockRecord[];
   assetLockSummary: AssetLockRecordSummary | null;
+  assetSourceBindings: ScriptSourceBinding[];
   assetTimelineSessionReady: boolean;
   assignedEpisodeNos: number[];
   assignmentSummary: AssignmentSummaryItem[];
@@ -2054,11 +2119,13 @@ function ModuleWorkbench({
   handleRejectDelivery: (deliveryPackageId: string) => void;
   handleRetryDeliveryImportJob: (jobId: string) => void;
   handleCreateAssetLockRecord: (draft: AssetLockCreateDraft) => Promise<void>;
+  handleBindAssetSource: (input: AssetSourceBindInput) => Promise<void>;
   handleFinalLockAsset: (assetLockRecordId: string) => Promise<void>;
   handleMarkAssetLockDispute: (assetLockRecordId: string, disputeReason: string) => Promise<void>;
   handleMarkAssetLockNeedsInfo: (assetLockRecordId: string, missingInfo: string) => Promise<void>;
   handlePrepareAssetLockDemo: () => Promise<void>;
   handleProductionConfirmAssetLock: (assetLockRecordId: string) => Promise<void>;
+  handleRemoveAssetSourceBinding: (input: AssetSourceRemoveInput) => Promise<void>;
   handleWriterConfirmAssetLock: (assetLockRecordId: string) => Promise<void>;
   handleSubmitDeliveryForReview: (deliveryPackageId: string) => void;
   handleUpdateConfirmedEpisode: (deliveryPackageId: string, episodeNo: number, checked: boolean) => void;
@@ -2244,6 +2311,7 @@ function ModuleWorkbench({
         errorText={assetLockError}
         isLoading={assetLockLoading}
         isMutating={assetLockMutating}
+        onBindSource={handleBindAssetSource}
         onCreateRecord={handleCreateAssetLockRecord}
         onFinalLock={handleFinalLockAsset}
         onMarkDispute={handleMarkAssetLockDispute}
@@ -2253,10 +2321,12 @@ function ModuleWorkbench({
         onPrepareDemo={handlePrepareAssetLockDemo}
         onProductionConfirm={handleProductionConfirmAssetLock}
         onRefresh={refreshAssetLockRecordsFromServer}
+        onRemoveSourceBinding={handleRemoveAssetSourceBinding}
         onWriterConfirm={handleWriterConfirmAssetLock}
         projectName={projectName}
         records={assetLockRecords}
         serverSummary={assetLockSummary}
+        sourceBindings={assetSourceBindings}
       />
     );
   }
@@ -3439,6 +3509,7 @@ function normalizeWorkspaceState(state: WorkspaceState): WorkspaceState {
   return {
     ...state,
     assetLockRecords: state.assetLockRecords ?? [],
+    scriptSourceBindings: state.scriptSourceBindings ?? [],
     assetAttachments: state.assetAttachments ?? []
   };
 }

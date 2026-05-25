@@ -41,13 +41,17 @@ import type {
   AssetRisk,
   AssetType
 } from "./asset-lock-workbench-data";
-import type { AssetAttachment, AssetAttachmentType, AssetLockRecord } from "@aigc/domain";
-import type { AssetLockCreateDraft, AssetLockRecordSummary } from "./asset-lock-api";
+import type { AssetAttachment, AssetAttachmentType, AssetLockRecord, ScriptSourceBinding } from "@aigc/domain";
+import type { AssetLockCreateDraft, AssetLockRecordSummary, AssetSourceBindInput, AssetSourceRemoveInput } from "./asset-lock-api";
+import { formatAssetLockError } from "./asset-lock-api";
 import {
   fetchAssetLockAttachments,
   formatAssetAttachmentError,
   uploadAssetLockAttachment
 } from "./asset-lock-attachment-api";
+import { AssetSourceBindingPanel } from "./asset-source-binding-panel";
+import { createDefaultSourceBindingDraft, getSourceBindingsForRecord, normalizeSourceBindingDraft } from "./asset-source-binding-data";
+import type { AssetSourceBindingDraft } from "./asset-source-binding-data";
 
 type AssetLockPackage = {
   id: string;
@@ -117,6 +121,7 @@ export function AssetLockWorkbench({
   isMutating,
   onCreateRecord,
   onFinalLock,
+  onBindSource,
   onMarkDispute,
   onMarkNeedsInfo,
   deliveryPackages,
@@ -124,10 +129,12 @@ export function AssetLockWorkbench({
   onPrepareDemo,
   onProductionConfirm,
   onRefresh,
+  onRemoveSourceBinding,
   onWriterConfirm,
   projectName,
   records,
-  serverSummary
+  serverSummary,
+  sourceBindings
 }: {
   activeDeliveryPackage: AssetLockPackage | null;
   actorRole: AssetLockActorRole;
@@ -136,6 +143,7 @@ export function AssetLockWorkbench({
   isLoading?: boolean;
   isMutating?: boolean;
   onCreateRecord: (draft: AssetLockCreateDraft) => Promise<void>;
+  onBindSource: (input: AssetSourceBindInput) => Promise<void>;
   onFinalLock: (assetLockRecordId: string) => Promise<void>;
   onMarkDispute: (assetLockRecordId: string, disputeReason: string) => Promise<void>;
   onMarkNeedsInfo: (assetLockRecordId: string, missingInfo: string) => Promise<void>;
@@ -144,10 +152,12 @@ export function AssetLockWorkbench({
   onPrepareDemo: () => Promise<void>;
   onProductionConfirm: (assetLockRecordId: string) => Promise<void>;
   onRefresh: () => Promise<void>;
+  onRemoveSourceBinding: (input: AssetSourceRemoveInput) => Promise<void>;
   onWriterConfirm: (assetLockRecordId: string) => Promise<void>;
   projectName: string;
   records: AssetLockRecord[];
   serverSummary: AssetLockRecordSummary | null;
+  sourceBindings: ScriptSourceBinding[];
 }) {
   const [filters, setFilters] = useState<AssetLockFilters>(emptyFilters);
   const items = useMemo(() => toAssetLockChangeItems(records), [records]);
@@ -161,6 +171,10 @@ export function AssetLockWorkbench({
   const [attachmentLoadingRecordId, setAttachmentLoadingRecordId] = useState<string | null>(null);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [sourceBindingDraft, setSourceBindingDraft] = useState<AssetSourceBindingDraft>(() => createDefaultSourceBindingDraft(null));
+  const [sourceBindingBusy, setSourceBindingBusy] = useState(false);
+  const [sourceBindingError, setSourceBindingError] = useState<string | null>(null);
+  const [sourceBindingSuccess, setSourceBindingSuccess] = useState<string | null>(null);
   const publishedPackages = deliveryPackages.filter((deliveryPackage) => deliveryPackage.status === "published");
   const packageForView =
     activeDeliveryPackage?.status === "published"
@@ -169,6 +183,7 @@ export function AssetLockWorkbench({
   const filteredItems = useMemo(() => filterAssetChanges(items, filters), [filters, items]);
   const summary = useMemo(() => summarizeAssetLock(items), [items]);
   const selectedAsset = items.find((item) => item.id === selectedAssetId) ?? filteredItems[0] ?? items[0];
+  const selectedRecord = selectedAsset ? records.find((record) => record.id === selectedAsset.id) ?? null : null;
   const episodeOptions = Array.from(new Set(items.flatMap((item) => item.episodeNos))).sort((a, b) => a - b);
   const ownerOptions = Array.from(new Set(items.map((item) => item.owner))).sort((a, b) => a.localeCompare(b, "zh-CN"));
   const selectedPackageEpisodes = packageForView?.confirmedEpisodeNos.length
@@ -186,11 +201,18 @@ export function AssetLockWorkbench({
   const selectedAssetCanFinalLock = Boolean(selectedAsset && selectedAsset.reviewStatus !== "locked" && summary.canLock);
   const selectedAssetIsLocked = !canUploadAssetAttachmentToRecord(selectedAsset);
   const selectedAssetAttachments = selectedAsset ? attachmentsByRecordId[selectedAsset.id] ?? [] : [];
+  const selectedSourceBindings = getSourceBindingsForRecord(selectedRecord?.id, sourceBindings);
 
   useEffect(() => {
     setSelectedAssetId((current) => (items.some((item) => item.id === current) ? current : items[0]?.id ?? ""));
     setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id && item.reviewStatus !== "locked")));
   }, [items]);
+
+  useEffect(() => {
+    setSourceBindingDraft(createDefaultSourceBindingDraft(selectedRecord));
+    setSourceBindingError(null);
+    setSourceBindingSuccess(null);
+  }, [selectedRecord?.id]);
 
   useEffect(() => {
     if (!selectedAsset) {
@@ -285,6 +307,48 @@ export function AssetLockWorkbench({
       setAttachmentError(formatAssetAttachmentError(error));
     } finally {
       setAttachmentUploading(false);
+    }
+  }
+
+  async function handleBindSource() {
+    if (!selectedRecord) {
+      return;
+    }
+
+    const nextDraft = normalizeSourceBindingDraft(sourceBindingDraft, selectedRecord);
+    setSourceBindingDraft(nextDraft);
+    setSourceBindingBusy(true);
+    setSourceBindingError(null);
+    setSourceBindingSuccess(null);
+
+    try {
+      await onBindSource({
+        assetLockRecordId: selectedRecord.id,
+        deliveryPackageId: selectedRecord.deliveryPackageId,
+        episodeNo: nextDraft.episodeNo,
+        startLine: nextDraft.startLine,
+        endLine: nextDraft.endLine
+      });
+      setSourceBindingSuccess("剧本来源绑定已更新。");
+    } catch (error) {
+      setSourceBindingError(formatAssetLockError(error) || "剧本来源绑定失败，请检查集数和行号后重试。");
+    } finally {
+      setSourceBindingBusy(false);
+    }
+  }
+
+  async function handleRemoveSourceBinding(scriptSourceBindingId: string) {
+    setSourceBindingBusy(true);
+    setSourceBindingError(null);
+    setSourceBindingSuccess(null);
+
+    try {
+      await onRemoveSourceBinding({ scriptSourceBindingId });
+      setSourceBindingSuccess("剧本来源绑定已移除。");
+    } catch (error) {
+      setSourceBindingError(formatAssetLockError(error) || "剧本来源绑定移除失败，请稍后重试。");
+    } finally {
+      setSourceBindingBusy(false);
     }
   }
 
@@ -556,6 +620,21 @@ export function AssetLockWorkbench({
             <DetailBlock icon={Flag} title="编剧说明" body={selectedAsset.writerNote} />
             <DetailBlock icon={ShieldCheck} title="制作备注" body={selectedAsset.productionNote} />
             <DetailBlock icon={Layers3} title="来源段落" body={selectedAsset.sourceParagraph} />
+            {selectedRecord ? (
+              <AssetSourceBindingPanel
+                actorRole={actorRole}
+                bindingError={sourceBindingError}
+                bindingSuccess={sourceBindingSuccess}
+                bindings={selectedSourceBindings}
+                draft={sourceBindingDraft}
+                isBusy={sourceBindingBusy}
+                isLocked={selectedAssetIsLocked}
+                onBind={() => void handleBindSource()}
+                onDraftChange={setSourceBindingDraft}
+                onRemove={(scriptSourceBindingId) => void handleRemoveSourceBinding(scriptSourceBindingId)}
+                record={selectedRecord}
+              />
+            ) : null}
 
             <div className="discussion-box">
               <div>

@@ -3,6 +3,54 @@
 This file is the handoff source for the main control conversation after context compression.
 Read it first before making scheduling, branch, or merge decisions.
 
+## Source Binding UI Progress
+
+Timestamp: `2026-05-25 23:50:00 +08:00`.
+
+Active branch:
+
+- Branch: `codex/source-binding-ui`.
+- Baseline main: `58071eb Record source binding mutation merge` plus CSS-only `d7355cc Stabilize narrow asset UI layout`.
+- Current committed UI-branch base: `91d6687 Expose source bindings with asset lock records`.
+- Do not push unless the user explicitly asks.
+
+External checks:
+
+- 09 API/browser smoke passed with no P0/P1/P2/P3.
+- Confirmed `bind_source` / `remove_source_binding` work through `POST /api/asset-lock-records`.
+- Confirmed spoofed identity/source fields are ignored, writer scope uses exact `binding.episodeNo`, creator is forbidden, locked records reject writes, and `/api/asset-decision-timeline` remains GET-only.
+- 10 UI direction: first write entry belongs in `asset-lock-workbench` detail panel near source paragraphs; asset timeline remains read-only.
+- 11 CSS boundary: avoid `asset-decision-timeline.tsx` and broad CSS work while source-binding UI is in flight.
+
+Implemented in current uncommitted slice:
+
+- `asset-lock-api.ts` now exposes `bindAssetSource` / `removeAssetSourceBinding`, source-binding response types, default `sourceBindings: []` for legacy responses, and Chinese error mapping for source-binding failures.
+- Added `asset-lock-api.test.ts`.
+- Added pure source-binding helper `asset-source-binding-data.ts` and tests.
+- Added `asset-source-binding-panel.tsx` with existing-binding display, episode/start/end inputs, creator read-only copy, locked disabled copy, and remove buttons.
+- Wired the panel into `asset-lock-workbench.tsx` only in the selected asset detail panel.
+- Wired `m1-dashboard.tsx` narrowly for state/prop flow: `scriptSourceBindings` from API responses and workspace snapshots, plus bind/remove callbacks. No asset timeline write controls were added.
+
+Verification passed in current uncommitted slice:
+
+- `npm.cmd run test -w apps/web -- asset-lock-api asset-source-binding-data`: 2 files / 8 tests.
+- `npm.cmd run typecheck -w apps/web`: passed.
+- `npm.cmd run test -w apps/web -- asset-lock-workbench asset-lock-api asset-source-binding-data m1-dashboard asset-lock-records`: 6 files / 69 tests.
+- `git diff --check`: passed.
+- `npm.cmd run test -w apps/web -- asset-lock-records asset-decision-timeline`: 8 files / 83 tests.
+- `npm.cmd run test -w apps/web`: 22 files / 171 tests.
+- `npm.cmd run typecheck -w apps/web`: passed.
+
+Browser note:
+
+- In-app browser smoke against `http://localhost:3000/` was attempted but blocked by the browser surface with `net::ERR_BLOCKED_BY_CLIENT`; do not count browser visual QA as complete yet.
+
+Next action:
+
+1. Commit this UI slice if the worktree review is clean.
+2. Ask 12/13 read-only reviews to inspect UI scope and source-binding UX.
+3. After review, run browser visual QA again or use an approved fallback if the in-app browser remains blocked.
+
 ## Script Source Binding Mutation Progress
 
 Timestamp: `2026-05-25 22:15:31 +08:00`.
