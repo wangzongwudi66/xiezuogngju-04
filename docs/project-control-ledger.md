@@ -6,16 +6,19 @@ Read it first before making scheduling, branch, or merge decisions.
 ## API Switch Handoff Snapshot
 
 Timestamp: `2026-05-25 21:17:03 +08:00`.
+Updated after merge: `2026-05-25`.
 
 If the current conversation is lost, start here:
 
-- Current branch: `codex/script-source-binding-service`.
-- Current HEAD: `a3e417d Pass source bindings into timeline service`.
-- Worktree at last check: clean after commit.
-- Branch relation at last check: this branch is one commit ahead of `main` and can be fast-forward merged after review.
+- Current branch: `main`.
+- Current HEAD: `9491ee6 Add API switch handoff snapshot`.
+- Merged branch: `codex/script-source-binding-service`.
+- Functional service commit: `a3e417d Pass source bindings into timeline service`.
+- Handoff-only commit: `9491ee6 Add API switch handoff snapshot`.
+- Worktree at last check: clean after fast-forward merge.
 - Do not push unless the user explicitly asks.
 
-Current branch includes:
+Current main includes:
 
 - Projection dirty-binding defense: explicit `ScriptSourceBinding` is ignored unless its `episodeNo` belongs to the target `AssetLockRecord.episodeNos`.
 - `/api/asset-decision-timeline` service read-only plumbing: passes `state.scriptSourceBindings ?? []` into `buildAssetTimelineProjection`.
@@ -31,13 +34,16 @@ Verification already run on this branch:
   - domain: 6 files / 58 tests.
   - Next production build passed.
 
+Completed action:
+
+1. 03/04 read-only reviews reported no P0/P1 and approved merge.
+2. Fast-forward merged `codex/script-source-binding-service` into `main`.
+3. Updated this ledger with the merge result.
+
 Recommended next action:
 
-1. Ask 01/02 for a quick read-only review of `a3e417d`.
-2. If no P0/P1, run `git status --short --branch`, `git rev-list --left-right --count main...HEAD`, and optionally `npm.cmd run verify`.
-3. Fast-forward merge `codex/script-source-binding-service` into `main`.
-4. Update this ledger with the merge result.
-5. Only after that, plan the next branch for narrow `asset-lock-records` source-binding mutations.
+1. Run/confirm post-merge `npm.cmd run verify`.
+2. Only after that, plan the next branch for narrow `asset-lock-records` source-binding mutations.
 
 01 read-only review prompt:
 
@@ -168,7 +174,7 @@ Next implementation sequence after documentation review:
 
 1. Add domain-only `ScriptSourceBinding` helper and tests. Done on this branch after 01/02 review.
 2. Let timeline projection consume explicit bindings while preserving asset-name fallback. Done on this branch.
-3. Add read-only service plumbing for optional legacy-safe workspace bindings. In progress on `codex/script-source-binding-service`.
+3. Add read-only service plumbing for optional legacy-safe workspace bindings. Done on `codex/script-source-binding-service` and merged into `main`.
 4. Only then consider narrow `asset-lock-records` actions for bind/remove source.
 
 01/02 review decisions applied:
@@ -197,12 +203,19 @@ Verification after service read-only plumbing step:
 - Projection dirty-binding defense: `filterVisibleScriptSourceBindings` now requires `binding.episodeNo` to be included in the target `AssetLockRecord.episodeNos`.
 - `/api/asset-decision-timeline` service now passes `state.scriptSourceBindings ?? []` into the projection.
 - Route remains read-only and still ignores client-provided `viewerRole`, `viewerUserId`, and `assignedEpisodeNos`.
+- 03 product/permission read-only review:可合并，无 P0/P1/P2/P3；confirmed route is GET-only/read-only and mutation must later reject client-controlled identity/scope.
+- 04 engineering/test read-only review:可合并，无 P0/P1/P2；P3 only noted the handoff snapshot HEAD mismatch, now corrected in this ledger.
+- Fast-forward merged `codex/script-source-binding-service` into `main` at `9491ee6 Add API switch handoff snapshot`.
 - `npm.cmd run test -w apps/web -- asset-decision-timeline` passed: 6 files / 47 tests.
 - `npm.cmd run typecheck -w apps/web` passed.
 - `npm.cmd run verify` passed:
   - web: 20 files / 154 tests.
   - domain: 6 files / 58 tests.
   - Next production build passed.
+- Post-merge `npm.cmd run verify` passed on `main`:
+  - web: 20 files / 154 tests.
+  - domain: 6 files / 58 tests.
+  - Next production build passed with `/api/asset-decision-timeline`, `/api/asset-lock-records`, `/api/asset-lock-attachments`, `/api/delivery-import-jobs`, `/api/delivery-packages`, and `/api/workspace-session`.
 
 ## Asset Lock Workbench Completion
 
