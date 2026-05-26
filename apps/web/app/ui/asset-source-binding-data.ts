@@ -22,6 +22,10 @@ export function groupSourceBindingsByRecord(bindings: ScriptSourceBinding[]) {
   }, {});
 }
 
+export function getSourceBindingCountLabel(count: number) {
+  return `已绑定 ${Math.max(0, count)} 段`;
+}
+
 export function getSourceBindingsForRecord(recordId: string | null | undefined, bindings: ScriptSourceBinding[]) {
   if (!recordId) {
     return [];

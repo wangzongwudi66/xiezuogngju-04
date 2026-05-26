@@ -2660,7 +2660,7 @@ textarea:focus-visible {
 
 .asset-row {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) minmax(52px, max-content) minmax(86px, max-content) minmax(74px, 0.26fr);
+  grid-template-columns: 18px minmax(0, 1fr) minmax(92px, max-content) minmax(52px, max-content) minmax(86px, max-content) minmax(74px, 0.26fr);
   gap: 10px;
   align-items: center;
   min-height: 66px;
@@ -2673,7 +2673,8 @@ textarea:focus-visible {
 }
 
 .asset-row .asset-tag,
-.asset-row .risk-dot {
+.asset-row .risk-dot,
+.asset-row .asset-source-binding-badge {
   min-width: 0;
 }
 
@@ -2762,6 +2763,33 @@ textarea:focus-visible {
 .asset-tag.production_pending {
   background: var(--orange-soft);
   color: #8f430f;
+}
+
+.asset-source-binding-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: max-content;
+  max-width: 100%;
+  min-height: 24px;
+  border: 1px solid rgba(52, 120, 246, 0.18);
+  border-radius: 999px;
+  background: #f3f7ff;
+  color: var(--blue);
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-detail-head-badges {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .asset-owner {
@@ -3552,6 +3580,7 @@ input[type="checkbox"] {
   }
 
   .asset-row .asset-tag,
+  .asset-row .asset-source-binding-badge,
   .asset-row .risk-dot,
   .asset-owner {
     grid-column: 2;

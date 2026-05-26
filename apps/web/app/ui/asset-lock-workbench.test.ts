@@ -8,6 +8,7 @@ import {
   getAssetLockFinalLockHint,
   getMockAssetChanges,
   getAssetLockRoleActions,
+  getSelectedAssetFinalLockHint,
   getNextAssetLockOwner,
   summarizeAssetLock,
   toAssetLockChangeItems
@@ -156,6 +157,28 @@ describe("asset lock workbench data helpers", () => {
       }))
     );
     expect(getAssetLockFinalLockHint(readySummary)).toBe("编剧和制作都已确认，可以由统筹最终定版。");
+  });
+  it("explains when the selected asset is ready but other records block final lock", () => {
+    const selectedAsset = {
+      ...getMockAssetChanges()[0],
+      writerConfirmation: "confirmed" as const,
+      productionConfirmation: "confirmed" as const,
+      reviewStatus: "ready_to_lock" as const
+    };
+    const blockedElsewhere = {
+      ...getMockAssetChanges()[1],
+      writerConfirmation: "pending" as const,
+      productionConfirmation: "confirmed" as const,
+      reviewStatus: "writer_pending" as const
+    };
+    const hint = getSelectedAssetFinalLockHint({
+      selectedAsset,
+      summary: summarizeAssetLock([selectedAsset, blockedElsewhere])
+    });
+
+    expect(hint).toContain("当前选中资产已满足定版条件");
+    expect(hint).toContain("同一演示包/批次还有其他记录未完成");
+    expect(hint).toContain("定版需要编剧和制作都确认完成");
   });
 });
 

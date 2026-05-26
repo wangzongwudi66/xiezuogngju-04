@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createDefaultSourceBindingDraft,
   formatSourceBindingRange,
+  getSourceBindingCountLabel,
   getSourceBindingAccess,
   getSourceBindingsForRecord,
   groupSourceBindingsByRecord,
@@ -22,6 +23,12 @@ describe("asset source binding data helpers", () => {
       "record-2": [{ id: "binding-3" }]
     });
     expect(getSourceBindingsForRecord("record-1", bindings).map((binding) => binding.id)).toEqual(["binding-1", "binding-2"]);
+  });
+
+  it("formats source binding count labels for workbench badges", () => {
+    expect(getSourceBindingCountLabel(0)).toBe("已绑定 0 段");
+    expect(getSourceBindingCountLabel(3)).toBe("已绑定 3 段");
+    expect(getSourceBindingCountLabel(-1)).toBe("已绑定 0 段");
   });
 
   it("builds and normalizes line range drafts", () => {

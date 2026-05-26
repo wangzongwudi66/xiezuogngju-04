@@ -333,6 +333,40 @@ export function getAssetLockFinalLockHint(summary: AssetLockSummary) {
   return "编剧和制作都已确认，可以由统筹最终定版。";
 }
 
+export function isAssetLockItemReadyForFinalLock(item: AssetLockChangeItem | null | undefined) {
+  return Boolean(
+    item &&
+      item.reviewStatus !== "locked" &&
+      item.reviewStatus !== "disputed" &&
+      item.reviewStatus !== "needs_info" &&
+      item.writerConfirmation === "confirmed" &&
+      item.productionConfirmation === "confirmed"
+  );
+}
+
+export function getSelectedAssetFinalLockHint(input: {
+  selectedAsset?: AssetLockChangeItem | null;
+  summary: AssetLockSummary;
+}) {
+  if (!input.selectedAsset) {
+    return getAssetLockFinalLockHint(input.summary);
+  }
+
+  if (input.selectedAsset.reviewStatus === "locked") {
+    return "这条资产记录已定版，不能重复定版。";
+  }
+
+  if (!isAssetLockItemReadyForFinalLock(input.selectedAsset)) {
+    return getAssetLockFinalLockHint(summarizeAssetLock([input.selectedAsset]));
+  }
+
+  if (!input.summary.canLock) {
+    return `当前选中资产已满足定版条件，但同一演示包/批次还有其他记录未完成：${getAssetLockFinalLockHint(input.summary)}`;
+  }
+
+  return getAssetLockFinalLockHint(input.summary);
+}
+
 export function getAssetLockBulkHint(selectedCount: number, isMutating: boolean) {
   if (isMutating) {
     return "正在处理上一项操作，请稍等。";

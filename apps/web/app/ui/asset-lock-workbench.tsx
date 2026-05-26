@@ -28,8 +28,8 @@ import {
   filterAssetChanges,
   getAssetLockBulkHint,
   getAssetLockEmptyState,
-  getAssetLockFinalLockHint,
   getAssetLockRoleActions,
+  getSelectedAssetFinalLockHint,
   getNextAssetLockOwner,
   summarizeAssetLock,
   toAssetLockChangeItems
@@ -55,7 +55,13 @@ import {
 } from "./asset-lock-attachment-api";
 import { triggerAssetAttachmentDownload } from "./asset-lock-attachment-download";
 import { AssetSourceBindingPanel } from "./asset-source-binding-panel";
-import { createDefaultSourceBindingDraft, getSourceBindingsForRecord, normalizeSourceBindingDraft } from "./asset-source-binding-data";
+import {
+  createDefaultSourceBindingDraft,
+  getSourceBindingCountLabel,
+  getSourceBindingsForRecord,
+  groupSourceBindingsByRecord,
+  normalizeSourceBindingDraft
+} from "./asset-source-binding-data";
 import type { AssetSourceBindingDraft } from "./asset-source-binding-data";
 
 type AssetLockPackage = {
@@ -189,6 +195,7 @@ export function AssetLockWorkbench({
       : publishedPackages[0] ?? activeDeliveryPackage ?? deliveryPackages[0] ?? null;
   const filteredItems = useMemo(() => filterAssetChanges(items, filters), [filters, items]);
   const summary = useMemo(() => summarizeAssetLock(items), [items]);
+  const sourceBindingsByRecordId = useMemo(() => groupSourceBindingsByRecord(sourceBindings), [sourceBindings]);
   const selectedAsset = items.find((item) => item.id === selectedAssetId) ?? filteredItems[0] ?? items[0];
   const selectedRecord = selectedAsset ? records.find((record) => record.id === selectedAsset.id) ?? null : null;
   const episodeOptions = Array.from(new Set(items.flatMap((item) => item.episodeNos))).sort((a, b) => a - b);
@@ -202,7 +209,7 @@ export function AssetLockWorkbench({
     packageTitle: packageForView?.title
   });
   const roleActions = getAssetLockRoleActions(actorRole);
-  const finalLockHint = getAssetLockFinalLockHint(summary);
+  const selectedFinalLockHint = getSelectedAssetFinalLockHint({ selectedAsset, summary });
   const bulkHint = getAssetLockBulkHint(selectedIds.length, Boolean(isMutating || activeOperation));
   const isBusy = Boolean(isMutating || activeOperation);
   const selectedAssetCanFinalLock = Boolean(selectedAsset && selectedAsset.reviewStatus !== "locked" && summary.canLock);
@@ -486,7 +493,7 @@ export function AssetLockWorkbench({
             className="primary-button"
             disabled={!selectedAssetCanFinalLock || isBusy}
             onClick={() => selectedAsset && runAssetOperation("正在提交统筹最终定版。", () => onFinalLock(selectedAsset.id))}
-            title={finalLockHint}
+            title={selectedFinalLockHint}
             type="button"
           >
             <LockKeyhole size={15} />
@@ -494,7 +501,7 @@ export function AssetLockWorkbench({
           </button>
         ) : null}
       </div>
-      <p className={`asset-lock-gate-note ${summary.canLock ? "ready" : "blocked"}`}>{finalLockHint}</p>
+      <p className={`asset-lock-gate-note ${summary.canLock ? "ready" : "blocked"}`}>{selectedFinalLockHint}</p>
 
       {items.length === 0 ? (
         <div className="empty-card soft">
@@ -599,37 +606,42 @@ export function AssetLockWorkbench({
             <span>编剧 / 制作 / 统筹状态</span>
           </div>
           {filteredItems.length === 0 ? <p className="empty-state">当前筛选条件下没有资产核对记录。</p> : null}
-          {filteredItems.map((item) => (
-            <article
-              className={`asset-row ${selectedAsset?.id === item.id ? "active" : ""} ${item.reviewStatus}`}
-              key={item.id}
-              onClick={() => setSelectedAssetId(item.id)}
-            >
-              <input
-                aria-label={`选择 ${item.assetName}`}
-                checked={selectedIds.includes(item.id)}
-                disabled={item.reviewStatus === "locked"}
-                onChange={(event) => {
-                  event.stopPropagation();
-                  setSelectedIds((current) =>
-                    current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id]
-                  );
-                }}
-                onClick={(event) => event.stopPropagation()}
-                type="checkbox"
-              />
-              <div>
-                <strong>{item.assetName}</strong>
-                <span>{assetTypeLabels[item.assetType]} · {changeTypeLabels[item.changeType]} · 第 {item.episodeNos.join("、")} 集</span>
-              </div>
-              <AssetTag tone={item.changeType}>{changeTypeLabels[item.changeType]}</AssetTag>
-              <AssetTag tone={item.reviewStatus}>{reviewStatusLabels[item.reviewStatus]}</AssetTag>
-              <div className="asset-owner">
-                <strong>{item.owner}</strong>
-                <span className={`risk-dot ${item.risk}`}>{riskLabels[item.risk]}</span>
-              </div>
-            </article>
-          ))}
+          {filteredItems.map((item) => {
+            const sourceBindingCount = sourceBindingsByRecordId[item.id]?.length ?? 0;
+
+            return (
+              <article
+                className={`asset-row ${selectedAsset?.id === item.id ? "active" : ""} ${item.reviewStatus}`}
+                key={item.id}
+                onClick={() => setSelectedAssetId(item.id)}
+              >
+                <input
+                  aria-label={`选择 ${item.assetName}`}
+                  checked={selectedIds.includes(item.id)}
+                  disabled={item.reviewStatus === "locked"}
+                  onChange={(event) => {
+                    event.stopPropagation();
+                    setSelectedIds((current) =>
+                      current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id]
+                    );
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  type="checkbox"
+                />
+                <div>
+                  <strong>{item.assetName}</strong>
+                  <span>{assetTypeLabels[item.assetType]} · {changeTypeLabels[item.changeType]} · 第 {item.episodeNos.join("、")} 集</span>
+                </div>
+                <span className="asset-source-binding-badge">{getSourceBindingCountLabel(sourceBindingCount)}</span>
+                <AssetTag tone={item.changeType}>{changeTypeLabels[item.changeType]}</AssetTag>
+                <AssetTag tone={item.reviewStatus}>{reviewStatusLabels[item.reviewStatus]}</AssetTag>
+                <div className="asset-owner">
+                  <strong>{item.owner}</strong>
+                  <span className={`risk-dot ${item.risk}`}>{riskLabels[item.risk]}</span>
+                </div>
+              </article>
+            );
+          })}
         </div>
 
         {selectedAsset ? (
@@ -639,7 +651,10 @@ export function AssetLockWorkbench({
                 <span>{assetTypeLabels[selectedAsset.assetType]} · {changeTypeLabels[selectedAsset.changeType]}</span>
                 <h3>{selectedAsset.assetName}</h3>
               </div>
-              <AssetTag tone={selectedAsset.reviewStatus}>{reviewStatusLabels[selectedAsset.reviewStatus]}</AssetTag>
+              <div className="asset-detail-head-badges">
+                <span className="asset-source-binding-badge">{getSourceBindingCountLabel(selectedSourceBindings.length)}</span>
+                <AssetTag tone={selectedAsset.reviewStatus}>{reviewStatusLabels[selectedAsset.reviewStatus]}</AssetTag>
+              </div>
             </div>
 
             <div className="confirmation-grid">
