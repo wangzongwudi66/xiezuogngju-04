@@ -5,10 +5,10 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-27 01:15:00 +08:00`.
+Timestamp: `2026-05-27 01:46:08 +08:00`.
 
 - Active branch: `main`.
-- Current local `main` HEAD: `2fbcbd8 Label timeline source excerpt origins`.
+- Current local `main` HEAD: `ac6b649 Clarify asset source binding status`.
 - Worktree at last check: clean.
 - Remote push is intentionally deferred unless the user explicitly asks.
 
@@ -27,6 +27,12 @@ Recently completed after the xiezuogongju-04 handoff:
   - No-source state: `当前选择没有可展示的剧本来源段落。`
   - `/api/asset-decision-timeline` remains GET-only/read-only.
   - No source binding write controls were added to the timeline.
+- `de0b29b Record staged validation strategy`
+  - Ledger now records staged verification gates instead of full verification after every small change.
+- `ac6b649 Clarify asset source binding status`
+  - Asset lock workbench list and detail header now show `已绑定 n 段` source-binding badges from scoped workbench `sourceBindings`.
+  - Coordinator final-lock disabled copy now clarifies when the selected asset is ready but the same package/batch still has other blockers.
+  - No backend/API, source-binding mutation, or asset timeline changes were included.
 
 Latest verification:
 
@@ -37,6 +43,10 @@ Latest verification:
   - Next production build passed.
 - For timeline explicit source badges:
   - `npm.cmd run test -w apps/web -- asset-decision-timeline m1-dashboard`: passed, 7 files / 65 tests.
+  - `npm.cmd run typecheck -w apps/web`: passed.
+  - `git diff --check`: passed.
+- For asset lock source-binding badges:
+  - `npm.cmd run test -w apps/web -- asset-lock-workbench asset-source-binding-data`: passed, 2 files / 19 tests.
   - `npm.cmd run typecheck -w apps/web`: passed.
   - `git diff --check`: passed.
 
@@ -51,10 +61,8 @@ New validation strategy agreed with the user:
 
 Recommended next phase:
 
-- Product direction: improve asset lock workbench clarity with a small combined slice:
-  1. show `已绑定 n 段` source-binding badge in asset list/detail;
-  2. clarify disabled/final-lock reasons when a selected item looks ready but the whole package still has blockers.
-- Keep this as a low-risk UI/data-helper slice; avoid backend/API changes unless a clear blocker appears.
+- Optional light browser QA: inspect the asset lock workbench list/detail at desktop and narrow widths after the new `已绑定 n 段` badge.
+- Next product slice should be chosen deliberately; keep using staged validation and avoid full `verify` until the next phase gate.
 
 ## Xiezuogongju-04 Environment Handoff
 
