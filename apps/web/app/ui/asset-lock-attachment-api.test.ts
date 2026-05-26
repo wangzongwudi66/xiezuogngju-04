@@ -124,5 +124,10 @@ describe("asset lock attachment API helper", () => {
     expect(formatAssetAttachmentError(new Error("asset_attachment_delete_forbidden"))).toBe("当前账号无权删除该资产附件。");
     expect(formatAssetAttachmentError(new Error("asset_attachment_locked_record_delete_forbidden"))).toBe("资产已定版，附件不能删除。");
     expect(formatAssetAttachmentError(new Error("asset_attachment_not_found"))).toBe("资产附件不存在或已失效。");
+    expect(formatAssetAttachmentError(new TypeError("Failed to fetch"))).toBe("资产附件操作失败，请稍后重试。");
+    expect(formatAssetAttachmentError(new Error("fetch failed"))).toBe("资产附件操作失败，请稍后重试。");
+    expect(formatAssetAttachmentError(new Error("NetworkError when attempting to fetch resource."))).toBe(
+      "资产附件操作失败，请稍后重试。"
+    );
   });
 });

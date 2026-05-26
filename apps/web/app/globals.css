@@ -2839,6 +2839,24 @@ textarea:focus-visible {
   padding: 9px;
 }
 
+.asset-attachment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.asset-attachment-row > div:first-child {
+  min-width: 0;
+}
+
+.asset-attachment-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .asset-attachment-list strong {
   display: block;
   overflow: hidden;

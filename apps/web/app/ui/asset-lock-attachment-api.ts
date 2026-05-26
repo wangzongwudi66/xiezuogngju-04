@@ -93,6 +93,10 @@ export async function deleteAssetLockAttachment(attachmentId: string): Promise<A
 export function formatAssetAttachmentError(error: unknown) {
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
 
+  if (/failed to fetch|fetch failed|networkerror/i.test(message)) {
+    return "资产附件操作失败，请稍后重试。";
+  }
+
   if (message.includes("asset_attachment_id_required")) {
     return "缺少附件 ID，无法完成操作。请刷新页面后重试。";
   }

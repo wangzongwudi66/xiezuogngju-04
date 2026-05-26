@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   ClipboardCheck,
+  Download,
   FileUp,
   FileWarning,
   Filter,
@@ -15,6 +16,7 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
+  Trash2,
   UserCheck
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -45,10 +47,13 @@ import type { AssetAttachment, AssetAttachmentType, AssetLockRecord, ScriptSourc
 import type { AssetLockCreateDraft, AssetLockRecordSummary, AssetSourceBindInput, AssetSourceRemoveInput } from "./asset-lock-api";
 import { formatAssetLockError } from "./asset-lock-api";
 import {
+  deleteAssetLockAttachment,
+  downloadAssetLockAttachment,
   fetchAssetLockAttachments,
   formatAssetAttachmentError,
   uploadAssetLockAttachment
 } from "./asset-lock-attachment-api";
+import { triggerAssetAttachmentDownload } from "./asset-lock-attachment-download";
 import { AssetSourceBindingPanel } from "./asset-source-binding-panel";
 import { createDefaultSourceBindingDraft, getSourceBindingsForRecord, normalizeSourceBindingDraft } from "./asset-source-binding-data";
 import type { AssetSourceBindingDraft } from "./asset-source-binding-data";
@@ -170,6 +175,8 @@ export function AssetLockWorkbench({
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [attachmentLoadingRecordId, setAttachmentLoadingRecordId] = useState<string | null>(null);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [attachmentDownloadingId, setAttachmentDownloadingId] = useState<string | null>(null);
+  const [attachmentDeletingId, setAttachmentDeletingId] = useState<string | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [sourceBindingDraft, setSourceBindingDraft] = useState<AssetSourceBindingDraft>(() => createDefaultSourceBindingDraft(null));
   const [sourceBindingBusy, setSourceBindingBusy] = useState(false);
@@ -307,6 +314,40 @@ export function AssetLockWorkbench({
       setAttachmentError(formatAssetAttachmentError(error));
     } finally {
       setAttachmentUploading(false);
+    }
+  }
+
+  async function handleDownloadAttachment(attachment: AssetAttachment) {
+    const activeAttachmentId = attachment.id;
+    setAttachmentDownloadingId(activeAttachmentId);
+    setAttachmentError(null);
+
+    try {
+      const { blob, fileName } = await downloadAssetLockAttachment(attachment.id);
+      triggerAssetAttachmentDownload(blob, fileName);
+    } catch (error) {
+      setAttachmentError(formatAssetAttachmentError(normalizeAssetAttachmentOperationError(error, "asset_attachment_download_failed")));
+    } finally {
+      setAttachmentDownloadingId((current) => (current === activeAttachmentId ? null : current));
+    }
+  }
+
+  async function handleDeleteAttachment(attachment: AssetAttachment) {
+    if (selectedAssetIsLocked) {
+      return;
+    }
+
+    const activeAttachmentId = attachment.id;
+    setAttachmentDeletingId(activeAttachmentId);
+    setAttachmentError(null);
+
+    try {
+      await deleteAssetLockAttachment(attachment.id);
+      await refreshSelectedAssetAttachments(attachment.assetLockRecordId);
+    } catch (error) {
+      setAttachmentError(formatAssetAttachmentError(normalizeAssetAttachmentOperationError(error, "asset_attachment_delete_failed")));
+    } finally {
+      setAttachmentDeletingId((current) => (current === activeAttachmentId ? null : current));
     }
   }
 
@@ -648,6 +689,8 @@ export function AssetLockWorkbench({
 
             <AssetAttachmentPanel
               attachmentError={attachmentError}
+              attachmentDeletingId={attachmentDeletingId}
+              attachmentDownloadingId={attachmentDownloadingId}
               attachmentFile={attachmentFile}
               attachmentLoading={attachmentLoadingRecordId === selectedAsset.id}
               attachmentNote={attachmentNote}
@@ -655,6 +698,8 @@ export function AssetLockWorkbench({
               attachments={selectedAssetAttachments}
               attachmentUploading={attachmentUploading}
               isLocked={selectedAssetIsLocked}
+              onDelete={(attachment) => void handleDeleteAttachment(attachment)}
+              onDownload={(attachment) => void handleDownloadAttachment(attachment)}
               onFileChange={handleAttachmentFileChange}
               onNoteChange={setAttachmentNote}
               onTypeChange={setAttachmentType}
@@ -728,6 +773,8 @@ export function AssetLockWorkbench({
 
 function AssetAttachmentPanel({
   attachmentError,
+  attachmentDeletingId,
+  attachmentDownloadingId,
   attachmentFile,
   attachmentLoading,
   attachmentNote,
@@ -735,12 +782,16 @@ function AssetAttachmentPanel({
   attachments,
   attachmentUploading,
   isLocked,
+  onDelete,
+  onDownload,
   onFileChange,
   onNoteChange,
   onTypeChange,
   onUpload
 }: {
   attachmentError: string | null;
+  attachmentDeletingId: string | null;
+  attachmentDownloadingId: string | null;
   attachmentFile: File | null;
   attachmentLoading: boolean;
   attachmentNote: string;
@@ -748,6 +799,8 @@ function AssetAttachmentPanel({
   attachments: AssetAttachment[];
   attachmentUploading: boolean;
   isLocked: boolean;
+  onDelete: (attachment: AssetAttachment) => void;
+  onDownload: (attachment: AssetAttachment) => void;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onNoteChange: (note: string) => void;
   onTypeChange: (type: AssetAttachmentType) => void;
@@ -767,17 +820,45 @@ function AssetAttachmentPanel({
         <p className="asset-attachment-empty">当前资产记录还没有有效附件。</p>
       ) : (
         <div className="asset-attachment-list">
-          {attachments.map((attachment) => (
-            <article key={attachment.id}>
-              <div>
-                <strong>{attachment.fileName}</strong>
-                <span>
-                  {attachmentTypeLabels[attachment.attachmentType]} · v{attachment.version} · {formatFileSize(attachment.size)}
-                </span>
-              </div>
-              {attachment.note ? <p>{attachment.note}</p> : null}
-            </article>
-          ))}
+          {attachments.map((attachment) => {
+            const isDownloading = attachmentDownloadingId === attachment.id;
+            const isDeleting = attachmentDeletingId === attachment.id;
+
+            return (
+              <article key={attachment.id}>
+                <div className="asset-attachment-row">
+                  <div>
+                    <strong>{attachment.fileName}</strong>
+                    <span>
+                      {attachmentTypeLabels[attachment.attachmentType]} · v{attachment.version} · {formatFileSize(attachment.size)}
+                    </span>
+                  </div>
+                  <div className="asset-attachment-row-actions">
+                    <button
+                      className="secondary-button compact"
+                      disabled={isDownloading}
+                      onClick={() => onDownload(attachment)}
+                      type="button"
+                    >
+                      <Download size={14} />
+                      {isDownloading ? "下载中..." : "下载"}
+                    </button>
+                    <button
+                      className="secondary-button compact"
+                      disabled={isLocked || isDeleting}
+                      onClick={() => onDelete(attachment)}
+                      title={isLocked ? "资产已定版，附件不能删除。" : undefined}
+                      type="button"
+                    >
+                      <Trash2 size={14} />
+                      {isDeleting ? "删除中..." : "删除"}
+                    </button>
+                  </div>
+                </div>
+                {attachment.note ? <p>{attachment.note}</p> : null}
+              </article>
+            );
+          })}
         </div>
       )}
 
@@ -837,6 +918,15 @@ function formatFileSize(size: number) {
   }
 
   return `${size}B`;
+}
+
+function normalizeAssetAttachmentOperationError(error: unknown, networkFallback: string) {
+  return isNetworkError(error) ? networkFallback : error;
+}
+
+function isNetworkError(error: unknown) {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  return /failed to fetch|fetch failed|networkerror/i.test(message);
 }
 
 function AssetMetric({ label, tone = "blue", value }: { label: string; tone?: "blue" | "amber" | "green" | "red"; value: string }) {
