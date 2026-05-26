@@ -2323,6 +2323,44 @@ textarea:focus-visible {
   margin: 0;
 }
 
+.source-excerpt-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.source-excerpt-head span {
+  flex: 1 1 160px;
+}
+
+.source-kind-badge {
+  width: max-content;
+  max-width: 100%;
+  border: 1px solid rgba(52, 120, 246, 0.18);
+  border-radius: 999px;
+  background: rgba(52, 120, 246, 0.1);
+  color: var(--blue);
+  padding: 3px 8px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.source-kind-badge.asset_name_match {
+  border-color: rgba(100, 116, 139, 0.18);
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.source-excerpt-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .decision-detail-card.hero {
   background: #eef6ff;
 }

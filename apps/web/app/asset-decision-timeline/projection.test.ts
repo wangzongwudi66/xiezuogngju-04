@@ -106,6 +106,7 @@ describe("asset decision timeline projection", () => {
       expect.objectContaining({
         id: "source-binding-binding-map",
         episodeNo: 2,
+        sourceKind: "explicit_binding",
         excerpt: "  Selected source line  ",
         relatedAssetNames: ["Mine Map"],
         startLine: 2,
@@ -151,6 +152,10 @@ describe("asset decision timeline projection", () => {
     expect(fallbackProjection.sourceExcerpts.map((excerpt) => excerpt.id)).toEqual([
       "delivery-current-ep2-line1",
       "delivery-current-ep2-line2"
+    ]);
+    expect(fallbackProjection.sourceExcerpts.map((excerpt) => excerpt.sourceKind)).toEqual([
+      "asset_name_match",
+      "asset_name_match"
     ]);
     expect(fallbackProjection.decisionQueue[0]?.sourceExcerptIds).toEqual([
       "delivery-current-ep2-line1",

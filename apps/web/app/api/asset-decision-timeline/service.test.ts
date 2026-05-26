@@ -71,6 +71,7 @@ describe("asset decision timeline service", () => {
         sourceExcerpts: [
           expect.objectContaining({
             id: "source-binding-binding-map",
+            sourceKind: "explicit_binding",
             excerpt: "  Bound source line  ",
             relatedAssetNames: ["Mine Map"]
           })
@@ -386,6 +387,9 @@ describe("asset decision timeline service", () => {
         decisionQueue: [expect.objectContaining({ sourceExcerptIds: ["delivery-current-ep2-line1"] })]
       }
     });
+    if (result.ok) {
+      expect(result.projection.sourceExcerpts.map((excerpt) => excerpt.sourceKind)).toEqual(["asset_name_match"]);
+    }
   });
 });
 

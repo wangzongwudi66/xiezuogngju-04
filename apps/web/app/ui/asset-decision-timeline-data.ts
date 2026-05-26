@@ -36,6 +36,7 @@ export interface ScriptSourceExcerpt {
   projectId: string;
   deliveryPackageId: string;
   episodeNo: number;
+  sourceKind: "explicit_binding" | "asset_name_match";
   title?: string;
   excerpt: string;
   startLine?: number;
@@ -189,6 +190,7 @@ const sourceExcerpts: ScriptSourceExcerpt[] = [
     projectId: "project-jincheng",
     deliveryPackageId: "delivery-jc-current",
     episodeNo: 8,
+    sourceKind: "asset_name_match",
     title: "第 8 集 · 升降笼卡死",
     excerpt: "升降笼停在半空，红色安全灯忽明忽暗。李砚把手伸进门缝，旧伤被铁锈刮开。",
     relatedAssetNames: ["北井升降笼", "李砚旧伤妆", "红色安全灯"]
@@ -198,6 +200,7 @@ const sourceExcerpts: ScriptSourceExcerpt[] = [
     projectId: "project-jincheng",
     deliveryPackageId: "delivery-jc-current",
     episodeNo: 10,
+    sourceKind: "asset_name_match",
     title: "第 10 集 · 旧矿区地图",
     excerpt: "杜衡把手绘图压在灯下，只露出北井到风道的一段线，禁入区名称被刻意遮住。",
     relatedAssetNames: ["旧矿区手绘图"]
@@ -207,6 +210,7 @@ const sourceExcerpts: ScriptSourceExcerpt[] = [
     projectId: "project-jincheng",
     deliveryPackageId: "delivery-jc-current",
     episodeNo: 12,
+    sourceKind: "asset_name_match",
     title: "第 12 集 · 粉尘爆闪",
     excerpt: "红灯骤暗，粉尘像火花一样闪过两秒，随后支架发出断裂声。",
     relatedAssetNames: ["井底粉尘爆闪"]

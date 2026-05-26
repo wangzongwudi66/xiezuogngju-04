@@ -1,5 +1,16 @@
 import type { ProjectRole } from "@aigc/domain";
-import type { AssetTimelineClip, AssetTimelineQueueTag } from "./asset-decision-timeline-data";
+import type { AssetTimelineClip, AssetTimelineQueueTag, ScriptSourceExcerpt } from "./asset-decision-timeline-data";
+
+const sourceKindLabels: Record<ScriptSourceExcerpt["sourceKind"], string> = {
+  explicit_binding: "显式绑定",
+  asset_name_match: "自动匹配参考"
+};
+
+export const sourceExcerptEmptyText = "当前选择没有可展示的剧本来源段落。";
+
+export function getSourceKindLabel(sourceKind: ScriptSourceExcerpt["sourceKind"]) {
+  return sourceKindLabels[sourceKind];
+}
 
 export function buildTimelineResetKey({
   actorRole,

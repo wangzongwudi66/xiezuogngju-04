@@ -25,7 +25,13 @@ import type {
   AssetTimelineQueueTag,
   RoleScopedAssetTimelineViewModel
 } from "./asset-decision-timeline-data";
-import { buildTimelineResetKey, getClipChangeMarkers, getDecisionClipClassName } from "./asset-decision-timeline-view";
+import {
+  buildTimelineResetKey,
+  getClipChangeMarkers,
+  getDecisionClipClassName,
+  getSourceKindLabel,
+  sourceExcerptEmptyText
+} from "./asset-decision-timeline-view";
 
 const queueOrder: AssetTimelineQueueTag[] = ["due_today", "affects_my_episodes", "conflicts", "script_changes", "waiting_others"];
 const changeMarkerLabels: Record<string, string> = {
@@ -564,12 +570,19 @@ function AssetTimelineDetailDrawer({
 
       <div className="decision-detail-card">
         <strong>剧本来源段落</strong>
-        {sourceExcerpts.map((excerpt) => (
-          <article className="source-excerpt" key={excerpt.id}>
-            <span>{excerpt.title ?? `第 ${excerpt.episodeNo} 集`}</span>
-            <p>{excerpt.excerpt}</p>
-          </article>
-        ))}
+        {sourceExcerpts.length > 0 ? (
+          sourceExcerpts.map((excerpt) => (
+            <article className="source-excerpt" key={excerpt.id}>
+              <div className="source-excerpt-head">
+                <span>{excerpt.title ?? `第 ${excerpt.episodeNo} 集`}</span>
+                <em className={`source-kind-badge ${excerpt.sourceKind}`}>{getSourceKindLabel(excerpt.sourceKind)}</em>
+              </div>
+              <p>{excerpt.excerpt}</p>
+            </article>
+          ))
+        ) : (
+          <p className="source-excerpt-empty">{sourceExcerptEmptyText}</p>
+        )}
       </div>
 
       {clip?.ghost ? (

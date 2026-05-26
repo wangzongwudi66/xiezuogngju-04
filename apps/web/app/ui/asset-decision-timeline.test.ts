@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildMockAssetDecisionTimelineViewModel } from "./asset-decision-timeline-data";
-import { buildTimelineResetKey, getDecisionClipClassName } from "./asset-decision-timeline-view";
+import {
+  buildTimelineResetKey,
+  getDecisionClipClassName,
+  getSourceKindLabel,
+  sourceExcerptEmptyText
+} from "./asset-decision-timeline-view";
 
 describe("asset decision timeline component helpers", () => {
   it("includes scope-muted in clip classes for empty creator scope clips", () => {
@@ -58,5 +63,11 @@ describe("asset decision timeline component helpers", () => {
     });
 
     expect(demoKey).not.toBe(realKey);
+  });
+
+  it("labels read-only source excerpt display states", () => {
+    expect(getSourceKindLabel("explicit_binding")).toBe("显式绑定");
+    expect(getSourceKindLabel("asset_name_match")).toBe("自动匹配参考");
+    expect(sourceExcerptEmptyText).toBe("当前选择没有可展示的剧本来源段落。");
   });
 });
