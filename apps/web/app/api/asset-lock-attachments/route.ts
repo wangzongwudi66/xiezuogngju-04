@@ -15,13 +15,7 @@ export async function GET(request: Request) {
   try {
     return NextResponse.json({ attachments: await listAssetAttachments(recordId) });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error: "asset_attachment_list_failed",
-        message: error instanceof Error ? error.message : "asset attachment list failed"
-      },
-      { status: 400 }
-    );
+    return attachmentErrorResponse(errorCodeFromUnknown(error, "asset_attachment_list_failed"));
   }
 }
 
@@ -103,4 +97,29 @@ function readOptionalString(value: FormDataEntryValue | null) {
 function readAttachmentType(value: FormDataEntryValue | null) {
   const text = readString(value);
   return attachmentTypes.includes(text as AssetAttachmentType) ? (text as AssetAttachmentType) : null;
+}
+
+function attachmentErrorResponse(error: string) {
+  return NextResponse.json({ error }, { status: statusForAttachmentError(error) });
+}
+
+function errorCodeFromUnknown(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : "";
+  return message.startsWith("asset_attachment_") ? message : fallback;
+}
+
+function statusForAttachmentError(error: string) {
+  switch (error) {
+    case "asset_attachment_record_id_required":
+      return 400;
+    case "asset_attachment_unauthenticated":
+      return 401;
+    case "asset_attachment_project_member_required":
+    case "asset_attachment_forbidden":
+      return 403;
+    case "asset_attachment_record_not_found":
+      return 404;
+    default:
+      return 400;
+  }
 }
