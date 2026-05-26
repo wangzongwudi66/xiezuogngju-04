@@ -171,11 +171,15 @@ describe("asset lock workbench data helpers", () => {
       productionConfirmation: "confirmed" as const,
       reviewStatus: "writer_pending" as const
     };
+    const summary = summarizeAssetLock([selectedAsset, blockedElsewhere]);
     const hint = getSelectedAssetFinalLockHint({
       selectedAsset,
-      summary: summarizeAssetLock([selectedAsset, blockedElsewhere])
+      summary
     });
 
+    expect(summary.canLock).toBe(false);
+    expect(summary.writerPendingCount).toBe(1);
+    expect(hint).toBe("当前选中资产已满足定版条件，但同一演示包/批次还有其他记录未完成：定版需要编剧和制作都确认完成。");
     expect(hint).toContain("当前选中资产已满足定版条件");
     expect(hint).toContain("同一演示包/批次还有其他记录未完成");
     expect(hint).toContain("定版需要编剧和制作都确认完成");
