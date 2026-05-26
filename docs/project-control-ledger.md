@@ -3,6 +3,75 @@
 This file is the handoff source for the main control conversation after context compression.
 Read it first before making scheduling, branch, or merge decisions.
 
+## Xiezuogongju-04 Environment Handoff
+
+Timestamp: `2026-05-26 08:55:00 +08:00`.
+
+Purpose:
+
+- The user is moving to a new work environment.
+- This section is the current handoff snapshot for syncing and resuming as `xiezuogongju-04`.
+
+Current branch and commits:
+
+- Active branch: `codex/asset-attachment-download-delete`.
+- Main baseline already merged: `9f40adb Scope source binding cache by session`.
+- Current branch commits after `main`:
+  - `362d900 Cover locked source binding access`.
+  - `f145a0f Add asset attachment download and delete APIs`.
+- Worktree at last check: clean.
+- Do not push unless the user explicitly asks; for this handoff the user explicitly requested cloud sync as `xiezuogongju-04`.
+
+Main/source-binding status:
+
+- `codex/source-binding-ui` was fast-forward merged into `main` through `9f40adb`.
+- Source binding mutation and UI first version are complete on local `main`.
+- `/api/asset-decision-timeline` remains GET-only/read-only.
+- Asset timeline source-binding write controls were not added.
+- Source-binding workbench cache is scoped by `{ projectId, userId }` and waits for `syncedServerUserId === state.currentUserId` before fetching scoped source bindings.
+- 18 completed locked source-binding browser verification: locked record keeps source snapshot readable and disables bind/remove controls. No P0/P1.
+
+Current attachment download/delete branch status:
+
+- 21 implemented attachment download/delete backend/API/helper on `codex/asset-attachment-download-delete`.
+- Added dynamic route: `apps/web/app/api/asset-lock-attachments/[attachmentId]/route.ts`.
+- `GET /api/asset-lock-attachments/:attachmentId` returns file bytes with `Content-Type`, `Content-Length`, `Content-Disposition`, and `X-Content-Type-Options: nosniff`.
+- `DELETE /api/asset-lock-attachments/:attachmentId` soft-deletes metadata only.
+- List endpoint now checks current session user, project membership, and asset-record visibility.
+- Download/delete check current session user, project membership, active attachment status, attachment-record relationship, and record visibility.
+- Locked records allow download but prohibit all attachment deletion.
+- Delete is allowed for owner/coordinator or the uploading user; head_writer cannot delete another user's attachment.
+- Deleted/inactive attachments cannot be downloaded or deleted.
+- Route errors are stable `{ error }` responses and do not expose `filePath`, `.local-data`, or absolute paths.
+- UI helper exposes download/delete wrappers but no attachment UI has been wired yet.
+- `asset-lock-workbench.tsx`, `globals.css`, and `asset-decision-timeline.tsx` were not modified in the attachment branch.
+
+Sub-conversation status:
+
+- 18: locked source-binding visual QA complete; no P0/P1.
+- 19: next product priority review recommended attachment download/delete first, source-binding polish second, asset timeline explicit-source display third.
+- 20: engineering plan recommended service/API/helper first, attachment UI later; avoid concurrent edits to `asset-lock-workbench.tsx`.
+- 21: implemented attachment download/delete, fixed 22's P1s, and reported no remaining P0/P1.
+- 22: first review was on the wrong baseline and invalid; second review found P1s (locked deletion and list auth), both fixed by 21. A final 22 re-review after the fix is still recommended before UI wiring.
+- 23: added locked source-binding helper test; committed as `362d900`.
+
+Verification after current commits:
+
+- `npm.cmd run test -w apps/web -- asset-lock-attachments asset-lock-attachment-api asset-source-binding-data`: passed, 4 files / 41 tests.
+- `npm.cmd run typecheck -w apps/web`: passed.
+
+Next recommended action after environment switch:
+
+1. In the new environment, fetch `xiezuogongju-04` and inspect this ledger first.
+2. Confirm branch `codex/asset-attachment-download-delete` is present at `f145a0f`.
+3. Ask 22 to re-run final read-only security review on `f145a0f`.
+4. If no P0/P1, run:
+   - `npm.cmd run typecheck --workspaces --if-present`
+   - `npm.cmd run test -w apps/web -- asset-lock-attachments asset-lock-records asset-decision-timeline asset-lock-attachment-api asset-source-binding-data`
+   - `npm.cmd run test -w packages/domain -- store`
+   - `npm.cmd run build -w apps/web`
+5. Only after backend/API/helper are accepted, start attachment UI wiring as a new serial task touching `asset-lock-workbench.tsx`.
+
 ## Source Binding UI Progress
 
 Timestamp: `2026-05-25 23:50:00 +08:00`.
