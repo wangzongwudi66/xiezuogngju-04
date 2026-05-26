@@ -53,6 +53,18 @@ describe("asset source binding data helpers", () => {
     });
   });
 
+  it("keeps locked source binding access read-only with snapshot copy", () => {
+    const actorRoles = ["owner", "coordinator", "head_writer", "writer", "creator"] as const;
+
+    for (const actorRole of actorRoles) {
+      expect(getSourceBindingAccess({ actorRole, isBusy: actorRole === "owner", isLocked: true })).toEqual({
+        canEdit: false,
+        disabledReason: "这条资产记录已定版，不能修改剧本来源绑定。",
+        helperText: "已定版记录只保留来源快照供查看。"
+      });
+    }
+  });
+
   it("formats binding ranges for display", () => {
     expect(formatSourceBindingRange(buildBinding({ episodeNo: 5, startLine: 12, endLine: 14 }))).toBe("第 5 集 · L12-L14");
   });
