@@ -3,6 +3,59 @@
 This file is the handoff source for the main control conversation after context compression.
 Read it first before making scheduling, branch, or merge decisions.
 
+## Current Main Snapshot
+
+Timestamp: `2026-05-27 01:15:00 +08:00`.
+
+- Active branch: `main`.
+- Current local `main` HEAD: `2fbcbd8 Label timeline source excerpt origins`.
+- Worktree at last check: clean.
+- Remote push is intentionally deferred unless the user explicitly asks.
+
+Recently completed after the xiezuogongju-04 handoff:
+
+- `6eed4d4 Add asset attachment row actions`
+  - Attachment rows in asset lock workbench now show download/delete actions.
+  - Download uses Blob/object URL and revokes in `finally`.
+  - Delete is disabled for locked records and refreshes the active attachment list after success.
+  - Network failure messages are mapped to Chinese copy instead of surfacing raw `Failed to fetch`.
+- `631a81f Record attachment UI merge status`
+  - Ledger updated after attachment UI merge and full verify.
+- `2fbcbd8 Label timeline source excerpt origins`
+  - Asset timeline source excerpts now expose read-only `sourceKind: "explicit_binding" | "asset_name_match"`.
+  - Timeline detail drawer shows badges: `显式绑定` and `自动匹配参考`.
+  - No-source state: `当前选择没有可展示的剧本来源段落。`
+  - `/api/asset-decision-timeline` remains GET-only/read-only.
+  - No source binding write controls were added to the timeline.
+
+Latest verification:
+
+- For attachment UI merge:
+  - `npm.cmd run verify`: passed.
+  - web: 23 files / 196 tests.
+  - domain: 6 files / 63 tests.
+  - Next production build passed.
+- For timeline explicit source badges:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline m1-dashboard`: passed, 7 files / 65 tests.
+  - `npm.cmd run typecheck -w apps/web`: passed.
+  - `git diff --check`: passed.
+
+New validation strategy agreed with the user:
+
+- Do not run full verification after every small change.
+- Use staged validation gates:
+  - Small display/UI text/CSS changes: related tests + targeted typecheck only.
+  - API/permission/file-system changes: related API tests + targeted typecheck.
+  - Full `npm.cmd run verify` only for push/cloud sync/environment handoff, large multi-feature checkpoint, or high-risk permission/storage/dashboard state changes.
+- Browser QA is reserved for user-visible flow completion, layout risk, or regressions found by review.
+
+Recommended next phase:
+
+- Product direction: improve asset lock workbench clarity with a small combined slice:
+  1. show `已绑定 n 段` source-binding badge in asset list/detail;
+  2. clarify disabled/final-lock reasons when a selected item looks ready but the whole package still has blockers.
+- Keep this as a low-risk UI/data-helper slice; avoid backend/API changes unless a clear blocker appears.
+
 ## Xiezuogongju-04 Environment Handoff
 
 Timestamp: `2026-05-26 08:55:00 +08:00`.
