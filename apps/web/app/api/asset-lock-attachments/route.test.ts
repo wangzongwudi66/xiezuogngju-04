@@ -131,11 +131,16 @@ describe("asset lock attachment route", () => {
   it("returns upload errors and does not save invalid files", async () => {
     const recordId = (await createAssetRecord()).record.id;
     const invalidMimeResponse = await POST(formRequest(buildUploadForm(recordId, { fileName: "bad.png", mime: "application/pdf" })));
+    const emptyFileResponse = await POST(formRequest(buildUploadForm(recordId, { fileContent: "" })));
     const missingRecordResponse = await POST(formRequest(buildUploadForm("missing-record")));
 
     expect(invalidMimeResponse.status).toBe(400);
     await expect(invalidMimeResponse.json()).resolves.toMatchObject({
       error: "asset_attachment_file_type_invalid"
+    });
+    expect(emptyFileResponse.status).toBe(400);
+    await expect(emptyFileResponse.json()).resolves.toMatchObject({
+      error: "asset_attachment_file_empty"
     });
     expect(missingRecordResponse.status).toBe(400);
     await expect(missingRecordResponse.json()).resolves.toMatchObject({
@@ -435,7 +440,10 @@ describe("asset lock attachment route", () => {
   }
 });
 
-function buildUploadForm(recordId: string, overrides: { fileName?: string; mime?: string; uploadedByUserId?: string } = {}) {
+function buildUploadForm(
+  recordId: string,
+  overrides: { fileContent?: string; fileName?: string; mime?: string; uploadedByUserId?: string } = {}
+) {
   const fileName = overrides.fileName ?? "reference.png";
   const mime = overrides.mime ?? "image/png";
   const form = new FormData();
@@ -444,7 +452,7 @@ function buildUploadForm(recordId: string, overrides: { fileName?: string; mime?
   form.set("uploadedByUserId", overrides.uploadedByUserId ?? "user-head-writer");
   form.set("attachmentType", "reference");
   form.set("note", "reference note");
-  form.set("file", new File([new Uint8Array([1, 2, 3])], fileName, { type: mime }));
+  form.set("file", new File([overrides.fileContent ?? "\u0001\u0002\u0003"], fileName, { type: mime }));
 
   return form;
 }
