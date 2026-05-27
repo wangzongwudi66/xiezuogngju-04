@@ -197,6 +197,11 @@ describe("asset decision timeline route", () => {
         `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}&previousDeliveryPackageId=${draftPackageId}`
       )
     );
+    const samePreviousPackage = await GET(
+      new Request(
+        `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}&previousDeliveryPackageId=${publishedPackageId}`
+      )
+    );
 
     expect(nonMember.status).toBe(403);
     await expect(nonMember.json()).resolves.toEqual({ ok: false, error: "project_member_required" });
@@ -208,6 +213,8 @@ describe("asset decision timeline route", () => {
     await expect(missingPreviousPackage.json()).resolves.toEqual({ ok: false, error: "previous_delivery_package_not_found" });
     expect(draftPreviousPackage.status).toBe(409);
     await expect(draftPreviousPackage.json()).resolves.toEqual({ ok: false, error: "previous_delivery_package_not_published" });
+    expect(samePreviousPackage.status).toBe(409);
+    await expect(samePreviousPackage.json()).resolves.toEqual({ ok: false, error: "previous_delivery_package_not_before_current" });
   });
 });
 
