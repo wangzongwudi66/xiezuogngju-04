@@ -5,12 +5,12 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-27 22:38:16 +08:00`.
+Timestamp: `2026-05-27 22:39:31 +08:00`.
 
-- Active branch: `codex/api-contract-test-gap`, branched from `main@6ffdac6`.
-- Latest recorded `main` commit before this branch: `6ffdac6 Record timeline QA browser block`.
-- Latest product/test code commit on the active branch: `abf395a Cover timeline previous package boundary route`.
-- Worktree at last check: dirty only for this ledger update after committing the route contract test.
+- Active branch: `main`.
+- Latest recorded `main` commit before this ledger update: `b07f6c2 Record API contract test gap branch`.
+- Latest product/test code commit: `abf395a Cover timeline previous package boundary route`.
+- Worktree at last check: dirty only for this ledger update after fast-forward merging `codex/api-contract-test-gap`.
 - GitHub sync remains blocked: remote `xiezuogongju-04` returns `Repository not found`, so do not push there until repository access or URL is fixed.
 - Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
 
@@ -52,9 +52,11 @@ Recently completed after the xiezuogongju-04 handoff:
   - Recorded that fresh production build and localhost HTTP checks passed, but in-app browser QA was blocked by policy.
 - Pending branch: `codex/timeline-mobile-crop-hardening` at `39b4b7a Record timeline browser policy block retry`.
   - Contains the static 390px-risk CSS hardening for the asset timeline detail drawer, but remains unmerged because browser visual QA is still blocked.
-- Pending branch: `codex/api-contract-test-gap` at `abf395a Cover timeline previous package boundary route`.
+- `abf395a Cover timeline previous package boundary route`
   - Adds a route-level contract test proving that using the current delivery package as `previousDeliveryPackageId` returns `409 previous_delivery_package_not_before_current`.
   - Does not touch `codex/timeline-mobile-crop-hardening`, UI CSS, or production route logic.
+- `b07f6c2 Record API contract test gap branch`
+  - Recorded the API contract branch verification before merging it back to `main`.
 - QA finding not yet fixed: timeline explicit/fallback badge browser QA used a stale `.next` build; fresh-build QA is still needed, and 390px width showed a drawer/source excerpt crop risk.
 
 Latest verification:
@@ -109,7 +111,7 @@ Recommended next phase:
 
 - Do fresh-build timeline browser QA for explicit/fallback source badges once localhost browser access is allowed, focusing on the 390px drawer/source excerpt crop risk.
 - If `codex/timeline-mobile-crop-hardening` passes 390px/760px/1366px visual QA, fast-forward merge it into `main` and update this ledger.
-- Review `codex/api-contract-test-gap`; if acceptable, fast-forward merge it into `main` independently of the blocked visual QA branch.
+- `codex/api-contract-test-gap` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
 - Continue staged validation; run full `npm.cmd run verify` only for the next push/cloud-sync or large phase gate.
 - Fix `xiezuogongju-04` repository access or URL before attempting GitHub sync.
 
