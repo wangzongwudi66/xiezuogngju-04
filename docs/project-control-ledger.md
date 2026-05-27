@@ -5,20 +5,20 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-27 23:58:59 +08:00`.
+Timestamp: `2026-05-28 00:00:00 +08:00`.
 
-- Active branch: `codex/source-binding-bind-route-contract`.
-- Branch base: `main@9724cea Record source binding contract merge`.
-- Latest recorded `main` commit before this branch: `9724cea Record source binding contract merge`.
-- Current branch adds focused route-level coverage that writer source-binding bind attempts outside the assigned episode scope return `403 asset_lock_episode_scope_forbidden`.
-- Worktree at last check: dirty for this ledger update and `apps/web/app/api/asset-lock-records/route.test.ts` before committing the branch.
+- Active branch: `main`.
+- Latest recorded `main` commit before this ledger update: `7778ec9 Cover source binding bind route contract`.
+- Latest product/test code commit: `7778ec9 Cover source binding bind route contract`.
+- Worktree at last check: dirty only for this ledger update after fast-forward merging `codex/source-binding-bind-route-contract`.
 - GitHub sync remains blocked: remote `xiezuogongju-04` returns `Repository not found`, so do not push there until repository access or URL is fixed.
 - Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
 
 Recently completed after the xiezuogongju-04 handoff:
 
-- Current branch `codex/source-binding-bind-route-contract`
+- `7778ec9 Cover source binding bind route contract`
   - Adds route-level coverage that `bind_source` returns `403` with message `asset_lock_episode_scope_forbidden` when `user-writer` attempts to bind episode 21 outside their assigned scope.
+  - Fast-forward merged `codex/source-binding-bind-route-contract` into `main` after targeted test/typecheck/diff verification.
   - No production logic, UI, CSS, browser QA, remote push, or `codex/timeline-mobile-crop-hardening` changes were included.
 - `e7ffc09 Cover source binding route permission contract`
   - Adds route-level coverage that `remove_source_binding` returns `403` with message `asset_lock_episode_scope_forbidden` when `user-writer` attempts to remove a binding for episode 21 outside their assigned scope.
@@ -77,7 +77,7 @@ Recently completed after the xiezuogongju-04 handoff:
 
 Latest verification:
 
-- For `codex/source-binding-bind-route-contract`:
+- For `codex/source-binding-bind-route-contract` after merge into `main`:
   - `npm.cmd run test -w apps/web -- asset-lock-records`: passed, 2 files / 37 tests.
   - `npm.cmd run typecheck -w apps/web`: passed.
   - `git diff --check`: passed, with only Git's LF-to-CRLF warning for `apps/web/app/api/asset-lock-records/route.test.ts`.
@@ -147,7 +147,7 @@ Recommended next phase:
 - `codex/api-contract-helper-error-format` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
 - `codex/api-contract-minimal-gap` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
 - `codex/source-binding-route-permission-contract` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
-- `codex/source-binding-bind-route-contract` is ready for review/merge after the branch commit; no browser QA or remote push is needed for this API-only test branch.
+- `codex/source-binding-bind-route-contract` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
 - Continue staged validation; run full `npm.cmd run verify` only for the next push/cloud-sync or large phase gate.
 - Fix `xiezuogongju-04` repository access or URL before attempting GitHub sync.
 
