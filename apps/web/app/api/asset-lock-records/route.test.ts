@@ -291,6 +291,31 @@ describe("asset lock record route", () => {
     await expect(invalidRemove.json()).resolves.toEqual({ error: "invalid_asset_lock_record_request" });
   });
 
+  it("maps source binding bind permission errors to stable 403 responses", async () => {
+    const deliveryPackageId = await createDraftForRange(1, 21);
+    const createResponse = await POST(jsonRequest(buildCreateBody(deliveryPackageId, "Writer Scoped Asset", [1, 21])));
+    expect(createResponse.status).toBe(200);
+    const created = await createResponse.json();
+    await login("user-writer");
+
+    const bindResponse = await POST(
+      jsonRequest({
+        action: "bind_source",
+        assetLockRecordId: created.record.id,
+        deliveryPackageId,
+        episodeNo: 21,
+        startLine: 1,
+        endLine: 1
+      })
+    );
+
+    expect(bindResponse.status).toBe(403);
+    await expect(bindResponse.json()).resolves.toMatchObject({
+      error: "asset_lock_record_mutation_failed",
+      message: "asset_lock_episode_scope_forbidden"
+    });
+  });
+
   it("maps source binding remove permission errors to stable 403 responses", async () => {
     const deliveryPackageId = await createDraftForRange(1, 21);
     const createResponse = await POST(jsonRequest(buildCreateBody(deliveryPackageId, "Wide Range Asset", [1, 21])));
