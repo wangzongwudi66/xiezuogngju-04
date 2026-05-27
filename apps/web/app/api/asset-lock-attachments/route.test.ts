@@ -252,6 +252,10 @@ describe("asset lock attachment route", () => {
     const missingId = await GET_ATTACHMENT(attachmentRequest(""), attachmentContext(""));
     const missingAttachment = await GET_ATTACHMENT(attachmentRequest("missing-attachment"), attachmentContext("missing-attachment"));
 
+    await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: null }));
+    const unauthenticatedDownload = await GET_ATTACHMENT(attachmentRequest(created.attachment.id), attachmentContext(created.attachment.id));
+    const unauthenticatedDelete = await DELETE_ATTACHMENT(attachmentRequest(created.attachment.id), attachmentContext(created.attachment.id));
+
     await mutateDeliveryImportWorkspace((state) => ({
       ...state,
       users: [...state.users, { id: "user-outsider", name: "Outsider", defaultRole: "creator", avatarTone: "ink" }]
@@ -272,6 +276,10 @@ describe("asset lock attachment route", () => {
     await expect(missingId.json()).resolves.toEqual({ error: "asset_attachment_id_required" });
     expect(missingAttachment.status).toBe(404);
     await expect(missingAttachment.json()).resolves.toEqual({ error: "asset_attachment_not_found" });
+    expect(unauthenticatedDownload.status).toBe(401);
+    await expect(unauthenticatedDownload.json()).resolves.toEqual({ error: "asset_attachment_unauthenticated" });
+    expect(unauthenticatedDelete.status).toBe(401);
+    await expect(unauthenticatedDelete.json()).resolves.toEqual({ error: "asset_attachment_unauthenticated" });
     expect(nonMember.status).toBe(403);
     await expect(nonMember.json()).resolves.toEqual({ error: "asset_attachment_project_member_required" });
     expect(inactiveDelete.status).toBe(404);
