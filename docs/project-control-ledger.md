@@ -5,13 +5,14 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-27 21:20:37 +08:00`.
+Timestamp: `2026-05-27 21:28:38 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `2c3e59b Polish source binding error copy`.
+- Latest recorded `main` commit before this ledger update: `1f8a8d8 Record source binding polish merge`.
 - Latest product/test code commit: `2c3e59b Polish source binding error copy`.
 - Worktree at last check: clean after clearing local `apps/web/next-env.d.ts` generated churn.
 - GitHub sync remains blocked: remote `xiezuogongju-04` returns `Repository not found`, so do not push there until repository access or URL is fixed.
+- Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
 
 Recently completed after the xiezuogongju-04 handoff:
 
@@ -45,6 +46,8 @@ Recently completed after the xiezuogongju-04 handoff:
 - `2c3e59b Polish source binding error copy`
   - Adds source-binding-specific error copy mapping for duplicate bindings, invalid/out-of-range/reversed lines, empty excerpts, missing scripts, locked records, role/assignment failures, unauthenticated/non-member users, and remove-not-found.
   - Rebased `codex/source-binding-error-copy-polish` onto current `main` and fast-forward merged it back into `main`.
+- `1f8a8d8 Record source binding polish merge`
+  - Recorded the polish merge, rebase target, staged verification, and next recommended timeline QA step.
 - QA finding not yet fixed: timeline explicit/fallback badge browser QA used a stale `.next` build; fresh-build QA is still needed, and 390px width showed a drawer/source excerpt crop risk.
 
 Latest verification:
@@ -76,6 +79,11 @@ Latest verification:
   - `npm.cmd run test -w apps/web -- asset-lock-api asset-lock-records asset-source-binding-data`: passed, 4 files / 46 tests.
   - `npm.cmd run typecheck -w apps/web`: passed.
   - `git diff --check`: passed.
+- For fresh-build timeline browser QA setup:
+  - Cleared `apps/web/.next`.
+  - `npm.cmd run build -w apps/web`: passed.
+  - Local production server returned HTTP 200 at `http://localhost:3000`.
+  - In-app browser QA did not run because browser policy blocked `http://localhost:3000`.
 
 New validation strategy agreed with the user:
 
@@ -88,7 +96,7 @@ New validation strategy agreed with the user:
 
 Recommended next phase:
 
-- Do fresh-build timeline browser QA for explicit/fallback source badges, focusing on the 390px drawer/source excerpt crop risk.
+- Do fresh-build timeline browser QA for explicit/fallback source badges once localhost browser access is allowed, focusing on the 390px drawer/source excerpt crop risk.
 - If the 390px crop reproduces, open a small timeline layout fix branch before starting a larger feature.
 - Continue staged validation; run full `npm.cmd run verify` only for the next push/cloud-sync or large phase gate.
 - Fix `xiezuogongju-04` repository access or URL before attempting GitHub sync.
