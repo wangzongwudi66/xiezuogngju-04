@@ -291,6 +291,39 @@ describe("asset lock record route", () => {
     await expect(invalidRemove.json()).resolves.toEqual({ error: "invalid_asset_lock_record_request" });
   });
 
+  it("maps source binding remove permission errors to stable 403 responses", async () => {
+    const deliveryPackageId = await createDraftForRange(1, 21);
+    const createResponse = await POST(jsonRequest(buildCreateBody(deliveryPackageId, "Wide Range Asset", [1, 21])));
+    expect(createResponse.status).toBe(200);
+    const created = await createResponse.json();
+    const bindResponse = await POST(
+      jsonRequest({
+        action: "bind_source",
+        assetLockRecordId: created.record.id,
+        deliveryPackageId,
+        episodeNo: 21,
+        startLine: 1,
+        endLine: 1
+      })
+    );
+    expect(bindResponse.status).toBe(200);
+    const bound = await bindResponse.json();
+    await login("user-writer");
+
+    const removeResponse = await POST(
+      jsonRequest({
+        action: "remove_source_binding",
+        scriptSourceBindingId: bound.sourceBinding.id
+      })
+    );
+
+    expect(removeResponse.status).toBe(403);
+    await expect(removeResponse.json()).resolves.toMatchObject({
+      error: "asset_lock_record_mutation_failed",
+      message: "asset_lock_episode_scope_forbidden"
+    });
+  });
+
   it("prepares demo records for acceptance testing when no published package exists", async () => {
     await login("user-owner");
     const response = await POST(
@@ -410,6 +443,40 @@ async function createDraft() {
   return deliveryPackageId;
 }
 
+async function createDraftForRange(episodeFrom: number, episodeTo: number) {
+  const rawText = Array.from({ length: episodeTo - episodeFrom + 1 }, (_, index) => {
+    const episodeNo = episodeFrom + index;
+    return `\u7b2c ${episodeNo} \u96c6\nEpisode ${episodeNo} source line`;
+  }).join("\n");
+  const result = await createDeliveryImportJob({
+    source: "text",
+    projectId: "project-jincheng",
+    uploadedByUserId: "user-head-writer",
+    declaredRangeText: `${episodeFrom}-${episodeTo}`,
+    rawText
+  });
+
+  expect(result.ok).toBe(true);
+  if (!result.ok || !result.job.deliveryPackageId) {
+    throw new Error("delivery package draft was not created");
+  }
+
+  const deliveryPackageId = result.job.deliveryPackageId;
+
+  await mutateDeliveryPackage({
+    action: "submit",
+    deliveryPackageId,
+    actorUserId: "user-head-writer"
+  });
+  await mutateDeliveryPackage({
+    action: "publish",
+    deliveryPackageId,
+    actorUserId: "user-owner"
+  });
+
+  return deliveryPackageId;
+}
+
 async function createCandidateDraft() {
   const result = await createDeliveryImportJob({
     source: "text",
@@ -441,12 +508,12 @@ async function createCandidateDraft() {
   return deliveryPackageId;
 }
 
-function buildCreateBody(deliveryPackageId: string, assetName = "Mine Lift") {
+function buildCreateBody(deliveryPackageId: string, assetName = "Mine Lift", episodeNos = [1, 2]) {
   return {
     action: "create",
     projectId: "project-jincheng",
     deliveryPackageId,
-    episodeNos: [1, 2],
+    episodeNos,
     assetName,
     assetType: "scene",
     changeType: "new",
