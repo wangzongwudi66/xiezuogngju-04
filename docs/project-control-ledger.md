@@ -5,20 +5,20 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-27 23:46:01 +08:00`.
+Timestamp: `2026-05-27 23:49:01 +08:00`.
 
-- Active branch: `codex/api-contract-minimal-gap`.
-- Branch base: `main@e7b5370 Record API helper contract merge`.
-- Latest recorded `main` commit before this branch: `e7b5370 Record API helper contract merge`.
-- Current branch adds focused route-level coverage that attachment download/delete routes map unauthenticated sessions to `401 asset_attachment_unauthenticated`.
-- Worktree at last check: dirty for this ledger update and `apps/web/app/api/asset-lock-attachments/route.test.ts` before committing the branch.
+- Active branch: `main`.
+- Latest recorded `main` commit before this ledger update: `e4c354d Cover attachment unauthenticated route contract`.
+- Latest product/test code commit: `e4c354d Cover attachment unauthenticated route contract`.
+- Worktree at last check: dirty only for this ledger update after fast-forward merging `codex/api-contract-minimal-gap`.
 - GitHub sync remains blocked: remote `xiezuogongju-04` returns `Repository not found`, so do not push there until repository access or URL is fixed.
 - Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
 
 Recently completed after the xiezuogongju-04 handoff:
 
-- Current branch `codex/api-contract-minimal-gap`
+- `e4c354d Cover attachment unauthenticated route contract`
   - Adds route-level coverage that `GET` and `DELETE` on `/api/asset-lock-attachments/[attachmentId]` return `401 asset_attachment_unauthenticated` when the session has no current user.
+  - Fast-forward merged `codex/api-contract-minimal-gap` into `main` after targeted test/typecheck/diff verification.
   - No production logic, UI, CSS, browser QA, remote push, or `codex/timeline-mobile-crop-hardening` changes were included.
 - `6eed4d4 Add asset attachment row actions`
   - Attachment rows in asset lock workbench now show download/delete actions.
@@ -69,7 +69,7 @@ Recently completed after the xiezuogongju-04 handoff:
 
 Latest verification:
 
-- For `codex/api-contract-minimal-gap`:
+- For `codex/api-contract-minimal-gap` after merge into `main`:
   - `npm.cmd run test -w apps/web -- asset-lock-attachments`: passed, 2 files / 31 tests.
   - `npm.cmd run typecheck -w apps/web`: passed.
   - `git diff --check`: passed, with only Git's LF-to-CRLF warnings for the touched files.
@@ -129,7 +129,7 @@ Recommended next phase:
 - If `codex/timeline-mobile-crop-hardening` passes 390px/760px/1366px visual QA, fast-forward merge it into `main` and update this ledger.
 - `codex/api-contract-test-gap` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
 - `codex/api-contract-helper-error-format` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
-- `codex/api-contract-minimal-gap` is ready for review/merge after the branch commit; no browser QA or remote push is needed for this API-only test branch.
+- `codex/api-contract-minimal-gap` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
 - Continue staged validation; run full `npm.cmd run verify` only for the next push/cloud-sync or large phase gate.
 - Fix `xiezuogongju-04` repository access or URL before attempting GitHub sync.
 
