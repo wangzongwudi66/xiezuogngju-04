@@ -291,6 +291,21 @@ describe("asset lock record route", () => {
     await expect(invalidRemove.json()).resolves.toEqual({ error: "invalid_asset_lock_record_request" });
   });
 
+  it("maps missing source binding removes to stable mutation errors", async () => {
+    const response = await POST(
+      jsonRequest({
+        action: "remove_source_binding",
+        scriptSourceBindingId: "missing-source-binding"
+      })
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "asset_lock_record_mutation_failed",
+      message: "script_source_binding_not_found"
+    });
+  });
+
   it("maps source binding bind permission errors to stable 403 responses", async () => {
     const deliveryPackageId = await createDraftForRange(1, 21);
     const createResponse = await POST(jsonRequest(buildCreateBody(deliveryPackageId, "Writer Scoped Asset", [1, 21])));
