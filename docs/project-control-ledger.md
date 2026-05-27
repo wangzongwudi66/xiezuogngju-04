@@ -5,17 +5,20 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-28 00:10:30 +08:00`.
+Timestamp: `2026-05-28 00:31:58 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `6423860 Cover empty attachment upload contract`.
+- Latest recorded `main` commit before this ledger update: `018fdfa Record attachment empty upload contract merge`.
 - Latest product/test code commit: `6423860 Cover empty attachment upload contract`.
-- Worktree at last check: dirty only for this ledger update after fast-forward merging `codex/attachment-empty-upload-contract`.
-- GitHub sync remains blocked: remote `xiezuogongju-04` returns `Repository not found`, so do not push there until repository access or URL is fixed.
+- Worktree at last check: dirty only for this ledger update after syncing `main` to GitHub.
+- GitHub sync unblocked: remote `xiezuogongju-04` now points to `https://wangzongwudi66@github.com/wangzongwudi66/xiezuogngju-04.git`, and `main@018fdfa` was pushed to `xiezuogongju-04/main`.
 - Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `018fdfa Record attachment empty upload contract merge`
+  - Recorded the empty attachment upload contract merge after fast-forwarding `codex/attachment-empty-upload-contract` into `main`.
+  - `main@018fdfa` has now been pushed to the corrected `xiezuogongju-04` remote URL (`xiezuogngju-04.git`).
 - `6423860 Cover empty attachment upload contract`
   - Adds route-level coverage that empty asset attachment uploads return `400` with `error: asset_attachment_file_empty`.
   - Keeps the invalid upload no-file-write assertion in place.
@@ -168,7 +171,7 @@ Recommended next phase:
 - `codex/source-binding-missing-route-contract` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
 - `codex/attachment-empty-upload-contract` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
 - Continue staged validation; run full `npm.cmd run verify` only for the next push/cloud-sync or large phase gate.
-- Fix `xiezuogongju-04` repository access or URL before attempting GitHub sync.
+- GitHub sync is now restored for `main`; continue to avoid pushing feature branches unless explicitly requested.
 
 ## Xiezuogongju-04 Environment Handoff
 
