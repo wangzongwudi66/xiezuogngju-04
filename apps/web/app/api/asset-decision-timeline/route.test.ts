@@ -160,8 +160,12 @@ describe("asset decision timeline route", () => {
   it("maps member and package-boundary errors to stable HTTP statuses", async () => {
     const draftPackageId = await createPackage({ publish: false });
     const publishedPackageId = await createPublishedPackage();
+    const mismatchedPreviousPackageId = await createPublishedPackage();
     await mutateDeliveryImportWorkspace((state) => ({
       ...loginAsUser(state, "user-owner"),
+      deliveryPackages: state.deliveryPackages.map((item) =>
+        item.id === mismatchedPreviousPackageId ? { ...item, projectId: "project-tide" } : item
+      ),
       currentUserId: "user-outsider",
       users: [
         ...state.users,
@@ -197,6 +201,11 @@ describe("asset decision timeline route", () => {
         `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}&previousDeliveryPackageId=${draftPackageId}`
       )
     );
+    const mismatchedPreviousPackage = await GET(
+      new Request(
+        `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}&previousDeliveryPackageId=${mismatchedPreviousPackageId}`
+      )
+    );
     const samePreviousPackage = await GET(
       new Request(
         `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}&previousDeliveryPackageId=${publishedPackageId}`
@@ -213,6 +222,11 @@ describe("asset decision timeline route", () => {
     await expect(missingPreviousPackage.json()).resolves.toEqual({ ok: false, error: "previous_delivery_package_not_found" });
     expect(draftPreviousPackage.status).toBe(409);
     await expect(draftPreviousPackage.json()).resolves.toEqual({ ok: false, error: "previous_delivery_package_not_published" });
+    expect(mismatchedPreviousPackage.status).toBe(400);
+    await expect(mismatchedPreviousPackage.json()).resolves.toEqual({
+      ok: false,
+      error: "previous_delivery_package_project_mismatch"
+    });
     expect(samePreviousPackage.status).toBe(409);
     await expect(samePreviousPackage.json()).resolves.toEqual({ ok: false, error: "previous_delivery_package_not_before_current" });
   });

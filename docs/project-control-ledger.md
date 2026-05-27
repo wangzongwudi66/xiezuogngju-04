@@ -5,17 +5,21 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-27 22:39:31 +08:00`.
+Timestamp: `2026-05-27 23:25:59 +08:00`.
 
-- Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `b07f6c2 Record API contract test gap branch`.
-- Latest product/test code commit: `abf395a Cover timeline previous package boundary route`.
-- Worktree at last check: dirty only for this ledger update after fast-forward merging `codex/api-contract-test-gap`.
+- Active branch: `codex/api-contract-helper-error-format`.
+- Branch base: `main@977a989 Record API contract merge`.
+- Latest recorded `main` commit before this branch: `977a989 Record API contract merge`.
+- Current branch adds a focused route-level contract test for `/api/asset-decision-timeline` when `previousDeliveryPackageId` points at a published package from another project.
+- Worktree at last check: dirty for this ledger update and `apps/web/app/api/asset-decision-timeline/route.test.ts` before committing the branch.
 - GitHub sync remains blocked: remote `xiezuogongju-04` returns `Repository not found`, so do not push there until repository access or URL is fixed.
 - Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- Current branch `codex/api-contract-helper-error-format`
+  - Adds route-level coverage that a cross-project `previousDeliveryPackageId` returns `400 previous_delivery_package_project_mismatch`.
+  - No production logic, UI, CSS, browser QA, remote push, or `codex/timeline-mobile-crop-hardening` changes were included.
 - `6eed4d4 Add asset attachment row actions`
   - Attachment rows in asset lock workbench now show download/delete actions.
   - Download uses Blob/object URL and revokes in `finally`.
@@ -61,6 +65,10 @@ Recently completed after the xiezuogongju-04 handoff:
 
 Latest verification:
 
+- For `codex/api-contract-helper-error-format`:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline`: passed, 6 files / 49 tests.
+  - `npm.cmd run typecheck -w apps/web`: passed.
+  - `git diff --check`: passed, with only Git's LF-to-CRLF warning for touched files.
 - For attachment UI merge:
   - `npm.cmd run verify`: passed.
   - web: 23 files / 196 tests.
