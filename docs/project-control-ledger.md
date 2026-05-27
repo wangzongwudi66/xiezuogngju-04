@@ -5,25 +5,25 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-28 01:13:26 +08:00`.
+Timestamp: `2026-05-28 01:27:22 +08:00`.
 
-- Active branch: `codex/m3-request-actor-boundary`.
-- Branch base: local `main@e7fbf93` (`Record xiezuogngju-04 sync`).
-- Latest recorded `main` commit before this branch: `e7fbf93 Record xiezuogngju-04 sync`.
-- Latest product/test branch work: M3 API request actor boundary for asset lock records, asset lock attachments, and asset decision timeline.
-- Worktree at last check: dirty for this branch implementation and this ledger update.
+- Active branch: `main`.
+- Latest recorded `main` commit before this ledger update: `d3890c8 Add M3 request actor boundary`.
+- Latest product/test code commit: `d3890c8 Add M3 request actor boundary`.
+- Worktree at last check: dirty only for this ledger update after fast-forward merging `codex/m3-request-actor-boundary`.
 - GitHub sync unblocked: remote `xiezuogongju-04` now points to `https://wangzongwudi66@github.com/wangzongwudi66/xiezuogngju-04.git`, and `main@018fdfa` was pushed to `xiezuogongju-04/main`.
 - Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
-- In progress on `codex/m3-request-actor-boundary`
+- `d3890c8 Add M3 request actor boundary`
   - Adds a small route-level workspace actor helper for the current mock session.
   - M3 asset lock records, asset lock attachments, and asset decision timeline routes now resolve actor from server session and pass it into services.
   - Services no longer derive request identity directly from shared `WorkspaceState.currentUserId` for these M3 request paths.
   - Asset attachment upload ignores/removes client `uploadedByUserId`; metadata uses the server session actor and pre-checks record visibility before writing files.
   - Timeline projection uses the session actor and continues ignoring client `viewerUserId`, `viewerRole`, and `assignedEpisodeNos`.
+  - Fast-forward merged `codex/m3-request-actor-boundary` into `main` after F review found no P0/P1/P2.
   - No DB, object storage, formal cookie/JWT, UI visual, timeline write ability, browser QA, remote push, or `codex/timeline-mobile-crop-hardening` changes were included.
 - `018fdfa Record attachment empty upload contract merge`
   - Recorded the empty attachment upload contract merge after fast-forwarding `codex/attachment-empty-upload-contract` into `main`.
@@ -100,8 +100,10 @@ Latest verification:
 
 - For `codex/m3-request-actor-boundary`:
   - `npm.cmd run test -w apps/web -- workspace-session asset-lock-records asset-lock-attachments asset-decision-timeline asset-lock-api asset-lock-attachment-api`: passed, 14 files / 135 tests.
+  - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/route.test.ts app/api/asset-lock-records/service.test.ts app/api/asset-lock-attachments/route.test.ts app/api/asset-lock-attachments/service.test.ts app/api/asset-decision-timeline/route.test.ts app/api/asset-decision-timeline/service.test.ts`: passed, 6 files / 86 tests.
   - `npm.cmd run typecheck -w apps/web`: passed.
-  - `git diff --check`: passed, with only Git's LF-to-CRLF warnings for touched files.
+  - `git diff --check`: passed.
+  - F review: no P0/P1/P2; P3 follow-up suggested direct service tests where `actor.userId` intentionally differs from `WorkspaceState.currentUserId` to prevent regressions.
 - For `codex/attachment-empty-upload-contract` after merge into `main`:
   - `npm.cmd run test -w apps/web -- asset-lock-attachments`: passed, 2 files / 31 tests.
   - `npm.cmd run typecheck -w apps/web`: passed.
@@ -176,6 +178,8 @@ Recommended next phase:
 
 - Do fresh-build timeline browser QA for explicit/fallback source badges once localhost browser access is allowed, focusing on the 390px drawer/source excerpt crop risk.
 - If `codex/timeline-mobile-crop-hardening` passes 390px/760px/1366px visual QA, fast-forward merge it into `main` and update this ledger.
+- Consider a narrow follow-up for F's P3 test suggestion before the next formal backend slice: service-level actor/currentUser mismatch assertions for asset lock records, attachments, and timeline.
+- Next formalization slice after that should remain small: DB/repository schema planning for M3 records/bindings/attachments, not a full DB migration in one step.
 - `codex/api-contract-test-gap` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
 - `codex/api-contract-helper-error-format` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
 - `codex/api-contract-minimal-gap` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
