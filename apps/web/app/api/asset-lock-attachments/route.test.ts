@@ -193,6 +193,33 @@ describe("asset lock attachment route", () => {
     expect(serialized).not.toContain(resolve(attachmentDir));
   });
 
+  it("refreshes the active attachment list after a successful delete", async () => {
+    const recordId = (await createAssetRecord()).record.id;
+    const firstUploadResponse = await POST(formRequest(buildUploadForm(recordId, { fileName: "first.png" })));
+    const first = await firstUploadResponse.json();
+    const secondUploadResponse = await POST(formRequest(buildUploadForm(recordId, { fileName: "second.png" })));
+    const second = await secondUploadResponse.json();
+
+    const beforeListResponse = await GET(listRequest(recordId));
+    const beforeList = await beforeListResponse.json();
+    const deleteResponse = await DELETE_ATTACHMENT(attachmentRequest(first.attachment.id), attachmentContext(first.attachment.id));
+    const deletePayload = await deleteResponse.json();
+    const afterListResponse = await GET(listRequest(recordId));
+    const afterList = await afterListResponse.json();
+
+    expect(beforeListResponse.status).toBe(200);
+    expect(beforeList.attachments).toHaveLength(2);
+    expect(beforeList.attachments).toEqual([first.attachment, second.attachment]);
+    expect(deleteResponse.status).toBe(200);
+    expect(deletePayload.attachment).toMatchObject({
+      id: first.attachment.id,
+      status: "deleted"
+    });
+    expect(afterListResponse.status).toBe(200);
+    expect(afterList.attachments).toHaveLength(1);
+    expect(afterList.attachments).toEqual([second.attachment]);
+  });
+
   it("ignores spoofed DELETE request bodies and uses the session user", async () => {
     const recordId = (await createAssetRecord()).record.id;
     const uploadResponse = await POST(formRequest(buildUploadForm(recordId, { uploadedByUserId: "user-creator-a" })));
