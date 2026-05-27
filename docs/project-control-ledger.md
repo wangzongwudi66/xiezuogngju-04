@@ -5,21 +5,17 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-27 23:25:59 +08:00`.
+Timestamp: `2026-05-27 23:40:46 +08:00`.
 
-- Active branch: `codex/api-contract-helper-error-format`.
-- Branch base: `main@977a989 Record API contract merge`.
-- Latest recorded `main` commit before this branch: `977a989 Record API contract merge`.
-- Current branch adds a focused route-level contract test for `/api/asset-decision-timeline` when `previousDeliveryPackageId` points at a published package from another project.
-- Worktree at last check: dirty for this ledger update and `apps/web/app/api/asset-decision-timeline/route.test.ts` before committing the branch.
+- Active branch: `main`.
+- Latest recorded `main` commit before this ledger update: `3947305 Cover timeline previous project mismatch route`.
+- Latest product/test code commit: `3947305 Cover timeline previous project mismatch route`.
+- Worktree at last check: dirty only for this ledger update after fast-forward merging `codex/api-contract-helper-error-format`.
 - GitHub sync remains blocked: remote `xiezuogongju-04` returns `Repository not found`, so do not push there until repository access or URL is fixed.
 - Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
 
 Recently completed after the xiezuogongju-04 handoff:
 
-- Current branch `codex/api-contract-helper-error-format`
-  - Adds route-level coverage that a cross-project `previousDeliveryPackageId` returns `400 previous_delivery_package_project_mismatch`.
-  - No production logic, UI, CSS, browser QA, remote push, or `codex/timeline-mobile-crop-hardening` changes were included.
 - `6eed4d4 Add asset attachment row actions`
   - Attachment rows in asset lock workbench now show download/delete actions.
   - Download uses Blob/object URL and revokes in `finally`.
@@ -61,14 +57,18 @@ Recently completed after the xiezuogongju-04 handoff:
   - Does not touch `codex/timeline-mobile-crop-hardening`, UI CSS, or production route logic.
 - `b07f6c2 Record API contract test gap branch`
   - Recorded the API contract branch verification before merging it back to `main`.
+- `3947305 Cover timeline previous project mismatch route`
+  - Adds route-level coverage that a cross-project `previousDeliveryPackageId` returns `400 previous_delivery_package_project_mismatch`.
+  - Fast-forward merged `codex/api-contract-helper-error-format` into `main` after targeted test/typecheck/diff verification.
+  - No production logic, UI, CSS, browser QA, remote push, or `codex/timeline-mobile-crop-hardening` changes were included.
 - QA finding not yet fixed: timeline explicit/fallback badge browser QA used a stale `.next` build; fresh-build QA is still needed, and 390px width showed a drawer/source excerpt crop risk.
 
 Latest verification:
 
-- For `codex/api-contract-helper-error-format`:
+- For `codex/api-contract-helper-error-format` after merge into `main`:
   - `npm.cmd run test -w apps/web -- asset-decision-timeline`: passed, 6 files / 49 tests.
   - `npm.cmd run typecheck -w apps/web`: passed.
-  - `git diff --check`: passed, with only Git's LF-to-CRLF warning for touched files.
+  - `git diff --check`: passed.
 - For attachment UI merge:
   - `npm.cmd run verify`: passed.
   - web: 23 files / 196 tests.
@@ -120,6 +120,7 @@ Recommended next phase:
 - Do fresh-build timeline browser QA for explicit/fallback source badges once localhost browser access is allowed, focusing on the 390px drawer/source excerpt crop risk.
 - If `codex/timeline-mobile-crop-hardening` passes 390px/760px/1366px visual QA, fast-forward merge it into `main` and update this ledger.
 - `codex/api-contract-test-gap` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
+- `codex/api-contract-helper-error-format` has been fast-forward merged into `main`; no follow-up needed unless a reviewer asks for broader coverage.
 - Continue staged validation; run full `npm.cmd run verify` only for the next push/cloud-sync or large phase gate.
 - Fix `xiezuogongju-04` repository access or URL before attempting GitHub sync.
 
