@@ -5,17 +5,26 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-28 00:31:58 +08:00`.
+Timestamp: `2026-05-28 01:13:26 +08:00`.
 
-- Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `018fdfa Record attachment empty upload contract merge`.
-- Latest product/test code commit: `6423860 Cover empty attachment upload contract`.
-- Worktree at last check: dirty only for this ledger update after syncing `main` to GitHub.
+- Active branch: `codex/m3-request-actor-boundary`.
+- Branch base: local `main@e7fbf93` (`Record xiezuogngju-04 sync`).
+- Latest recorded `main` commit before this branch: `e7fbf93 Record xiezuogngju-04 sync`.
+- Latest product/test branch work: M3 API request actor boundary for asset lock records, asset lock attachments, and asset decision timeline.
+- Worktree at last check: dirty for this branch implementation and this ledger update.
 - GitHub sync unblocked: remote `xiezuogongju-04` now points to `https://wangzongwudi66@github.com/wangzongwudi66/xiezuogngju-04.git`, and `main@018fdfa` was pushed to `xiezuogongju-04/main`.
 - Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
+- Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- In progress on `codex/m3-request-actor-boundary`
+  - Adds a small route-level workspace actor helper for the current mock session.
+  - M3 asset lock records, asset lock attachments, and asset decision timeline routes now resolve actor from server session and pass it into services.
+  - Services no longer derive request identity directly from shared `WorkspaceState.currentUserId` for these M3 request paths.
+  - Asset attachment upload ignores/removes client `uploadedByUserId`; metadata uses the server session actor and pre-checks record visibility before writing files.
+  - Timeline projection uses the session actor and continues ignoring client `viewerUserId`, `viewerRole`, and `assignedEpisodeNos`.
+  - No DB, object storage, formal cookie/JWT, UI visual, timeline write ability, browser QA, remote push, or `codex/timeline-mobile-crop-hardening` changes were included.
 - `018fdfa Record attachment empty upload contract merge`
   - Recorded the empty attachment upload contract merge after fast-forwarding `codex/attachment-empty-upload-contract` into `main`.
   - `main@018fdfa` has now been pushed to the corrected `xiezuogongju-04` remote URL (`xiezuogngju-04.git`).
@@ -89,6 +98,10 @@ Recently completed after the xiezuogongju-04 handoff:
 
 Latest verification:
 
+- For `codex/m3-request-actor-boundary`:
+  - `npm.cmd run test -w apps/web -- workspace-session asset-lock-records asset-lock-attachments asset-decision-timeline asset-lock-api asset-lock-attachment-api`: passed, 14 files / 135 tests.
+  - `npm.cmd run typecheck -w apps/web`: passed.
+  - `git diff --check`: passed, with only Git's LF-to-CRLF warnings for touched files.
 - For `codex/attachment-empty-upload-contract` after merge into `main`:
   - `npm.cmd run test -w apps/web -- asset-lock-attachments`: passed, 2 files / 31 tests.
   - `npm.cmd run typecheck -w apps/web`: passed.

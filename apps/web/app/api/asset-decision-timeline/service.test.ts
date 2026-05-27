@@ -11,7 +11,8 @@ import type {
   User,
   WorkspaceState
 } from "@aigc/domain";
-import { buildAssetDecisionTimelineProjectionFromWorkspace } from "./service";
+import { buildAssetDecisionTimelineProjectionFromWorkspace as buildAssetDecisionTimelineProjectionFromWorkspaceForActor } from "./service";
+import type { AssetDecisionTimelineProjectionRequest } from "./service";
 
 const now = "2026-05-24T00:00:00.000Z";
 
@@ -400,7 +401,8 @@ function buildWorkspace(overrides: Partial<WorkspaceState> = {}): WorkspaceState
       buildUser("user-coordinator", "coordinator"),
       buildUser("user-creator", "creator"),
       buildUser("user-writer", "writer"),
-      buildUser("user-multi", "creator")
+      buildUser("user-multi", "creator"),
+      buildUser("user-outsider", "creator")
     ],
     projects: [buildProject("project-jincheng"), buildProject("project-tide")],
     members: [buildMember("user-coordinator", "coordinator")],
@@ -416,6 +418,22 @@ function buildWorkspace(overrides: Partial<WorkspaceState> = {}): WorkspaceState
     notifications: [],
     ...overrides
   };
+}
+
+function buildAssetDecisionTimelineProjectionFromWorkspace(
+  state: WorkspaceState,
+  input: Omit<AssetDecisionTimelineProjectionRequest, "actor"> & {
+    actor?: AssetDecisionTimelineProjectionRequest["actor"];
+  }
+) {
+  return buildAssetDecisionTimelineProjectionFromWorkspaceForActor(state, {
+    ...input,
+    actor: input.actor ?? actorFromState(state)
+  });
+}
+
+function actorFromState(state: WorkspaceState): AssetDecisionTimelineProjectionRequest["actor"] {
+  return state.currentUserId ? { userId: state.currentUserId } : null;
 }
 
 function buildUser(id: string, defaultRole: User["defaultRole"]): User {

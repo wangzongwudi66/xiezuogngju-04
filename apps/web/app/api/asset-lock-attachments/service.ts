@@ -4,6 +4,7 @@ import path from "node:path";
 import { createAssetAttachmentMetadata, listAssetAttachmentsForRecord, selectPrimaryRole, softDeleteAssetAttachment } from "@aigc/domain";
 import type { AssetAttachment, AssetAttachmentType, AssetLockRecord, EpisodeAssignment, ProjectRole, WorkspaceState } from "@aigc/domain";
 import { mutateDeliveryImportWorkspace, readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import type { WorkspaceRequestActor } from "../workspace-actor";
 
 const attachmentFileDirEnvKey = "AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR";
 const defaultAttachmentFileDir = path.join(process.cwd(), ".local-data", "asset-lock-attachments");
@@ -18,7 +19,6 @@ const allowedAttachmentTypes: Record<string, { extension: string; mime: string }
 
 export interface AssetAttachmentUploadInput {
   assetLockRecordId: string;
-  uploadedByUserId: string;
   attachmentType: AssetAttachmentType;
   note?: string;
   fileName: string;
@@ -35,6 +35,7 @@ export interface AssetAttachmentDownload {
 
 export async function uploadAssetAttachment(
   input: AssetAttachmentUploadInput,
+  actor: WorkspaceRequestActor,
   options: {
     persistMetadata?: typeof mutateDeliveryImportWorkspace;
   } = {}
@@ -53,11 +54,13 @@ export async function uploadAssetAttachment(
     mime: fileRule.mime,
     size: bytes.byteLength,
     attachmentType: input.attachmentType,
-    uploadedByUserId: input.uploadedByUserId,
+    uploadedByUserId: actor.userId,
     note: input.note
   };
 
   const workspace = await readDeliveryImportWorkspace();
+  assertKnownActor(workspace.state, actor);
+  requireVisibleRecordAccess(workspace.state, input.assetLockRecordId, actor);
   createAssetAttachmentMetadata(workspace.state, metadataInput);
   const filePath = resolveAssetAttachmentFilePath(fileId, fileRule.extension);
   const persistMetadata = options.persistMetadata ?? mutateDeliveryImportWorkspace;
@@ -80,15 +83,15 @@ export async function uploadAssetAttachment(
   }
 }
 
-export async function listAssetAttachments(recordId: string) {
+export async function listAssetAttachments(recordId: string, actor: WorkspaceRequestActor) {
   const workspace = await readDeliveryImportWorkspace();
-  const { record } = requireVisibleRecordAccess(workspace.state, recordId);
+  const { record } = requireVisibleRecordAccess(workspace.state, recordId, actor);
   return listAssetAttachmentsForRecord(workspace.state, record.id);
 }
 
-export async function downloadAssetAttachment(attachmentId: string): Promise<AssetAttachmentDownload> {
+export async function downloadAssetAttachment(attachmentId: string, actor: WorkspaceRequestActor): Promise<AssetAttachmentDownload> {
   const workspace = await readDeliveryImportWorkspace();
-  const { attachment } = requireActiveAttachmentAccess(workspace.state, attachmentId);
+  const { attachment } = requireActiveAttachmentAccess(workspace.state, attachmentId, actor);
   const filePath = resolveAssetAttachmentFilePath(attachment.fileId, path.extname(attachment.fileName));
   let bytes: Uint8Array;
 
@@ -106,10 +109,10 @@ export async function downloadAssetAttachment(attachmentId: string): Promise<Ass
   };
 }
 
-export async function deleteAssetAttachment(attachmentId: string): Promise<AssetAttachment> {
+export async function deleteAssetAttachment(attachmentId: string, actor: WorkspaceRequestActor): Promise<AssetAttachment> {
   let deletedAttachment: AssetAttachment | null = null;
   const snapshot = await mutateDeliveryImportWorkspace((state) => {
-    const { attachment, record, viewerRole, viewerUserId } = requireActiveAttachmentAccess(state, attachmentId);
+    const { attachment, record, viewerRole, viewerUserId } = requireActiveAttachmentAccess(state, attachmentId, actor);
 
     assertCanDeleteAttachment(attachment, record, viewerUserId, viewerRole);
 
@@ -174,7 +177,7 @@ function findCreatedAttachment(state: WorkspaceState, fileId: string) {
   return (state.assetAttachments ?? []).find((attachment) => attachment.fileId === fileId) ?? null;
 }
 
-function requireActiveAttachmentAccess(state: WorkspaceState, attachmentId: string) {
+function requireActiveAttachmentAccess(state: WorkspaceState, attachmentId: string, actor: WorkspaceRequestActor) {
   const normalizedAttachmentId = attachmentId.trim();
 
   if (!normalizedAttachmentId) {
@@ -197,19 +200,19 @@ function requireActiveAttachmentAccess(state: WorkspaceState, attachmentId: stri
     throw new Error("asset_attachment_record_mismatch");
   }
 
-  const { viewerRole, viewerUserId } = requireVisibleRecordAccess(state, record.id);
+  const { viewerRole, viewerUserId } = requireVisibleRecordAccess(state, record.id, actor);
 
   return { attachment, record, viewerRole, viewerUserId };
 }
 
-function requireVisibleRecordAccess(state: WorkspaceState, assetLockRecordId: string) {
+function requireVisibleRecordAccess(state: WorkspaceState, assetLockRecordId: string, actor: WorkspaceRequestActor) {
   const normalizedRecordId = assetLockRecordId.trim();
 
   if (!normalizedRecordId) {
     throw new Error("asset_attachment_record_id_required");
   }
 
-  const viewerUserId = requireCurrentUserId(state);
+  const viewerUserId = requireActorUserId(state, actor);
   const record = (state.assetLockRecords ?? []).find((item) => item.id === normalizedRecordId);
 
   if (!record) {
@@ -221,12 +224,16 @@ function requireVisibleRecordAccess(state: WorkspaceState, assetLockRecordId: st
   return { record, viewerRole, viewerUserId };
 }
 
-function requireCurrentUserId(state: WorkspaceState) {
-  if (!state.currentUserId || !state.users.some((user) => user.id === state.currentUserId)) {
+function requireActorUserId(state: WorkspaceState, actor: WorkspaceRequestActor) {
+  if (!actor.userId || !state.users.some((user) => user.id === actor.userId)) {
     throw new Error("asset_attachment_unauthenticated");
   }
 
-  return state.currentUserId;
+  return actor.userId;
+}
+
+function assertKnownActor(state: WorkspaceState, actor: WorkspaceRequestActor) {
+  requireActorUserId(state, actor);
 }
 
 function requireVisibleAssetLockRecord(state: WorkspaceState, record: AssetLockRecord, viewerUserId: string) {

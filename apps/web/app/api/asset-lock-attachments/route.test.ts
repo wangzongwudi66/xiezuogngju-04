@@ -31,7 +31,7 @@ describe("asset lock attachment route", () => {
 
   it("uploads an attachment and lists active attachments without exposing storage paths", async () => {
     const recordId = (await createAssetRecord()).record.id;
-    const uploadResponse = await POST(formRequest(buildUploadForm(recordId)));
+    const uploadResponse = await POST(formRequest(buildUploadForm(recordId, { uploadedByUserId: "user-owner" })));
     const created = await uploadResponse.json();
     const listResponse = await GET(new Request(`http://localhost/api/asset-lock-attachments?recordId=${recordId}`));
     const listed = await listResponse.json();
@@ -44,7 +44,8 @@ describe("asset lock attachment route", () => {
         fileId: expect.stringMatching(/^asset-att-/),
         fileName: "reference.png",
         mime: "image/png",
-        status: "active"
+        status: "active",
+        uploadedByUserId: "user-head-writer"
       }
     });
     expect(serialized).not.toContain("filePath");
@@ -90,6 +91,28 @@ describe("asset lock attachment route", () => {
     await expect(creatorVisible.json()).resolves.toEqual({ attachments: [created.attachment] });
     expect(creatorHidden.status).toBe(403);
     await expect(creatorHidden.json()).resolves.toEqual({ error: "asset_attachment_forbidden" });
+  });
+
+  it("requires the current session actor for uploads and does not fall back to uploadedByUserId", async () => {
+    const recordId = (await createAssetRecord()).record.id;
+    await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: null }));
+    const unauthenticated = await POST(formRequest(buildUploadForm(recordId, { uploadedByUserId: "user-head-writer" })));
+
+    await addOutsider();
+    await login("user-outsider");
+    const nonMember = await POST(formRequest(buildUploadForm(recordId, { uploadedByUserId: "user-head-writer" })));
+
+    expect(unauthenticated.status).toBe(401);
+    await expect(unauthenticated.json()).resolves.toMatchObject({
+      error: "asset_attachment_unauthenticated",
+      message: "asset_attachment_unauthenticated"
+    });
+    expect(nonMember.status).toBe(403);
+    await expect(nonMember.json()).resolves.toMatchObject({
+      error: "asset_attachment_project_member_required",
+      message: "asset_attachment_project_member_required"
+    });
+    await expect(readSavedFileNames()).resolves.toEqual([]);
   });
 
   it("supports JPEG and PDF multipart uploads", async () => {
@@ -142,9 +165,10 @@ describe("asset lock attachment route", () => {
     await expect(emptyFileResponse.json()).resolves.toMatchObject({
       error: "asset_attachment_file_empty"
     });
-    expect(missingRecordResponse.status).toBe(400);
+    expect(missingRecordResponse.status).toBe(404);
     await expect(missingRecordResponse.json()).resolves.toMatchObject({
-      error: "asset_attachment_upload_failed"
+      error: "asset_attachment_record_not_found",
+      message: "asset_attachment_record_not_found"
     });
     await expect(readSavedFileNames()).resolves.toEqual([]);
   });
@@ -227,7 +251,8 @@ describe("asset lock attachment route", () => {
 
   it("ignores spoofed DELETE request bodies and uses the session user", async () => {
     const recordId = (await createAssetRecord()).record.id;
-    const uploadResponse = await POST(formRequest(buildUploadForm(recordId, { uploadedByUserId: "user-creator-a" })));
+    await login("user-creator-a");
+    const uploadResponse = await POST(formRequest(buildUploadForm(recordId, { uploadedByUserId: "user-head-writer" })));
     const created = await uploadResponse.json();
     await login("user-head-writer");
 
@@ -247,6 +272,7 @@ describe("asset lock attachment route", () => {
     await expect(spoofedByHeadWriter.json()).resolves.toEqual({ error: "asset_attachment_delete_forbidden" });
     expect(deletedByCoordinator.status).toBe(200);
     expect(payload.attachment.deletedByUserId).toBe("user-owner");
+    expect(payload.attachment.uploadedByUserId).toBe("user-creator-a");
   });
 
   it("maps GET and DELETE attachment errors to stable statuses", async () => {
@@ -365,7 +391,7 @@ describe("asset lock attachment route", () => {
       changeType: "new",
       createdByUserId: "user-head-writer",
       risk: "attention"
-    });
+    }, { userId: "user-head-writer" });
   }
 
   async function login(userId: string) {
@@ -387,13 +413,13 @@ describe("asset lock attachment route", () => {
       action: "writer_confirm",
       assetLockRecordId,
       confirmedByUserId: "user-head-writer"
-    });
+    }, { userId: "user-head-writer" });
     await login("user-creator-a");
     await mutateAssetLockRecord({
       action: "production_confirm",
       assetLockRecordId,
       confirmedByUserId: "user-creator-a"
-    });
+    }, { userId: "user-creator-a" });
     await mutateDeliveryImportWorkspace((state) =>
       finalLockAssetRecord(state, {
         assetLockRecordId,

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireWorkspaceRequestActor } from "../workspace-actor";
 import { listAssetLockRecords, mutateAssetLockRecord } from "./service";
 import type { AssetLockRecordMutationRequest } from "./service";
 import type { AssetChangeType, AssetRiskLevel, AssetType } from "@aigc/domain";
@@ -11,7 +12,8 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
   try {
-    return NextResponse.json(await listAssetLockRecords(searchParams.get("projectId") ?? undefined));
+    const actor = await requireWorkspaceRequestActor("asset_lock_unauthenticated");
+    return NextResponse.json(await listAssetLockRecords(searchParams.get("projectId") ?? undefined, actor));
   } catch (error) {
     return assetLockErrorResponse(error, "asset_lock_records_request_failed");
   }
@@ -33,7 +35,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    return NextResponse.json(await mutateAssetLockRecord(input));
+    const actor = await requireWorkspaceRequestActor("asset_lock_unauthenticated");
+    return NextResponse.json(await mutateAssetLockRecord(input, actor));
   } catch (error) {
     return assetLockErrorResponse(error, "asset_lock_record_mutation_failed");
   }

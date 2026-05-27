@@ -6,7 +6,12 @@ import { loginAsUser, seedWorkspace } from "@aigc/domain";
 import { createDeliveryImportJob, getDeliveryImportWorkspace } from "../delivery-import-jobs/service";
 import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { mutateDeliveryPackage } from "../delivery-packages/service";
-import { listAssetLockRecords, mutateAssetLockRecord } from "./service";
+import {
+  listAssetLockRecords as listAssetLockRecordsForActor,
+  mutateAssetLockRecord as mutateAssetLockRecordForActor
+} from "./service";
+
+let currentActorUserId = "user-head-writer";
 
 describe("asset lock record service", () => {
   let storeDir: string;
@@ -787,5 +792,14 @@ async function bindSource(
 }
 
 async function login(userId: string) {
+  currentActorUserId = userId;
   await mutateDeliveryImportWorkspace((state) => loginAsUser(state, userId));
+}
+
+function listAssetLockRecords(projectId?: string) {
+  return listAssetLockRecordsForActor(projectId, { userId: currentActorUserId });
+}
+
+function mutateAssetLockRecord(input: Parameters<typeof mutateAssetLockRecordForActor>[0]) {
+  return mutateAssetLockRecordForActor(input, { userId: currentActorUserId });
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveWorkspaceRequestActor } from "../workspace-actor";
 import { getAssetDecisionTimelineProjection } from "./service";
 import type { AssetDecisionTimelineProjectionError } from "./service";
 
@@ -12,10 +13,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "invalid_asset_decision_timeline_request" }, { status: 400 });
   }
 
+  const actor = await resolveWorkspaceRequestActor();
   const result = await getAssetDecisionTimelineProjection({
     projectId,
     deliveryPackageId,
-    previousDeliveryPackageId
+    previousDeliveryPackageId,
+    actor
   });
 
   return NextResponse.json(result, { status: result.ok ? 200 : statusForProjectionError(result.error) });

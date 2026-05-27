@@ -8,9 +8,9 @@ import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persisten
 import { mutateDeliveryPackage } from "../delivery-packages/service";
 import { mutateAssetLockRecord } from "../asset-lock-records/service";
 import {
-  deleteAssetAttachment,
-  downloadAssetAttachment,
-  listAssetAttachments,
+  deleteAssetAttachment as deleteAssetAttachmentForActor,
+  downloadAssetAttachment as downloadAssetAttachmentForActor,
+  listAssetAttachments as listAssetAttachmentsForActor,
   resolveAssetAttachmentFilePath,
   uploadAssetAttachment
 } from "./service";
@@ -21,8 +21,10 @@ type UploadOverrides = {
   fileName: string;
   mime: string;
   note: string;
-  uploadedByUserId: string;
+  actorUserId: string;
 };
+
+let currentActorUserId = "user-head-writer";
 
 describe("asset lock attachment service", () => {
   let storeDir: string;
@@ -81,7 +83,7 @@ describe("asset lock attachment service", () => {
       )
     }));
 
-    const attachments = await listAssetAttachments(record.id);
+    const attachments = await list(record.id);
 
     expect(attachments).toHaveLength(1);
     expect(attachments[0].fileName).toBe("second.png");
@@ -92,11 +94,12 @@ describe("asset lock attachment service", () => {
     await upload(record.id);
 
     await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: null }));
-    await expect(listAssetAttachments(record.id)).rejects.toThrow("asset_attachment_unauthenticated");
+    currentActorUserId = "";
+    await expect(list(record.id)).rejects.toThrow("asset_attachment_unauthenticated");
 
     await addOutsider();
     await login("user-outsider");
-    await expect(listAssetAttachments(record.id)).rejects.toThrow("asset_attachment_project_member_required");
+    await expect(list(record.id)).rejects.toThrow("asset_attachment_project_member_required");
   });
 
   it("lists attachments only when writer and creator users can see the asset record", async () => {
@@ -106,27 +109,27 @@ describe("asset lock attachment service", () => {
     await upload(hiddenRecord.id, { fileName: "hidden.png" });
 
     await login("user-writer");
-    await expect(listAssetAttachments(visibleRecord.id)).resolves.toEqual([visibleAttachment]);
-    await expect(listAssetAttachments(hiddenRecord.id)).rejects.toThrow("asset_attachment_forbidden");
+    await expect(list(visibleRecord.id)).resolves.toEqual([visibleAttachment]);
+    await expect(list(hiddenRecord.id)).rejects.toThrow("asset_attachment_forbidden");
 
     await login("user-creator-a");
-    await expect(listAssetAttachments(visibleRecord.id)).resolves.toEqual([visibleAttachment]);
-    await expect(listAssetAttachments(hiddenRecord.id)).rejects.toThrow("asset_attachment_forbidden");
+    await expect(list(visibleRecord.id)).resolves.toEqual([visibleAttachment]);
+    await expect(list(hiddenRecord.id)).rejects.toThrow("asset_attachment_forbidden");
   });
 
   it("downloads active attachment content for a visible project member", async () => {
     const record = (await createAssetRecord()).record;
     const attachment = await upload(record.id, { fileName: "layout.png", fileBuffer: pngBytes() });
 
-    const download = await downloadAssetAttachment(attachment.id);
-    const serialized = JSON.stringify(download);
+    const downloaded = await download(attachment.id);
+    const serialized = JSON.stringify(downloaded);
 
-    expect(download).toMatchObject({
+    expect(downloaded).toMatchObject({
       fileName: "layout.png",
       mime: "image/png",
       size: pngBytes().byteLength
     });
-    expect(Buffer.from(download.bytes)).toEqual(Buffer.from(pngBytes()));
+    expect(Buffer.from(downloaded.bytes)).toEqual(Buffer.from(pngBytes()));
     expect(serialized).not.toContain("filePath");
     expect(serialized).not.toContain(".local-data");
     expect(serialized).not.toContain(storeDir);
@@ -141,8 +144,8 @@ describe("asset lock attachment service", () => {
 
     await login("user-writer");
 
-    await expect(downloadAssetAttachment(visibleAttachment.id)).resolves.toMatchObject({ fileName: "writer-visible.png" });
-    await expect(downloadAssetAttachment(hiddenAttachment.id)).rejects.toThrow("asset_attachment_forbidden");
+    await expect(download(visibleAttachment.id)).resolves.toMatchObject({ fileName: "writer-visible.png" });
+    await expect(download(hiddenAttachment.id)).rejects.toThrow("asset_attachment_forbidden");
   });
 
   it("soft deletes active attachments without removing stored files", async () => {
@@ -150,7 +153,7 @@ describe("asset lock attachment service", () => {
     const attachment = await upload(record.id);
     const savedFilesBeforeDelete = await readSavedFileNames();
 
-    const deleted = await deleteAssetAttachment(attachment.id);
+    const deleted = await remove(attachment.id);
     const workspace = await getDeliveryImportWorkspace();
     const persisted = workspace.state.assetAttachments?.find((item) => item.id === attachment.id);
     const serialized = JSON.stringify(deleted);
@@ -162,7 +165,7 @@ describe("asset lock attachment service", () => {
       deletedAt: expect.any(String)
     });
     expect(persisted).toMatchObject({ status: "deleted", deletedByUserId: "user-head-writer" });
-    await expect(listAssetAttachments(record.id)).resolves.toEqual([]);
+    await expect(list(record.id)).resolves.toEqual([]);
     await expect(readSavedFileNames()).resolves.toEqual(savedFilesBeforeDelete);
     expect(serialized).not.toContain("filePath");
     expect(serialized).not.toContain(".local-data");
@@ -173,26 +176,27 @@ describe("asset lock attachment service", () => {
   it("allows owner and coordinator deletes but blocks head writer deletes for attachments uploaded by someone else", async () => {
     await addProjectOwner();
     const record = (await createAssetRecord()).record;
-    const ownerDeletedAttachment = await upload(record.id, { fileName: "owner-delete.png", uploadedByUserId: "user-creator-a" });
-    const coordinatorDeletedAttachment = await upload(record.id, { fileName: "coordinator-delete.png", uploadedByUserId: "user-creator-a" });
-    const headWriterBlockedAttachment = await upload(record.id, { fileName: "head-writer-blocked.png", uploadedByUserId: "user-creator-a" });
+    await login("user-creator-a");
+    const ownerDeletedAttachment = await upload(record.id, { fileName: "owner-delete.png" });
+    const coordinatorDeletedAttachment = await upload(record.id, { fileName: "coordinator-delete.png" });
+    const headWriterBlockedAttachment = await upload(record.id, { fileName: "head-writer-blocked.png" });
 
     await login("user-project-owner");
-    await expect(deleteAssetAttachment(ownerDeletedAttachment.id)).resolves.toMatchObject({
+    await expect(remove(ownerDeletedAttachment.id)).resolves.toMatchObject({
       id: ownerDeletedAttachment.id,
       status: "deleted",
       deletedByUserId: "user-project-owner"
     });
 
     await login("user-owner");
-    await expect(deleteAssetAttachment(coordinatorDeletedAttachment.id)).resolves.toMatchObject({
+    await expect(remove(coordinatorDeletedAttachment.id)).resolves.toMatchObject({
       id: coordinatorDeletedAttachment.id,
       status: "deleted",
       deletedByUserId: "user-owner"
     });
 
     await login("user-head-writer");
-    await expect(deleteAssetAttachment(headWriterBlockedAttachment.id)).rejects.toThrow("asset_attachment_delete_forbidden");
+    await expect(remove(headWriterBlockedAttachment.id)).rejects.toThrow("asset_attachment_delete_forbidden");
   });
 
   it("requires membership and record visibility before downloading or deleting", async () => {
@@ -204,16 +208,16 @@ describe("asset lock attachment service", () => {
       users: [...state.users, { id: "user-outsider", name: "Outsider", defaultRole: "creator", avatarTone: "ink" }]
     }));
     await login("user-outsider");
-    await expect(downloadAssetAttachment(attachment.id)).rejects.toThrow("asset_attachment_project_member_required");
-    await expect(deleteAssetAttachment(attachment.id)).rejects.toThrow("asset_attachment_project_member_required");
+    await expect(download(attachment.id)).rejects.toThrow("asset_attachment_project_member_required");
+    await expect(remove(attachment.id)).rejects.toThrow("asset_attachment_project_member_required");
 
     await login("user-creator-b");
-    await expect(downloadAssetAttachment(attachment.id)).rejects.toThrow("asset_attachment_forbidden");
-    await expect(deleteAssetAttachment(attachment.id)).rejects.toThrow("asset_attachment_forbidden");
+    await expect(download(attachment.id)).rejects.toThrow("asset_attachment_forbidden");
+    await expect(remove(attachment.id)).rejects.toThrow("asset_attachment_forbidden");
 
     await login("user-creator-a");
-    await expect(downloadAssetAttachment(attachment.id)).resolves.toMatchObject({ fileName: "reference.png" });
-    await expect(deleteAssetAttachment(attachment.id)).rejects.toThrow("asset_attachment_delete_forbidden");
+    await expect(download(attachment.id)).resolves.toMatchObject({ fileName: "reference.png" });
+    await expect(remove(attachment.id)).rejects.toThrow("asset_attachment_delete_forbidden");
   });
 
   it("blocks every attachment delete for locked records while downloads still work", async () => {
@@ -223,10 +227,10 @@ describe("asset lock attachment service", () => {
     await lockRecord(record.id);
     await login("user-owner");
 
-    await expect(deleteAssetAttachment(first.id)).rejects.toThrow("asset_attachment_locked_record_delete_forbidden");
-    await expect(deleteAssetAttachment(second.id)).rejects.toThrow("asset_attachment_locked_record_delete_forbidden");
-    await expect(downloadAssetAttachment(first.id)).resolves.toMatchObject({ fileName: "first.png" });
-    await expect(downloadAssetAttachment(second.id)).resolves.toMatchObject({ fileName: "second.png" });
+    await expect(remove(first.id)).rejects.toThrow("asset_attachment_locked_record_delete_forbidden");
+    await expect(remove(second.id)).rejects.toThrow("asset_attachment_locked_record_delete_forbidden");
+    await expect(download(first.id)).resolves.toMatchObject({ fileName: "first.png" });
+    await expect(download(second.id)).resolves.toMatchObject({ fileName: "second.png" });
 
     const workspace = await getDeliveryImportWorkspace();
     expect(workspace.state.assetAttachments?.find((attachment) => attachment.id === first.id)?.status).toBe("active");
@@ -242,13 +246,13 @@ describe("asset lock attachment service", () => {
       assetAttachments: state.assetAttachments?.map((item) => (item.id === attachment.id ? { ...item, status: "deleted" } : item))
     }));
 
-    await expect(downloadAssetAttachment(attachment.id)).rejects.toThrow("asset_attachment_not_found");
-    await expect(deleteAssetAttachment(attachment.id)).rejects.toThrow("asset_attachment_not_found");
+    await expect(download(attachment.id)).rejects.toThrow("asset_attachment_not_found");
+    await expect(remove(attachment.id)).rejects.toThrow("asset_attachment_not_found");
 
     const workspace = await getDeliveryImportWorkspace();
     expect(workspace.state.assetAttachments?.find((item) => item.id === attachment.id)?.status).toBe("deleted");
     await expect(readSavedFileNames()).resolves.toEqual([`${attachment.fileId}.png`]);
-    await expect(listAssetAttachments(record.id)).resolves.toEqual([]);
+    await expect(list(record.id)).resolves.toEqual([]);
   });
 
   it("rejects missing, empty, too large, and mismatched file types before writing metadata", async () => {
@@ -277,19 +281,19 @@ describe("asset lock attachment service", () => {
       ...state,
       users: [...state.users, { id: "user-outsider", name: "Outsider", defaultRole: "creator", avatarTone: "ink" }]
     }));
-    await expect(upload(record.id, { uploadedByUserId: "user-outsider" })).rejects.toThrow();
+    await expect(upload(record.id, { actorUserId: "user-outsider" })).rejects.toThrow();
 
     await mutateAssetLockRecord({
       action: "writer_confirm",
       assetLockRecordId: record.id,
       confirmedByUserId: "user-head-writer"
-    });
+    }, { userId: currentActorUserId });
     await login("user-creator-a");
     await mutateAssetLockRecord({
       action: "production_confirm",
       assetLockRecordId: record.id,
       confirmedByUserId: "user-creator-a"
-    });
+    }, { userId: currentActorUserId });
     await mutateDeliveryImportWorkspace((state) =>
       finalLockAssetRecord(state, {
         assetLockRecordId: record.id,
@@ -330,7 +334,7 @@ describe("asset lock attachment service", () => {
       )
     }));
 
-    await expect(downloadAssetAttachment(attachment.id)).rejects.toThrow("asset_attachment_file_id_invalid");
+    await expect(download(attachment.id)).rejects.toThrow("asset_attachment_file_id_invalid");
   });
 
   it("cleans up the saved file if metadata persistence fails", async () => {
@@ -339,6 +343,7 @@ describe("asset lock attachment service", () => {
     await expect(
       uploadAssetAttachment(
         buildUploadInput(record.id),
+        { userId: currentActorUserId },
         {
           persistMetadata: async () => {
             throw new Error("forced_metadata_failure");
@@ -377,10 +382,11 @@ describe("asset lock attachment service", () => {
       changeType: "new",
       createdByUserId: "user-head-writer",
       risk: "attention"
-    });
+    }, { userId: currentActorUserId });
   }
 
   async function login(userId: string) {
+    currentActorUserId = userId;
     await mutateDeliveryImportWorkspace((state) => loginAsUser(state, userId));
   }
 
@@ -419,17 +425,17 @@ describe("asset lock attachment service", () => {
     await mutateAssetLockRecord({
       action: "writer_confirm",
       assetLockRecordId
-    });
+    }, { userId: currentActorUserId });
     await login("user-creator-a");
     await mutateAssetLockRecord({
       action: "production_confirm",
       assetLockRecordId
-    });
+    }, { userId: currentActorUserId });
     await login("user-owner");
     await mutateAssetLockRecord({
       action: "final_lock",
       assetLockRecordId
-    });
+    }, { userId: currentActorUserId });
   }
 
   async function createPublishedDeliveryPackage(episodeNos = [1, 2]) {
@@ -462,13 +468,24 @@ describe("asset lock attachment service", () => {
   }
 
   function upload(recordId: string, overrides: Partial<UploadOverrides> = {}) {
-    return uploadAssetAttachment(buildUploadInput(recordId, overrides));
+    return uploadAssetAttachment(buildUploadInput(recordId, overrides), { userId: overrides.actorUserId ?? currentActorUserId });
+  }
+
+  function list(recordId: string) {
+    return listAssetAttachmentsForActor(recordId, { userId: currentActorUserId });
+  }
+
+  function download(attachmentId: string) {
+    return downloadAssetAttachmentForActor(attachmentId, { userId: currentActorUserId });
+  }
+
+  function remove(attachmentId: string) {
+    return deleteAssetAttachmentForActor(attachmentId, { userId: currentActorUserId });
   }
 
   function buildUploadInput(recordId: string, overrides: Partial<UploadOverrides> = {}) {
     return {
       assetLockRecordId: recordId,
-      uploadedByUserId: overrides.uploadedByUserId ?? "user-head-writer",
       attachmentType: overrides.attachmentType ?? "reference",
       note: overrides.note ?? "reference note",
       fileName: overrides.fileName ?? "reference.png",

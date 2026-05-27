@@ -3,6 +3,7 @@ import type { WorkspaceState } from "@aigc/domain";
 import { buildAssetTimelineProjection } from "../../asset-decision-timeline/projection";
 import type { RoleScopedAssetTimelineViewModel } from "../../ui/asset-decision-timeline-data";
 import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import type { WorkspaceRequestActor } from "../workspace-actor";
 
 export type AssetDecisionTimelineProjectionError =
   | "unauthenticated"
@@ -20,6 +21,7 @@ export interface AssetDecisionTimelineProjectionRequest {
   projectId: string;
   deliveryPackageId: string;
   previousDeliveryPackageId?: string;
+  actor: WorkspaceRequestActor | null;
 }
 
 export type AssetDecisionTimelineProjectionResponse =
@@ -44,9 +46,9 @@ export function buildAssetDecisionTimelineProjectionFromWorkspace(
   state: WorkspaceState,
   input: AssetDecisionTimelineProjectionRequest
 ): AssetDecisionTimelineProjectionResponse {
-  const viewerUserId = state.currentUserId;
+  const viewerUserId = input.actor?.userId;
 
-  if (!viewerUserId) {
+  if (!viewerUserId || !state.users.some((user) => user.id === viewerUserId)) {
     return { ok: false, error: "unauthenticated" };
   }
 

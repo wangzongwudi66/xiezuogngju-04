@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { AssetAttachment } from "@aigc/domain";
+import { requireWorkspaceRequestActor } from "../../workspace-actor";
 import { deleteAssetAttachment, downloadAssetAttachment } from "../service";
 
 type AttachmentRouteContext = {
@@ -14,7 +15,8 @@ export async function GET(_request: Request, context: AttachmentRouteContext) {
   }
 
   try {
-    const download = await downloadAssetAttachment(attachmentId);
+    const actor = await requireWorkspaceRequestActor("asset_attachment_unauthenticated");
+    const download = await downloadAssetAttachment(attachmentId, actor);
 
     return new Response(toArrayBuffer(download.bytes), {
       headers: {
@@ -37,7 +39,8 @@ export async function DELETE(_request: Request, context: AttachmentRouteContext)
   }
 
   try {
-    const attachment = await deleteAssetAttachment(attachmentId);
+    const actor = await requireWorkspaceRequestActor("asset_attachment_unauthenticated");
+    const attachment = await deleteAssetAttachment(attachmentId, actor);
     return NextResponse.json({ attachment });
   } catch (error) {
     return attachmentErrorResponse(errorCodeFromUnknown(error, "asset_attachment_delete_failed"));

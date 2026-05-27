@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { AssetAttachmentType } from "@aigc/domain";
+import { requireWorkspaceRequestActor } from "../workspace-actor";
 import { listAssetAttachments, uploadAssetAttachment } from "./service";
+import type { AssetAttachmentUploadInput } from "./service";
 
 const attachmentTypes: AssetAttachmentType[] = ["reference", "production", "final"];
 
@@ -13,7 +15,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    return NextResponse.json({ attachments: await listAssetAttachments(recordId) });
+    const actor = await requireWorkspaceRequestActor("asset_attachment_unauthenticated");
+    return NextResponse.json({ attachments: await listAssetAttachments(recordId, actor) });
   } catch (error) {
     return attachmentErrorResponse(errorCodeFromUnknown(error, "asset_attachment_list_failed"));
   }
@@ -35,7 +38,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const attachment = await uploadAssetAttachment(parsed.input);
+    const actor = await requireWorkspaceRequestActor("asset_attachment_unauthenticated");
+    const attachment = await uploadAssetAttachment(parsed.input, actor);
     return NextResponse.json({ attachment });
   } catch (error) {
     const message = error instanceof Error ? error.message : "asset attachment upload failed";
@@ -46,7 +50,7 @@ export async function POST(request: Request) {
         error: errorCode,
         message
       },
-      { status: 400 }
+      { status: statusForAttachmentError(errorCode) }
     );
   }
 }
@@ -54,11 +58,10 @@ export async function POST(request: Request) {
 async function parseUploadRequest(
   form: FormData
 ): Promise<
-  | { ok: true; input: Parameters<typeof uploadAssetAttachment>[0] }
+  | { ok: true; input: AssetAttachmentUploadInput }
   | { ok: false; error: "asset_attachment_file_required" | "invalid_asset_attachment_request" }
 > {
   const assetLockRecordId = readString(form.get("assetLockRecordId"));
-  const uploadedByUserId = readString(form.get("uploadedByUserId"));
   const attachmentType = readAttachmentType(form.get("attachmentType"));
   const note = readOptionalString(form.get("note"));
   const file = form.get("file");
@@ -67,7 +70,7 @@ async function parseUploadRequest(
     return { ok: false, error: "asset_attachment_file_required" };
   }
 
-  if (!assetLockRecordId || !uploadedByUserId || !attachmentType) {
+  if (!assetLockRecordId || !attachmentType) {
     return { ok: false, error: "invalid_asset_attachment_request" };
   }
 
@@ -75,7 +78,6 @@ async function parseUploadRequest(
     ok: true,
     input: {
       assetLockRecordId,
-      uploadedByUserId,
       attachmentType,
       note,
       fileName: file.name,

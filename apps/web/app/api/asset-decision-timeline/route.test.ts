@@ -36,7 +36,7 @@ describe("asset decision timeline route", () => {
   it("returns a read-only projection for the current project member", async () => {
     const deliveryPackageId = await createPublishedPackage();
     await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-head-writer"));
-    await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Mine Lift", [1]));
+    await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Mine Lift", [1]), { userId: "user-head-writer" });
     await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-owner"));
 
     const response = await GET(
@@ -62,8 +62,8 @@ describe("asset decision timeline route", () => {
   it("does not accept client-controlled viewer identity or assignment scope", async () => {
     const deliveryPackageId = await createPublishedPackage();
     await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-head-writer"));
-    await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Mine Lift", [1]));
-    await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Far Signal", [9]));
+    await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Mine Lift", [1]), { userId: "user-head-writer" });
+    await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Far Signal", [9]), { userId: "user-head-writer" });
     await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-creator-a"));
 
     const response = await GET(
@@ -89,8 +89,8 @@ describe("asset decision timeline route", () => {
   it("returns only session-visible explicit source bindings", async () => {
     const deliveryPackageId = await createPublishedPackage();
     await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-head-writer"));
-    const visible = await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Mine Lift", [1]));
-    const hidden = await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Far Signal", [9]));
+    const visible = await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Mine Lift", [1]), { userId: "user-head-writer" });
+    const hidden = await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Far Signal", [9]), { userId: "user-head-writer" });
     await mutateDeliveryImportWorkspace((state) => ({
       ...state,
       scriptSourceBindings: [

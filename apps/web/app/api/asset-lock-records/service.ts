@@ -24,6 +24,7 @@ import type {
   WorkspaceState
 } from "@aigc/domain";
 import { mutateDeliveryImportWorkspace, readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import type { WorkspaceRequestActor } from "../workspace-actor";
 
 export type AssetLockRecordMutationRequest =
   | {
@@ -112,9 +113,13 @@ export interface AssetLockRecordSummary {
   pendingProductionCount: number;
 }
 
-export async function listAssetLockRecords(projectId?: string): Promise<AssetLockRecordListResponse> {
+export async function listAssetLockRecords(
+  projectId: string | undefined,
+  actor: WorkspaceRequestActor
+): Promise<AssetLockRecordListResponse> {
   const workspace = await readDeliveryImportWorkspace();
-  const viewerUserId = requireCurrentUserId(workspace.state);
+  const viewerUserId = actor.userId;
+  assertKnownActor(workspace.state, actor);
   const records = selectAssetLockRecords(workspace.state, projectId, viewerUserId);
 
   return {
@@ -124,7 +129,10 @@ export async function listAssetLockRecords(projectId?: string): Promise<AssetLoc
   };
 }
 
-export async function mutateAssetLockRecord(input: AssetLockRecordMutationRequest): Promise<AssetLockRecordMutationResponse> {
+export async function mutateAssetLockRecord(
+  input: AssetLockRecordMutationRequest,
+  actor: WorkspaceRequestActor
+): Promise<AssetLockRecordMutationResponse> {
   let sourceBinding: ScriptSourceBinding | undefined;
   let removedSourceBindingId: string | undefined;
   let removedSourceBindingRecordId: string | undefined;
@@ -135,7 +143,7 @@ export async function mutateAssetLockRecord(input: AssetLockRecordMutationReques
       removedSourceBindingId = binding.id;
     }
 
-    const nextState = applyAssetLockRecordMutation(state, input);
+    const nextState = applyAssetLockRecordMutation(state, input, actor);
 
     if (input.action === "bind_source") {
       sourceBinding = findCreatedSourceBinding(nextState, input);
@@ -144,7 +152,7 @@ export async function mutateAssetLockRecord(input: AssetLockRecordMutationReques
     return nextState;
   });
   const record = findMutatedRecord(snapshot.state, input, removedSourceBindingRecordId);
-  const viewerUserId = requireCurrentUserId(snapshot.state);
+  const viewerUserId = actor.userId;
   const records = selectAssetLockRecords(snapshot.state, record.projectId, viewerUserId);
 
   return {
@@ -157,8 +165,9 @@ export async function mutateAssetLockRecord(input: AssetLockRecordMutationReques
   };
 }
 
-function applyAssetLockRecordMutation(state: WorkspaceState, input: AssetLockRecordMutationRequest) {
-  const actorUserId = requireCurrentUserId(state);
+function applyAssetLockRecordMutation(state: WorkspaceState, input: AssetLockRecordMutationRequest, actor: WorkspaceRequestActor) {
+  const actorUserId = actor.userId;
+  assertKnownActor(state, actor);
   assertAssetLockMutationPermission(state, input, actorUserId);
 
   switch (input.action) {
@@ -463,14 +472,6 @@ function selectVisibleScriptSourceBindings(state: WorkspaceState, records: Asset
   });
 }
 
-function requireCurrentUserId(state: WorkspaceState) {
-  if (!state.currentUserId) {
-    throw new Error("asset_lock_unauthenticated");
-  }
-
-  return state.currentUserId;
-}
-
 function requireProjectMemberRole(state: WorkspaceState, projectId: string, userId: string) {
   const isMember = state.members.some((member) => member.projectId === projectId && member.userId === userId);
 
@@ -479,6 +480,12 @@ function requireProjectMemberRole(state: WorkspaceState, projectId: string, user
   }
 
   return selectPrimaryRole(state, userId, projectId);
+}
+
+function assertKnownActor(state: WorkspaceState, actor: WorkspaceRequestActor) {
+  if (!actor.userId || !state.users.some((user) => user.id === actor.userId)) {
+    throw new Error("asset_lock_unauthenticated");
+  }
 }
 
 function canViewAssetLockRecord(state: WorkspaceState, record: AssetLockRecord, viewerUserId: string) {
