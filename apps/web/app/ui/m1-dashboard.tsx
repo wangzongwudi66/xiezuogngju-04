@@ -769,7 +769,7 @@ export function M1Dashboard() {
       applyAssetLockResponse(response);
       setActionMessage({ tone: "success", text: "剧本来源绑定已更新。" });
     } catch (error) {
-      const message = formatAssetLockError(error) || "剧本来源绑定失败，请检查集数和行号后重试。";
+      const message = formatAssetLockError(error, { action: "bind_source" }) || "剧本来源绑定失败，请检查集数和行号后重试。";
       setAssetLockError(message);
       setActionMessage({ tone: "error", text: message });
       throw new Error(message);
@@ -787,7 +787,7 @@ export function M1Dashboard() {
       applyAssetLockResponse(response);
       setActionMessage({ tone: "success", text: "剧本来源绑定已移除。" });
     } catch (error) {
-      const message = formatAssetLockError(error) || "剧本来源绑定移除失败，请稍后重试。";
+      const message = formatAssetLockError(error, { action: "remove_source_binding" }) || "剧本来源绑定移除失败，请稍后重试。";
       setAssetLockError(message);
       setActionMessage({ tone: "error", text: message });
       throw new Error(message);

@@ -379,7 +379,7 @@ export function AssetLockWorkbench({
       });
       setSourceBindingSuccess("剧本来源绑定已更新。");
     } catch (error) {
-      setSourceBindingError(formatAssetLockError(error) || "剧本来源绑定失败，请检查集数和行号后重试。");
+      setSourceBindingError(formatAssetLockError(error, { action: "bind_source" }) || "剧本来源绑定失败，请检查集数和行号后重试。");
     } finally {
       setSourceBindingBusy(false);
     }
@@ -394,7 +394,7 @@ export function AssetLockWorkbench({
       await onRemoveSourceBinding({ scriptSourceBindingId });
       setSourceBindingSuccess("剧本来源绑定已移除。");
     } catch (error) {
-      setSourceBindingError(formatAssetLockError(error) || "剧本来源绑定移除失败，请稍后重试。");
+      setSourceBindingError(formatAssetLockError(error, { action: "remove_source_binding" }) || "剧本来源绑定移除失败，请稍后重试。");
     } finally {
       setSourceBindingBusy(false);
     }
