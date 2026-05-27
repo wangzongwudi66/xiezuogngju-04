@@ -5,12 +5,12 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-27 21:28:38 +08:00`.
+Timestamp: `2026-05-27 22:38:16 +08:00`.
 
-- Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `1f8a8d8 Record source binding polish merge`.
-- Latest product/test code commit: `2c3e59b Polish source binding error copy`.
-- Worktree at last check: clean after clearing local `apps/web/next-env.d.ts` generated churn.
+- Active branch: `codex/api-contract-test-gap`, branched from `main@6ffdac6`.
+- Latest recorded `main` commit before this branch: `6ffdac6 Record timeline QA browser block`.
+- Latest product/test code commit on the active branch: `abf395a Cover timeline previous package boundary route`.
+- Worktree at last check: dirty only for this ledger update after committing the route contract test.
 - GitHub sync remains blocked: remote `xiezuogongju-04` returns `Repository not found`, so do not push there until repository access or URL is fixed.
 - Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
 
@@ -48,6 +48,13 @@ Recently completed after the xiezuogongju-04 handoff:
   - Rebased `codex/source-binding-error-copy-polish` onto current `main` and fast-forward merged it back into `main`.
 - `1f8a8d8 Record source binding polish merge`
   - Recorded the polish merge, rebase target, staged verification, and next recommended timeline QA step.
+- `6ffdac6 Record timeline QA browser block`
+  - Recorded that fresh production build and localhost HTTP checks passed, but in-app browser QA was blocked by policy.
+- Pending branch: `codex/timeline-mobile-crop-hardening` at `39b4b7a Record timeline browser policy block retry`.
+  - Contains the static 390px-risk CSS hardening for the asset timeline detail drawer, but remains unmerged because browser visual QA is still blocked.
+- Pending branch: `codex/api-contract-test-gap` at `abf395a Cover timeline previous package boundary route`.
+  - Adds a route-level contract test proving that using the current delivery package as `previousDeliveryPackageId` returns `409 previous_delivery_package_not_before_current`.
+  - Does not touch `codex/timeline-mobile-crop-hardening`, UI CSS, or production route logic.
 - QA finding not yet fixed: timeline explicit/fallback badge browser QA used a stale `.next` build; fresh-build QA is still needed, and 390px width showed a drawer/source excerpt crop risk.
 
 Latest verification:
@@ -84,6 +91,10 @@ Latest verification:
   - `npm.cmd run build -w apps/web`: passed.
   - Local production server returned HTTP 200 at `http://localhost:3000`.
   - In-app browser QA did not run because browser policy blocked `http://localhost:3000`.
+- For `codex/api-contract-test-gap`:
+  - `npm.cmd run test -w apps/web -- asset-decision-timeline`: passed, 6 files / 49 tests.
+  - `npm.cmd run typecheck -w apps/web`: passed.
+  - `git diff --check`: passed.
 
 New validation strategy agreed with the user:
 
@@ -97,7 +108,8 @@ New validation strategy agreed with the user:
 Recommended next phase:
 
 - Do fresh-build timeline browser QA for explicit/fallback source badges once localhost browser access is allowed, focusing on the 390px drawer/source excerpt crop risk.
-- If the 390px crop reproduces, open a small timeline layout fix branch before starting a larger feature.
+- If `codex/timeline-mobile-crop-hardening` passes 390px/760px/1366px visual QA, fast-forward merge it into `main` and update this ledger.
+- Review `codex/api-contract-test-gap`; if acceptable, fast-forward merge it into `main` independently of the blocked visual QA branch.
 - Continue staged validation; run full `npm.cmd run verify` only for the next push/cloud-sync or large phase gate.
 - Fix `xiezuogongju-04` repository access or URL before attempting GitHub sync.
 
