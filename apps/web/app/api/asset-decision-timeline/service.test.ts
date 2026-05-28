@@ -42,6 +42,38 @@ describe("asset decision timeline service", () => {
     });
   });
 
+  it("uses the explicit actor instead of workspace currentUserId for projection viewer scope", () => {
+    const state = buildWorkspace({
+      currentUserId: "user-creator",
+      members: [buildMember("user-coordinator", "coordinator"), buildMember("user-creator", "creator")],
+      deliveryPackages: [buildPackage("delivery-current", "project-jincheng", "published")],
+      deliveryPackageEpisodes: [buildPackageEpisode(1, "Mine Lift appears."), buildPackageEpisode(2, "Mine Map appears.")],
+      episodes: [buildEpisode(1), buildEpisode(2)],
+      assignments: [buildAssignment("assignment-creator-2", "episode-project-jincheng-2", "user-creator", "creator")],
+      assetLockRecords: [
+        buildRecord({ id: "asset-lift", assetName: "Mine Lift", episodeNos: [1] }),
+        buildRecord({ id: "asset-map", assetName: "Mine Map", assetType: "prop", episodeNos: [2] })
+      ]
+    });
+
+    const result = buildAssetDecisionTimelineProjectionFromWorkspace(state, {
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      actor: { userId: "user-coordinator" }
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      projection: {
+        viewerUserId: "user-coordinator",
+        viewerRole: "coordinator"
+      }
+    });
+    if (result.ok) {
+      expect(result.projection.decisionQueue.map((item) => item.assetLockRecordId).sort()).toEqual(["asset-lift", "asset-map"]);
+    }
+  });
+
   it("passes explicit source bindings into the projection before fallback matching", () => {
     const state = buildWorkspace({
       currentUserId: "user-coordinator",

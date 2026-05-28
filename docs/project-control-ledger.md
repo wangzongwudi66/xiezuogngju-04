@@ -5,18 +5,24 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-28 01:27:22 +08:00`.
+Timestamp: `2026-05-28 20:57:05 +08:00`.
 
-- Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `d3890c8 Add M3 request actor boundary`.
-- Latest product/test code commit: `d3890c8 Add M3 request actor boundary`.
-- Worktree at last check: dirty only for this ledger update after fast-forward merging `codex/m3-request-actor-boundary`.
-- GitHub sync unblocked: remote `xiezuogongju-04` now points to `https://wangzongwudi66@github.com/wangzongwudi66/xiezuogngju-04.git`, and `main@018fdfa` was pushed to `xiezuogongju-04/main`.
+- Active branch: `codex/m3-actor-mismatch-tests`, branched from `main@50cf11a`.
+- Latest recorded `main` commit before this branch: `50cf11a Record M3 actor boundary merge`.
+- Latest product/test code commit on `main`: `d3890c8 Add M3 request actor boundary`.
+- Worktree at last check: dirty only for the minimal M3 actor/currentUser mismatch service tests and this ledger update.
+- GitHub sync unblocked: remote `xiezuogongju-04` points to `https://wangzongwudi66@github.com/wangzongwudi66/xiezuogngju-04.git`; handoff says `main@50cf11a` is synced to `xiezuogongju-04/main`.
 - Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- Pending on `codex/m3-actor-mismatch-tests`:
+  - Adds only service-level regression tests for the M3 actor boundary P3 follow-up from F review.
+  - `asset-lock-records` now covers create/list when `WorkspaceState.currentUserId` is `user-creator-b` but the explicit actor is `user-head-writer`.
+  - `asset-lock-attachments` now covers upload/delete metadata and permission checks when persisted `currentUserId` differs from the explicit actor.
+  - `asset-decision-timeline` now covers projection viewer identity/scope when `currentUserId` is a creator but the explicit actor is the coordinator.
+  - No production service logic, routes, UI, browser QA, remote push, or `codex/timeline-mobile-crop-hardening` changes are included.
 - `d3890c8 Add M3 request actor boundary`
   - Adds a small route-level workspace actor helper for the current mock session.
   - M3 asset lock records, asset lock attachments, and asset decision timeline routes now resolve actor from server session and pass it into services.
@@ -98,6 +104,10 @@ Recently completed after the xiezuogongju-04 handoff:
 
 Latest verification:
 
+- For `codex/m3-actor-mismatch-tests`:
+  - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/service.test.ts app/api/asset-lock-attachments/service.test.ts app/api/asset-decision-timeline/service.test.ts`: passed, 3 files / 56 tests.
+  - `npm.cmd run typecheck -w apps/web`: passed.
+  - `git diff --check`: passed, with only Git's LF-to-CRLF warnings for the three touched service test files.
 - For `codex/m3-request-actor-boundary`:
   - `npm.cmd run test -w apps/web -- workspace-session asset-lock-records asset-lock-attachments asset-decision-timeline asset-lock-api asset-lock-attachment-api`: passed, 14 files / 135 tests.
   - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/route.test.ts app/api/asset-lock-records/service.test.ts app/api/asset-lock-attachments/route.test.ts app/api/asset-lock-attachments/service.test.ts app/api/asset-decision-timeline/route.test.ts app/api/asset-decision-timeline/service.test.ts`: passed, 6 files / 86 tests.

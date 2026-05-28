@@ -136,6 +136,22 @@ describe("asset lock attachment service", () => {
     expect(serialized).not.toContain(resolve(attachmentDir));
   });
 
+  it("uses the explicit actor when workspace currentUserId differs for upload and delete", async () => {
+    const record = (await createAssetRecord()).record;
+    await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: "user-creator-b" }));
+    currentActorUserId = "user-head-writer";
+
+    const attachment = await upload(record.id);
+    const deleted = await remove(attachment.id);
+
+    expect(attachment.uploadedByUserId).toBe("user-head-writer");
+    expect(deleted).toMatchObject({
+      id: attachment.id,
+      status: "deleted",
+      deletedByUserId: "user-head-writer"
+    });
+  });
+
   it("allows writer downloads only for visible assigned records", async () => {
     const visibleRecord = (await createAssetRecord({ episodeNos: [1] })).record;
     const hiddenRecord = (await createAssetRecord({ episodeNos: [30] })).record;

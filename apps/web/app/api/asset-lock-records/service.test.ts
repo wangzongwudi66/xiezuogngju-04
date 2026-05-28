@@ -74,6 +74,29 @@ describe("asset lock record service", () => {
     });
   });
 
+  it("uses the explicit actor when workspace currentUserId differs for create and list", async () => {
+    const deliveryPackageId = await createDraft();
+    await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: "user-creator-b" }));
+    currentActorUserId = "user-head-writer";
+
+    const created = await mutateAssetLockRecord({
+      action: "create",
+      projectId: "project-jincheng",
+      deliveryPackageId,
+      episodeNos: [1, 2],
+      assetName: "Actor Boundary Lift",
+      assetType: "scene",
+      changeType: "new",
+      createdByUserId: "user-creator-b",
+      risk: "attention"
+    });
+    const listed = await listAssetLockRecords("project-jincheng");
+
+    expect(created.record.createdByUserId).toBe("user-head-writer");
+    expect(created.records.map((record) => record.id)).toContain(created.record.id);
+    expect(listed.records.map((record) => record.id)).toContain(created.record.id);
+  });
+
   it("prepares demo delivery package and asset records for acceptance testing", async () => {
     await login("user-owner");
     const result = await mutateAssetLockRecord({
