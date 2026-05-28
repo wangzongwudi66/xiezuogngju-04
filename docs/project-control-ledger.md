@@ -5,18 +5,31 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-28 22:45:13 +08:00`.
+Timestamp: `2026-05-29 00:06:39 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `761080a Add asset lock record repository adapter`.
-- Latest product/test code commit: `761080a Add asset lock record repository adapter`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-record-repository-local-adapter`.
-- Remote sync is pending: `xiezuogongju-04/main` is still recorded locally at `96eebd2` because the previous GitHub push attempt failed to connect.
+- Latest recorded `main` commit before this ledger update: `0f457cd Add asset lock record Drizzle schema`.
+- Latest product/test code commit: `0f457cd Add asset lock record Drizzle schema`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-asset-lock-record-schema`.
+- Remote sync is pending: `xiezuogongju-04/main` is still recorded locally at `96eebd2` because the previous GitHub push attempt failed to connect; this schema merge has not been pushed.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `0f457cd Add asset lock record Drizzle schema`
+  - Introduces the first M3 PostgreSQL/Drizzle tooling slice for `apps/web`.
+  - Adds `drizzle-orm`, `pg`, `drizzle-kit`, and `@types/pg`, plus `db:generate` and `db:check` scripts.
+  - Adds `apps/web/drizzle.config.ts`, `apps/web/db/schema/asset-lock-records.ts`, schema index, and generated migration/meta files for `asset_lock_records` and `asset_lock_record_episodes`.
+  - Keeps runtime behavior unchanged: no DB adapter, no real migration execution, no `delivery-import-jobs/persistence.ts` migration, no `script_source_bindings` or attachments schema, no UI, and no timeline mutation.
+  - Fast-forward merged `codex/m3-asset-lock-record-schema` into `main` after M review found no P0/P1/P2.
+  - M review P3: Drizzle `text(..., { enum })` narrows TypeScript types but generated PostgreSQL columns are plain `text`; add DB-level enum/check constraints before a runtime DB repository begins accepting writes if the DB must reject invalid statuses.
+  - Validation:
+    - `git diff --check 7c5f6f2..HEAD`: passed.
+    - `npm.cmd run db:generate -w apps/web`: passed on the implementation branch and generated `apps/web/db/migrations/0000_crazy_puppet_master.sql`.
+    - `npm.cmd run db:check -w apps/web`: passed on the implementation branch and again before merge.
+    - `npm.cmd run typecheck -w apps/web`: passed on the implementation branch and again before merge.
+    - `npm.cmd run test -w apps/web -- asset-lock-records`: passed on the implementation branch, 2 files / 39 tests.
 - `761080a Add asset lock record repository adapter`
   - Adds `apps/web/app/api/asset-lock-records/repository.ts` with an `AssetLockRecordRepository` interface and local workspace-backed adapter.
   - `asset-lock-records` service now reads/mutates `assetLockRecords` and `scriptSourceBindings` through the repository snapshot while keeping existing domain mutations, permission checks, actor handling, API shape, and response sorting unchanged.
