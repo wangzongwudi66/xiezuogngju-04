@@ -20,11 +20,15 @@ describe("asset lock record service", () => {
     storeDir = join(tmpdir(), `aigc-asset-lock-records-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
+    delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
+    delete process.env.DATABASE_URL;
     await login("user-head-writer");
   });
 
   afterEach(async () => {
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
+    delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
+    delete process.env.DATABASE_URL;
     await rm(storeDir, { recursive: true, force: true });
   });
 
@@ -44,6 +48,35 @@ describe("asset lock record service", () => {
       status: "draft"
     });
     expect(persisted.state.assetLockRecords).toContainEqual(result.record);
+  });
+
+  it("falls back to the local repository when DB mode is requested without DATABASE_URL", async () => {
+    process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
+    delete process.env.DATABASE_URL;
+    const deliveryPackageId = await createDraft();
+    const result = await createAssetRecord(deliveryPackageId, "Fallback Local Asset");
+    const persisted = await getDeliveryImportWorkspace();
+
+    expect(result.record).toMatchObject({
+      deliveryPackageId,
+      assetName: "Fallback Local Asset"
+    });
+    expect(persisted.state.assetLockRecords).toContainEqual(result.record);
+  });
+
+  it("rejects unsupported DB-mode mutations before writing to local state", async () => {
+    process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
+    process.env.DATABASE_URL = "postgres://example.invalid/aigc";
+    const workspaceBefore = await getDeliveryImportWorkspace();
+
+    await expect(
+      mutateAssetLockRecord({
+        action: "writer_confirm",
+        assetLockRecordId: "asset-lock-record-1",
+        confirmedByUserId: "user-head-writer"
+      })
+    ).rejects.toThrow("asset_lock_record_db_mutation_unsupported:writer_confirm");
+    await expect(getDeliveryImportWorkspace()).resolves.toEqual(workspaceBefore);
   });
 
   it("lists records by project and returns a summary", async () => {

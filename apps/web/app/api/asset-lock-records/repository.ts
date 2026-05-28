@@ -1,5 +1,6 @@
 import type { AssetLockRecord, ScriptSourceBinding, WorkspaceState } from "@aigc/domain";
 import { mutateDeliveryImportWorkspace, readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import { createDbAssetLockRecordRepository } from "./db-repository";
 
 export interface AssetLockRecordRepositorySnapshot {
   state: WorkspaceState;
@@ -7,14 +8,27 @@ export interface AssetLockRecordRepositorySnapshot {
   scriptSourceBindings: ScriptSourceBinding[];
 }
 
-export interface AssetLockRecordRepository {
+export interface LocalAssetLockRecordRepository {
+  mode: "local";
   read(): Promise<AssetLockRecordRepositorySnapshot>;
   mutate(
     mutate: (snapshot: AssetLockRecordRepositorySnapshot) => WorkspaceState
   ): Promise<AssetLockRecordRepositorySnapshot>;
 }
 
-export const localAssetLockRecordRepository: AssetLockRecordRepository = {
+export interface DbAssetLockRecordRepository {
+  mode: "db";
+  read(): Promise<AssetLockRecordRepositorySnapshot>;
+  createAssetLockRecord(record: AssetLockRecord): Promise<AssetLockRecordRepositorySnapshot>;
+}
+
+export type AssetLockRecordRepository = LocalAssetLockRecordRepository | DbAssetLockRecordRepository;
+
+const assetLockRecordRepositoryEnvKey = "ASSET_LOCK_RECORDS_REPOSITORY";
+type AssetLockRecordRepositoryEnv = Record<string, string | undefined>;
+
+export const localAssetLockRecordRepository: LocalAssetLockRecordRepository = {
+  mode: "local",
   async read() {
     const workspace = await readDeliveryImportWorkspace();
 
@@ -26,6 +40,18 @@ export const localAssetLockRecordRepository: AssetLockRecordRepository = {
     return toAssetLockRecordRepositorySnapshot(workspace.state);
   }
 };
+
+export function resolveAssetLockRecordRepository(env: AssetLockRecordRepositoryEnv = process.env): AssetLockRecordRepository {
+  if (isAssetLockRecordDbRepositoryEnabled(env)) {
+    return createDbAssetLockRecordRepository();
+  }
+
+  return localAssetLockRecordRepository;
+}
+
+export function isAssetLockRecordDbRepositoryEnabled(env: AssetLockRecordRepositoryEnv = process.env) {
+  return env[assetLockRecordRepositoryEnvKey]?.trim().toLowerCase() === "db" && Boolean(env.DATABASE_URL?.trim());
+}
 
 function toAssetLockRecordRepositorySnapshot(state: WorkspaceState): AssetLockRecordRepositorySnapshot {
   return {

@@ -15,11 +15,15 @@ describe("asset lock record route", () => {
     storeDir = join(tmpdir(), `aigc-asset-lock-record-route-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
+    delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
+    delete process.env.DATABASE_URL;
     await login("user-head-writer");
   });
 
   afterEach(async () => {
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
+    delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
+    delete process.env.DATABASE_URL;
     await rm(storeDir, { recursive: true, force: true });
   });
 

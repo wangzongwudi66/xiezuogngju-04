@@ -24,8 +24,8 @@ import type {
   WorkspaceState
 } from "@aigc/domain";
 import type { WorkspaceRequestActor } from "../workspace-actor";
-import { localAssetLockRecordRepository } from "./repository";
-import type { AssetLockRecordRepositorySnapshot } from "./repository";
+import { resolveAssetLockRecordRepository } from "./repository";
+import type { AssetLockRecordRepositorySnapshot, DbAssetLockRecordRepository, LocalAssetLockRecordRepository } from "./repository";
 
 export type AssetLockRecordMutationRequest =
   | {
@@ -118,7 +118,8 @@ export async function listAssetLockRecords(
   projectId: string | undefined,
   actor: WorkspaceRequestActor
 ): Promise<AssetLockRecordListResponse> {
-  const snapshot = await localAssetLockRecordRepository.read();
+  const repository = resolveAssetLockRecordRepository();
+  const snapshot = await repository.read();
   const viewerUserId = actor.userId;
   assertKnownActor(snapshot.state, actor);
   const records = selectAssetLockRecords(snapshot, projectId, viewerUserId);
@@ -134,10 +135,24 @@ export async function mutateAssetLockRecord(
   input: AssetLockRecordMutationRequest,
   actor: WorkspaceRequestActor
 ): Promise<AssetLockRecordMutationResponse> {
+  const repository = resolveAssetLockRecordRepository();
+
+  if (repository.mode === "db") {
+    return mutateAssetLockRecordInDb(repository, input, actor);
+  }
+
+  return mutateAssetLockRecordInLocal(repository, input, actor);
+}
+
+async function mutateAssetLockRecordInLocal(
+  repository: LocalAssetLockRecordRepository,
+  input: AssetLockRecordMutationRequest,
+  actor: WorkspaceRequestActor
+): Promise<AssetLockRecordMutationResponse> {
   let sourceBinding: ScriptSourceBinding | undefined;
   let removedSourceBindingId: string | undefined;
   let removedSourceBindingRecordId: string | undefined;
-  const snapshot = await localAssetLockRecordRepository.mutate((repositorySnapshot) => {
+  const snapshot = await repository.mutate((repositorySnapshot) => {
     const state = repositorySnapshot.state;
 
     if (input.action === "remove_source_binding") {
@@ -165,6 +180,31 @@ export async function mutateAssetLockRecord(
     summary: summarizeAssetLockRecords(records),
     sourceBinding,
     removedSourceBindingId
+  };
+}
+
+async function mutateAssetLockRecordInDb(
+  repository: DbAssetLockRecordRepository,
+  input: AssetLockRecordMutationRequest,
+  actor: WorkspaceRequestActor
+): Promise<AssetLockRecordMutationResponse> {
+  if (input.action !== "create") {
+    throw new Error(`asset_lock_record_db_mutation_unsupported:${input.action}`);
+  }
+
+  const previousSnapshot = await repository.read();
+  const nextState = applyAssetLockRecordMutation(previousSnapshot.state, input, actor);
+  const createdRecord = findCreatedAssetLockRecord(previousSnapshot, nextState);
+  const snapshot = await repository.createAssetLockRecord(createdRecord);
+  const record = snapshot.assetLockRecords.find((item) => item.id === createdRecord.id) ?? createdRecord;
+  const viewerUserId = actor.userId;
+  const records = selectAssetLockRecords(snapshot, record.projectId, viewerUserId);
+
+  return {
+    record,
+    records,
+    sourceBindings: selectVisibleScriptSourceBindings(snapshot, records, viewerUserId),
+    summary: summarizeAssetLockRecords(records)
   };
 }
 
@@ -312,6 +352,17 @@ function findMutatedRecord(
 
   if (!record) {
     throw new Error("asset_lock_record_not_found");
+  }
+
+  return record;
+}
+
+function findCreatedAssetLockRecord(previousSnapshot: AssetLockRecordRepositorySnapshot, nextState: WorkspaceState) {
+  const previousRecordIds = new Set(previousSnapshot.assetLockRecords.map((record) => record.id));
+  const record = (nextState.assetLockRecords ?? []).find((item) => !previousRecordIds.has(item.id));
+
+  if (!record) {
+    throw new Error("asset_lock_record_not_created");
   }
 
   return record;
