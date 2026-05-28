@@ -1,0 +1,303 @@
+{
+  "id": "96f10ab6-6b44-49b2-b38f-0b3ecfa37f1e",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.asset_lock_record_episodes": {
+      "name": "asset_lock_record_episodes",
+      "schema": "",
+      "columns": {
+        "asset_lock_record_id": {
+          "name": "asset_lock_record_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "episode_no": {
+          "name": "episode_no",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "asset_lock_record_episodes_episode_no_idx": {
+          "name": "asset_lock_record_episodes_episode_no_idx",
+          "columns": [
+            {
+              "expression": "episode_no",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "asset_lock_record_episodes_asset_lock_record_id_asset_lock_records_id_fk": {
+          "name": "asset_lock_record_episodes_asset_lock_record_id_asset_lock_records_id_fk",
+          "tableFrom": "asset_lock_record_episodes",
+          "tableTo": "asset_lock_records",
+          "columnsFrom": [
+            "asset_lock_record_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "asset_lock_record_episodes_pkey": {
+          "name": "asset_lock_record_episodes_pkey",
+          "columns": [
+            "asset_lock_record_id",
+            "episode_no"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "asset_lock_record_episodes_episode_no_positive": {
+          "name": "asset_lock_record_episodes_episode_no_positive",
+          "value": "\"asset_lock_record_episodes\".\"episode_no\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.asset_lock_records": {
+      "name": "asset_lock_records",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "delivery_package_id": {
+          "name": "delivery_package_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "asset_name": {
+          "name": "asset_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "asset_name_key": {
+          "name": "asset_name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "asset_type": {
+          "name": "asset_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "change_type": {
+          "name": "change_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "writer_confirmation": {
+          "name": "writer_confirmation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "writer_confirmed_by_user_id": {
+          "name": "writer_confirmed_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "writer_confirmed_at": {
+          "name": "writer_confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "writer_note": {
+          "name": "writer_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "production_confirmation": {
+          "name": "production_confirmation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "production_confirmed_by_user_id": {
+          "name": "production_confirmed_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "production_confirmed_at": {
+          "name": "production_confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "production_note": {
+          "name": "production_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "risk": {
+          "name": "risk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'normal'"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "missing_info": {
+          "name": "missing_info",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dispute_reason": {
+          "name": "dispute_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "final_locked_by_user_id": {
+          "name": "final_locked_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "final_locked_at": {
+          "name": "final_locked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "asset_lock_records_project_updated_idx": {
+          "name": "asset_lock_records_project_updated_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "asset_lock_records_delivery_package_idx": {
+          "name": "asset_lock_records_delivery_package_idx",
+          "columns": [
+            {
+              "expression": "delivery_package_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "asset_lock_records_delivery_package_name_key_unique": {
+          "name": "asset_lock_records_delivery_package_name_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "delivery_package_id",
+            "asset_name_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
