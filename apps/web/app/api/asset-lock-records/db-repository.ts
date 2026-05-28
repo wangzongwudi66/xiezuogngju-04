@@ -1,12 +1,13 @@
-import type { AssetLockRecord, WorkspaceState } from "@aigc/domain";
+import type { AssetLockRecord, ScriptSourceBinding, WorkspaceState } from "@aigc/domain";
 import { asc } from "drizzle-orm";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
-import { assetLockRecordEpisodes, assetLockRecords } from "../../../db/schema";
+import { assetLockRecordEpisodes, assetLockRecords, scriptSourceBindings } from "../../../db/schema";
 import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import type { DbAssetLockRecordRepository } from "./repository";
 
 export type AssetLockRecordDbRecordRow = typeof assetLockRecords.$inferSelect;
 export type AssetLockRecordDbEpisodeRow = typeof assetLockRecordEpisodes.$inferSelect;
+export type ScriptSourceBindingDbRow = typeof scriptSourceBindings.$inferSelect;
 
 type AssetLockRecordDbRecordInsert = typeof assetLockRecords.$inferInsert;
 type AssetLockRecordDbEpisodeInsert = typeof assetLockRecordEpisodes.$inferInsert;
@@ -15,12 +16,31 @@ export function createDbAssetLockRecordRepository(): DbAssetLockRecordRepository
   async function read() {
     const workspace = await readDeliveryImportWorkspace();
     const { db } = getAssetLockDbRuntime();
-    const [recordRows, episodeRows] = await Promise.all([
+    const [recordRows, episodeRows, sourceBindingRows] = await Promise.all([
       db.select().from(assetLockRecords).orderBy(asc(assetLockRecords.createdAt), asc(assetLockRecords.id)),
-      db.select().from(assetLockRecordEpisodes).orderBy(asc(assetLockRecordEpisodes.assetLockRecordId), asc(assetLockRecordEpisodes.episodeNo))
+      db
+        .select()
+        .from(assetLockRecordEpisodes)
+        .orderBy(asc(assetLockRecordEpisodes.assetLockRecordId), asc(assetLockRecordEpisodes.episodeNo)),
+      db
+        .select()
+        .from(scriptSourceBindings)
+        .orderBy(
+          asc(scriptSourceBindings.projectId),
+          asc(scriptSourceBindings.deliveryPackageId),
+          asc(scriptSourceBindings.assetLockRecordId),
+          asc(scriptSourceBindings.episodeNo),
+          asc(scriptSourceBindings.startLine),
+          asc(scriptSourceBindings.endLine),
+          asc(scriptSourceBindings.id)
+        )
     ]);
 
-    return toDbRepositorySnapshot(workspace.state, mapAssetLockRecordRows(recordRows, episodeRows));
+    return toDbRepositorySnapshot(
+      workspace.state,
+      mapAssetLockRecordRows(recordRows, episodeRows),
+      mapScriptSourceBindingRows(sourceBindingRows)
+    );
   }
 
   return {
@@ -119,17 +139,36 @@ export function mapAssetLockRecordToDbRows(record: AssetLockRecord): {
   };
 }
 
-function toDbRepositorySnapshot(state: WorkspaceState, records: AssetLockRecord[]) {
+export function mapScriptSourceBindingRows(bindingRows: ScriptSourceBindingDbRow[]): ScriptSourceBinding[] {
+  return bindingRows.map((row) => ({
+    id: row.id,
+    projectId: row.projectId,
+    deliveryPackageId: row.deliveryPackageId,
+    assetLockRecordId: row.assetLockRecordId,
+    episodeNo: row.episodeNo,
+    startLine: row.startLine,
+    endLine: row.endLine,
+    excerptSnapshot: row.excerptSnapshot,
+    createdByUserId: row.createdByUserId,
+    createdAt: row.createdAt
+  }));
+}
+
+function toDbRepositorySnapshot(
+  state: WorkspaceState,
+  records: AssetLockRecord[],
+  sourceBindings: ScriptSourceBinding[]
+) {
   const nextState: WorkspaceState = {
     ...state,
     assetLockRecords: records,
-    scriptSourceBindings: []
+    scriptSourceBindings: sourceBindings
   };
 
   return {
     state: nextState,
     assetLockRecords: records,
-    scriptSourceBindings: []
+    scriptSourceBindings: sourceBindings
   };
 }
 

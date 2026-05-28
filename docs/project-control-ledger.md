@@ -5,15 +5,29 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-29 01:06:47 +08:00`.
+Timestamp: `2026-05-29 01:28:30 +08:00`.
 
-- Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `7e2c8e4 Add script source binding DB schema`.
+- Active branch: `codex/source-binding-db-read-mapper`.
+- Latest recorded `main` commit before this ledger update: `1550d17 Record source binding schema merge`.
 - Latest product/test code commit on `main`: `7e2c8e4 Add script source binding DB schema`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-source-binding-schema`.
-- Remote sync restored: `main@7e2c8e4` was pushed to `xiezuogongju-04/main` after the script source binding schema merge.
+- Worktree at branch start: clean at `1550d17` before creating `codex/source-binding-db-read-mapper`.
+- Remote sync restored: `main@1550d17` was pushed to `xiezuogongju-04/main` after the source binding schema merge record.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
+
+Current implementation branch:
+
+- `codex/source-binding-db-read-mapper`
+  - Reads `script_source_bindings` in the DB asset-lock repository snapshot and maps rows into domain `ScriptSourceBinding` values.
+  - Returns DB-backed `scriptSourceBindings` through both `snapshot.state.scriptSourceBindings` and `snapshot.scriptSourceBindings` instead of hard-coding an empty list.
+  - Adds a pure mapper unit test for DB script source binding rows.
+  - Keeps the slice read-only: no `bind_source` DB create, no `remove_source_binding` DB delete, no repository/service behavior change, no migration generation, no real DB migrate, no attachments/timeline/delivery persistence/UI/browser QA work.
+  - Validation before commit:
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/db-repository.test.ts app/api/asset-lock-records/repository.test.ts app/api/asset-lock-records/service.test.ts`: passed, 3 files / 32 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `npm.cmd run test -w packages/domain -- src/script-source-binding.test.ts`: passed, 1 file / 16 tests.
+    - `npm.cmd run db:check -w apps/web`: passed; no migration/schema changes are included in this branch.
+    - `git diff --check`: passed, with only the existing LF-to-CRLF working-copy warning for `docs/project-control-ledger.md`.
 
 Recently completed after the xiezuogongju-04 handoff:
 

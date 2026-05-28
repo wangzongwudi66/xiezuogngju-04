@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   mapAssetLockRecordRows,
   mapAssetLockRecordToDbRows,
+  mapScriptSourceBindingRows,
   type AssetLockRecordDbEpisodeRow,
-  type AssetLockRecordDbRecordRow
+  type AssetLockRecordDbRecordRow,
+  type ScriptSourceBindingDbRow
 } from "./db-repository";
 
 describe("asset lock record DB repository mappers", () => {
@@ -108,6 +110,40 @@ describe("asset lock record DB repository mappers", () => {
       {
         assetLockRecordId: "asset-lock-1",
         episodeNo: 2,
+        createdAt: "2026-05-29T00:00:00.000Z"
+      }
+    ]);
+  });
+
+  it("maps DB script source binding rows into domain bindings", () => {
+    const bindingRows: ScriptSourceBindingDbRow[] = [
+      {
+        id: "source-binding-1",
+        projectId: "project-jincheng",
+        deliveryPackageId: "delivery-1",
+        assetLockRecordId: "asset-lock-1",
+        episodeNo: 2,
+        startLine: 4,
+        endLine: 6,
+        excerptSnapshot: "Mine lift source excerpt",
+        createdByUserId: "user-head-writer",
+        createdAt: "2026-05-29T00:00:00.000Z"
+      }
+    ];
+
+    const bindings = mapScriptSourceBindingRows(bindingRows);
+
+    expect(bindings).toEqual([
+      {
+        id: "source-binding-1",
+        projectId: "project-jincheng",
+        deliveryPackageId: "delivery-1",
+        assetLockRecordId: "asset-lock-1",
+        episodeNo: 2,
+        startLine: 4,
+        endLine: 6,
+        excerptSnapshot: "Mine lift source excerpt",
+        createdByUserId: "user-head-writer",
         createdAt: "2026-05-29T00:00:00.000Z"
       }
     ]);
