@@ -5,18 +5,31 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-29 00:55:19 +08:00`.
+Timestamp: `2026-05-29 01:06:47 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `22d5968 Add asset lock DB repository skeleton`.
-- Latest product/test code commit on `main`: `22d5968 Add asset lock DB repository skeleton`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-record-db-repository-skeleton`.
-- Remote sync restored: `main@22d5968` was pushed to `xiezuogongju-04/main` after the DB repository skeleton merge.
+- Latest recorded `main` commit before this ledger update: `7e2c8e4 Add script source binding DB schema`.
+- Latest product/test code commit on `main`: `7e2c8e4 Add script source binding DB schema`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-source-binding-schema`.
+- Remote sync restored: `main@7e2c8e4` was pushed to `xiezuogongju-04/main` after the script source binding schema merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `7e2c8e4 Add script source binding DB schema`
+  - Adds Drizzle schema and generated migration `apps/web/db/migrations/0002_cynical_shocker.sql` for `script_source_bindings`.
+  - Covers the current domain `ScriptSourceBinding` fields: project/package/record ids, episode number, start/end lines, excerpt snapshot, creator, and creation time.
+  - Adds FK cascade to `asset_lock_records`, positive checks for episode/start/end lines, `end_line >= start_line`, unique record/package/episode/line-range constraint, and record plus project/package indexes.
+  - Keeps runtime behavior unchanged: no source binding DB adapter, no asset-lock service change, no real DB migrate, no attachment/timeline/delivery persistence migration, no UI, and no browser QA.
+  - Fast-forward merged `codex/m3-source-binding-schema` into `main` after T review found no P0/P1/P2 and no blocking P3.
+  - Validation:
+    - `git diff --check main..HEAD`: passed before merge.
+    - `npm.cmd run db:generate -w apps/web`: passed on the implementation branch and generated `apps/web/db/migrations/0002_cynical_shocker.sql`.
+    - `npm.cmd run db:check -w apps/web`: passed on the implementation branch and again before merge.
+    - `npm.cmd run typecheck -w apps/web`: passed on the implementation branch and again before merge.
+    - `npm.cmd run test -w apps/web -- asset-lock-records`: passed on the implementation branch, 4 files / 45 tests.
+    - `npm.cmd run test -w apps/web`: passed before merge, 25 files / 214 tests.
 - `22d5968 Add asset lock DB repository skeleton`
   - Adds a thin `apps/web/db/runtime.ts` Drizzle/pg runtime. It does not create a pool or connect at import time; DB runtime is created only when repository methods need it.
   - Adds an asset-lock repository resolver. Default behavior remains local; DB mode is selected only when `ASSET_LOCK_RECORDS_REPOSITORY=db` and `DATABASE_URL` are both present. If DB mode is requested without `DATABASE_URL`, the resolver falls back to local.
