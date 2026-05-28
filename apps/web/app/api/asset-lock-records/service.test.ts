@@ -651,8 +651,8 @@ describe("asset lock record service", () => {
     ).rejects.toThrow();
   });
 
-  it("handles legacy workspaces without asset lock records", async () => {
-    const { assetLockRecords, ...legacyWorkspace } = seedWorkspace;
+  it("handles legacy workspaces without asset lock records or source bindings", async () => {
+    const { assetLockRecords, scriptSourceBindings, ...legacyWorkspace } = seedWorkspace;
     await writeFile(
       join(storeDir, "store.json"),
       JSON.stringify({
@@ -672,11 +672,15 @@ describe("asset lock record service", () => {
       }
     });
 
-    const result = await createAssetRecord(await createDraft());
+    const deliveryPackageId = await createDraft();
+    const result = await createAssetRecord(deliveryPackageId);
+    const bound = await bindSource(result.record.id, deliveryPackageId);
     const persisted = await getDeliveryImportWorkspace();
 
     expect(Array.isArray(persisted.state.assetLockRecords)).toBe(true);
     expect(persisted.state.assetLockRecords).toContainEqual(result.record);
+    expect(Array.isArray(persisted.state.scriptSourceBindings)).toBe(true);
+    expect(persisted.state.scriptSourceBindings).toContainEqual(bound.sourceBinding);
   });
 });
 

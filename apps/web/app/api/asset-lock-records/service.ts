@@ -23,8 +23,9 @@ import type {
   ScriptSourceBinding,
   WorkspaceState
 } from "@aigc/domain";
-import { mutateDeliveryImportWorkspace, readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import type { WorkspaceRequestActor } from "../workspace-actor";
+import { localAssetLockRecordRepository } from "./repository";
+import type { AssetLockRecordRepositorySnapshot } from "./repository";
 
 export type AssetLockRecordMutationRequest =
   | {
@@ -117,14 +118,14 @@ export async function listAssetLockRecords(
   projectId: string | undefined,
   actor: WorkspaceRequestActor
 ): Promise<AssetLockRecordListResponse> {
-  const workspace = await readDeliveryImportWorkspace();
+  const snapshot = await localAssetLockRecordRepository.read();
   const viewerUserId = actor.userId;
-  assertKnownActor(workspace.state, actor);
-  const records = selectAssetLockRecords(workspace.state, projectId, viewerUserId);
+  assertKnownActor(snapshot.state, actor);
+  const records = selectAssetLockRecords(snapshot, projectId, viewerUserId);
 
   return {
     records,
-    sourceBindings: selectVisibleScriptSourceBindings(workspace.state, records, viewerUserId),
+    sourceBindings: selectVisibleScriptSourceBindings(snapshot, records, viewerUserId),
     summary: summarizeAssetLockRecords(records)
   };
 }
@@ -136,7 +137,9 @@ export async function mutateAssetLockRecord(
   let sourceBinding: ScriptSourceBinding | undefined;
   let removedSourceBindingId: string | undefined;
   let removedSourceBindingRecordId: string | undefined;
-  const snapshot = await mutateDeliveryImportWorkspace((state) => {
+  const snapshot = await localAssetLockRecordRepository.mutate((repositorySnapshot) => {
+    const state = repositorySnapshot.state;
+
     if (input.action === "remove_source_binding") {
       const binding = requireScriptSourceBindingForService(state, input.scriptSourceBindingId);
       removedSourceBindingRecordId = binding.assetLockRecordId;
@@ -151,14 +154,14 @@ export async function mutateAssetLockRecord(
 
     return nextState;
   });
-  const record = findMutatedRecord(snapshot.state, input, removedSourceBindingRecordId);
+  const record = findMutatedRecord(snapshot, input, removedSourceBindingRecordId);
   const viewerUserId = actor.userId;
-  const records = selectAssetLockRecords(snapshot.state, record.projectId, viewerUserId);
+  const records = selectAssetLockRecords(snapshot, record.projectId, viewerUserId);
 
   return {
     record,
     records,
-    sourceBindings: selectVisibleScriptSourceBindings(snapshot.state, records, viewerUserId),
+    sourceBindings: selectVisibleScriptSourceBindings(snapshot, records, viewerUserId),
     summary: summarizeAssetLockRecords(records),
     sourceBinding,
     removedSourceBindingId
@@ -246,8 +249,12 @@ function applyAssetLockRecordMutation(state: WorkspaceState, input: AssetLockRec
   }
 }
 
-function findMutatedRecord(state: WorkspaceState, input: AssetLockRecordMutationRequest, removedSourceBindingRecordId?: string) {
-  const records = state.assetLockRecords ?? [];
+function findMutatedRecord(
+  snapshot: AssetLockRecordRepositorySnapshot,
+  input: AssetLockRecordMutationRequest,
+  removedSourceBindingRecordId?: string
+) {
+  const records = snapshot.assetLockRecords;
 
   if (input.action === "create") {
     const record = records.at(-1);
@@ -429,17 +436,25 @@ function normalizeAssetLockNameKey(assetName: string) {
   return assetName.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
-function selectAssetLockRecords(state: WorkspaceState, projectId: string | undefined, viewerUserId: string) {
-  return (state.assetLockRecords ?? [])
+function selectAssetLockRecords(
+  snapshot: AssetLockRecordRepositorySnapshot,
+  projectId: string | undefined,
+  viewerUserId: string
+) {
+  return snapshot.assetLockRecords
     .filter((record) => !projectId || record.projectId === projectId)
-    .filter((record) => canViewAssetLockRecord(state, record, viewerUserId))
+    .filter((record) => canViewAssetLockRecord(snapshot.state, record, viewerUserId))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-function selectVisibleScriptSourceBindings(state: WorkspaceState, records: AssetLockRecord[], viewerUserId: string) {
+function selectVisibleScriptSourceBindings(
+  snapshot: AssetLockRecordRepositorySnapshot,
+  records: AssetLockRecord[],
+  viewerUserId: string
+) {
   const recordsById = new Map(records.map((record) => [record.id, record]));
 
-  return (state.scriptSourceBindings ?? []).filter((binding) => {
+  return snapshot.scriptSourceBindings.filter((binding) => {
     const record = recordsById.get(binding.assetLockRecordId);
 
     if (!record) {
@@ -454,18 +469,20 @@ function selectVisibleScriptSourceBindings(state: WorkspaceState, records: Asset
       return false;
     }
 
-    const role = selectPrimaryRole(state, viewerUserId, record.projectId);
+    const role = selectPrimaryRole(snapshot.state, viewerUserId, record.projectId);
 
     if (hasFullAssetLockAccess(role)) {
       return true;
     }
 
     if (role === "writer") {
-      return getAssignedEpisodeNos(state, record.projectId, viewerUserId, ["writer"]).includes(binding.episodeNo);
+      return getAssignedEpisodeNos(snapshot.state, record.projectId, viewerUserId, ["writer"]).includes(binding.episodeNo);
     }
 
     if (role === "creator") {
-      return getAssignedEpisodeNos(state, record.projectId, viewerUserId, ["creator", "lead_creator"]).includes(binding.episodeNo);
+      return getAssignedEpisodeNos(snapshot.state, record.projectId, viewerUserId, ["creator", "lead_creator"]).includes(
+        binding.episodeNo
+      );
     }
 
     return false;

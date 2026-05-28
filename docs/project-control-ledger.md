@@ -5,18 +5,26 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-28 21:35:08 +08:00`.
+Timestamp: `2026-05-28 22:04:46 +08:00`.
 
-- Active branch: `main`.
-- Latest recorded `main` commit: `96eebd2 Record M3 actor mismatch merge`.
-- Latest product/test code commit: `33ce8a2 Cover M3 actor currentUser mismatch services`.
-- Worktree at last check: clean on `main`.
-- GitHub sync unblocked: remote `xiezuogongju-04` points to `https://wangzongwudi66@github.com/wangzongwudi66/xiezuogngju-04.git`; `main@96eebd2` is synced to `xiezuogongju-04/main`.
-- Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
+- Active implementation branch: `codex/m3-record-repository-local-adapter`.
+- Branch baseline: local `main@79c1a03 Refresh project ledger snapshot`.
+- Worktree at branch creation: clean on `main`.
+- Remote sync is intentionally out of scope: `79c1a03` may not be pushed to `xiezuogongju-04` because GitHub connection failed.
+- Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- Completed on `codex/m3-record-repository-local-adapter` (local branch, not pushed)
+  - Adds `apps/web/app/api/asset-lock-records/repository.ts` with an `AssetLockRecordRepository` interface and local workspace-backed adapter.
+  - `asset-lock-records` service now reads/mutates `assetLockRecords` and `scriptSourceBindings` through the repository snapshot while keeping existing domain mutations, permission checks, actor handling, API shape, and response sorting unchanged.
+  - `service.test.ts` now covers legacy workspaces missing both asset lock records and source bindings.
+  - No DB, migration, object storage, UI, browser QA, timeline write API, attachment service refactor, or `delivery-import-jobs/persistence.ts` migration is included.
+  - Validation:
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/service.test.ts`: passed, 1 file / 25 tests.
+    - `npm.cmd run test -w apps/web -- app/api/asset-decision-timeline/service.test.ts app/api/asset-lock-attachments/service.test.ts`: passed, 2 files / 31 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
 - `33ce8a2 Cover M3 actor currentUser mismatch services`
   - Adds only service-level regression tests for the M3 actor boundary P3 follow-up from F review.
   - `asset-lock-records` now covers create/list when `WorkspaceState.currentUserId` is `user-creator-b` but the explicit actor is `user-head-writer`.
