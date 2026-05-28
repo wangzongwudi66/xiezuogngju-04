@@ -5,23 +5,26 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-28 22:04:46 +08:00`.
+Timestamp: `2026-05-28 22:45:13 +08:00`.
 
-- Active implementation branch: `codex/m3-record-repository-local-adapter`.
-- Branch baseline: local `main@79c1a03 Refresh project ledger snapshot`.
-- Worktree at branch creation: clean on `main`.
-- Remote sync is intentionally out of scope: `79c1a03` may not be pushed to `xiezuogongju-04` because GitHub connection failed.
+- Active branch: `main`.
+- Latest recorded `main` commit before this ledger update: `761080a Add asset lock record repository adapter`.
+- Latest product/test code commit: `761080a Add asset lock record repository adapter`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-record-repository-local-adapter`.
+- Remote sync is pending: `xiezuogongju-04/main` is still recorded locally at `96eebd2` because the previous GitHub push attempt failed to connect.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
-- Completed on `codex/m3-record-repository-local-adapter` (local branch, not pushed)
+- `761080a Add asset lock record repository adapter`
   - Adds `apps/web/app/api/asset-lock-records/repository.ts` with an `AssetLockRecordRepository` interface and local workspace-backed adapter.
   - `asset-lock-records` service now reads/mutates `assetLockRecords` and `scriptSourceBindings` through the repository snapshot while keeping existing domain mutations, permission checks, actor handling, API shape, and response sorting unchanged.
   - `service.test.ts` now covers legacy workspaces missing both asset lock records and source bindings.
+  - Fast-forward merged `codex/m3-record-repository-local-adapter` into `main` after J review found no P0/P1/P2 and no blocking P3.
   - No DB, migration, object storage, UI, browser QA, timeline write API, attachment service refactor, or `delivery-import-jobs/persistence.ts` migration is included.
   - Validation:
+    - `git diff --check 79c1a03..HEAD`: passed.
     - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/service.test.ts`: passed, 1 file / 25 tests.
     - `npm.cmd run test -w apps/web -- app/api/asset-decision-timeline/service.test.ts app/api/asset-lock-attachments/service.test.ts`: passed, 2 files / 31 tests.
     - `npm.cmd run typecheck -w apps/web`: passed.
