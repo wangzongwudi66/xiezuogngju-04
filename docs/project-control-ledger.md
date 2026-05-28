@@ -5,31 +5,37 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-29 00:43:38 +08:00`.
+Timestamp: `2026-05-29 00:55:19 +08:00`.
 
-- Active branch: `codex/m3-record-db-repository-skeleton`.
-- Latest recorded `main` commit before this ledger update: `7c84a4a Record asset lock check constraints merge`.
-- Latest product/test code commit on `main`: `7c84a4a Record asset lock check constraints merge`.
-- Worktree at last check: implementation branch has local DB repository skeleton changes pending commit.
-- Remote sync restored: `main@7c84a4a` was pushed to `xiezuogongju-04/main` after the check constraints merge.
+- Active branch: `main`.
+- Latest recorded `main` commit before this ledger update: `22d5968 Add asset lock DB repository skeleton`.
+- Latest product/test code commit on `main`: `22d5968 Add asset lock DB repository skeleton`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-record-db-repository-skeleton`.
+- Remote sync restored: `main@22d5968` was pushed to `xiezuogongju-04/main` after the DB repository skeleton merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
-- `codex/m3-record-db-repository-skeleton`
+- `22d5968 Add asset lock DB repository skeleton`
   - Adds a thin `apps/web/db/runtime.ts` Drizzle/pg runtime. It does not create a pool or connect at import time; DB runtime is created only when repository methods need it.
   - Adds an asset-lock repository resolver. Default behavior remains local; DB mode is selected only when `ASSET_LOCK_RECORDS_REPOSITORY=db` and `DATABASE_URL` are both present. If DB mode is requested without `DATABASE_URL`, the resolver falls back to local.
   - Adds `apps/web/app/api/asset-lock-records/db-repository.ts` with read/list snapshot support, explicit create-record insert support, and pure DB row/domain mappers for `asset_lock_records` and `asset_lock_record_episodes`.
   - Updates `asset-lock-records` service to resolve the repository instead of directly importing the local adapter. Local mode keeps existing callback mutation behavior; DB mode only supports create through an explicit create command.
   - DB mode rejects non-create mutations with `asset_lock_record_db_mutation_unsupported:<action>` instead of writing to local state.
-  - No migration, migration regeneration, real DB migrate, DB startup, script source binding migration, attachment migration, timeline projection change, UI change, browser QA, or push was included.
+  - Fast-forward merged `codex/m3-record-db-repository-skeleton` into `main` after R review found no P0/P1/P2.
+  - R review P3: DB mode unsupported non-create mutations return the capability error before project permission checks. Routes still require a workspace actor first, so this is not an unauthenticated write risk; revisit if service reuse needs permission-preserving unsupported responses.
+  - No migration, migration regeneration, real DB migrate, DB startup, script source binding migration, attachment migration, timeline projection change, UI change, or browser QA was included.
   - Validation before commit:
     - `npm.cmd run typecheck -w apps/web`: passed.
     - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/service.test.ts app/api/asset-lock-records/route.test.ts`: passed, 2 files / 41 tests.
     - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/repository.test.ts app/api/asset-lock-records/db-repository.test.ts`: passed, 2 files / 4 tests.
     - `npm.cmd run db:check -w apps/web`: passed.
     - `git diff --check`: passed, with only existing LF-to-CRLF working-copy warnings.
+  - Validation before merge:
+    - `git diff --check main..HEAD`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/repository.test.ts app/api/asset-lock-records/db-repository.test.ts app/api/asset-lock-records/service.test.ts app/api/asset-lock-records/route.test.ts`: passed, 4 files / 45 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
 - `1a3892d Add asset lock record check constraints`
   - Adds DB-level `CHECK ... IN (...)` constraints for `asset_lock_records.asset_type`, `change_type`, `writer_confirmation`, `production_confirmation`, `risk`, and `status`.
   - Keeps the columns as `text` and does not switch to `pgEnum`.
