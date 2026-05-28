@@ -5,18 +5,30 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-29 00:08:25 +08:00`.
+Timestamp: `2026-05-29 00:26:57 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `56833e8 Record asset lock schema merge`.
-- Latest product/test code commit: `0f457cd Add asset lock record Drizzle schema`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-asset-lock-record-schema` and recording the schema merge.
-- Remote sync restored: `main` was pushed to `xiezuogongju-04/main` after the schema merge ledger update.
+- Latest recorded `main` commit before this ledger update: `1a3892d Add asset lock record check constraints`.
+- Latest product/test code commit: `1a3892d Add asset lock record check constraints`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-asset-lock-record-checks`.
+- Remote sync restored: `main@1a3892d` was pushed to `xiezuogongju-04/main` after the check constraints merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `1a3892d Add asset lock record check constraints`
+  - Adds DB-level `CHECK ... IN (...)` constraints for `asset_lock_records.asset_type`, `change_type`, `writer_confirmation`, `production_confirmation`, `risk`, and `status`.
+  - Keeps the columns as `text` and does not switch to `pgEnum`.
+  - Adds generated migration `apps/web/db/migrations/0001_abnormal_zemo.sql` and Drizzle meta snapshot updates.
+  - Keeps runtime behavior unchanged: no DB adapter, no real migration execution, no `delivery-import-jobs/persistence.ts` migration, no `script_source_bindings` or attachments schema, no UI, and no timeline mutation.
+  - Fast-forward merged `codex/m3-asset-lock-record-checks` into `main` after O review found no P0/P1/P2/P3.
+  - Validation:
+    - `git diff --check main..HEAD`: passed before merge.
+    - `npm.cmd run db:generate -w apps/web`: passed on the implementation branch and generated `apps/web/db/migrations/0001_abnormal_zemo.sql`.
+    - `npm.cmd run db:check -w apps/web`: passed on the implementation branch, in O review, and again before merge.
+    - `npm.cmd run typecheck -w apps/web`: passed on the implementation branch and again before merge.
+    - `npm.cmd run test -w apps/web -- asset-lock-records`: passed on the implementation branch, 2 files / 39 tests.
 - `0f457cd Add asset lock record Drizzle schema`
   - Introduces the first M3 PostgreSQL/Drizzle tooling slice for `apps/web`.
   - Adds `drizzle-orm`, `pg`, `drizzle-kit`, and `@types/pg`, plus `db:generate` and `db:check` scripts.
