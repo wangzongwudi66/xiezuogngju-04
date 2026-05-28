@@ -5,18 +5,37 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-29 01:42:37 +08:00`.
+Timestamp: `2026-05-29 02:18:01 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `a5d7352 Add asset attachments schema`.
-- Latest product/test code commit on `main`: `a5d7352 Add asset attachments schema`.
-- Worktree at last check: clean after fast-forward merging `codex/source-binding-db-read-mapper` and rebased `codex/m3-asset-attachments-schema`.
-- Remote sync restored: `main@a5d7352` was pushed to `xiezuogongju-04/main` after the source binding DB read mapper and asset attachments schema merges.
+- Latest recorded `main` commit before this ledger update: `04c8621 Add asset attachment DB metadata read mapper`.
+- Latest product/test code commit on `main`: `04c8621 Add asset attachment DB metadata read mapper`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-source-binding-db-write-path` and rebased `codex/asset-attachment-db-metadata-read-mapper`.
+- Remote sync restored: `main@04c8621` was pushed to `xiezuogongju-04/main` after the source binding DB write path and attachment metadata read mapper merges.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `04c8621 Add asset attachment DB metadata read mapper`
+  - Adds `asset-lock-attachments` DB metadata repository skeleton and row-to-domain mapper for `asset_attachments`.
+  - Adds local/default resolver tests; DB mode is only selected by the explicit attachment repository env and `DATABASE_URL`, so current attachment service/route behavior remains local.
+  - Keeps runtime behavior unchanged: no service/route/UI changes, no upload/list/delete DB write path, no file byte migration, no object storage, no checksum/storage key, no schema/migration change, and no browser QA.
+  - Rebases `codex/asset-attachment-db-metadata-read-mapper` onto `main@84c4a86` after AC merged, then fast-forward merged it into `main`. AF review found no P0/P1/P2/P3.
+  - Validation:
+    - `git diff --check main..HEAD`: passed after rebase.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-attachments/db-repository.test.ts app/api/asset-lock-attachments/repository.test.ts app/api/asset-lock-attachments/service.test.ts app/api/asset-lock-attachments/route.test.ts`: passed, 4 files / 36 tests.
+- `84c4a86 Add DB source binding write path`
+  - Adds explicit DB repository methods `createSourceBinding` and `removeSourceBinding` without adding a DB-side `mutate(callback)`.
+  - Adds source binding insert mapper, transaction-backed create, hard-delete remove, and 0-row delete handling via `script_source_binding_not_found`.
+  - Enables DB mode for `bind_source` and `remove_source_binding` while continuing to run the existing service/domain actor, permission, duplicate, locked-record, and line/excerpt validation before DB writes.
+  - Keeps the slice scoped: no schema/migration change, no attachments, no timeline, no delivery persistence, no UI, no real DB migrate, and no browser QA.
+  - Fast-forward merged `codex/m3-source-binding-db-write-path` into `main` after AE review found no P0/P1/P2/P3.
+  - Validation:
+    - `git diff --check main..HEAD`: passed.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/db-repository.test.ts app/api/asset-lock-records/service.test.ts app/api/asset-lock-records/route.test.ts`: passed, 3 files / 51 tests.
 - `a5d7352 Add asset attachments schema`
   - Adds Drizzle schema and generated migration `apps/web/db/migrations/0003_spotty_revanche.sql` for `asset_attachments`.
   - Covers current attachment metadata fields, including record/package/project ids, file id/name/mime/size, version, attachment type, uploader, upload time, note, status, and delete metadata.
