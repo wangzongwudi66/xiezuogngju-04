@@ -5,13 +5,13 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-28 21:06:27 +08:00`.
+Timestamp: `2026-05-28 21:35:08 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `33ce8a2 Cover M3 actor currentUser mismatch services`.
+- Latest recorded `main` commit: `96eebd2 Record M3 actor mismatch merge`.
 - Latest product/test code commit: `33ce8a2 Cover M3 actor currentUser mismatch services`.
-- Worktree at last check: dirty only for this ledger update after fast-forward merging `codex/m3-actor-mismatch-tests`.
-- GitHub sync unblocked: remote `xiezuogongju-04` points to `https://wangzongwudi66@github.com/wangzongwudi66/xiezuogngju-04.git`; handoff says `main@50cf11a` is synced to `xiezuogongju-04/main`.
+- Worktree at last check: clean on `main`.
+- GitHub sync unblocked: remote `xiezuogongju-04` points to `https://wangzongwudi66@github.com/wangzongwudi66/xiezuogngju-04.git`; `main@96eebd2` is synced to `xiezuogongju-04/main`.
 - Fresh-build timeline browser QA is still blocked: `npm.cmd run build -w apps/web` passed, but the in-app browser rejected `http://localhost:3000` due enterprise network policy.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
