@@ -5,13 +5,13 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-29 00:06:39 +08:00`.
+Timestamp: `2026-05-29 00:08:25 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `0f457cd Add asset lock record Drizzle schema`.
+- Latest recorded `main` commit before this ledger update: `56833e8 Record asset lock schema merge`.
 - Latest product/test code commit: `0f457cd Add asset lock record Drizzle schema`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-asset-lock-record-schema`.
-- Remote sync is pending: `xiezuogongju-04/main` is still recorded locally at `96eebd2` because the previous GitHub push attempt failed to connect; this schema merge has not been pushed.
+- Worktree at last check: clean after fast-forward merging `codex/m3-asset-lock-record-schema` and recording the schema merge.
+- Remote sync restored: `main` was pushed to `xiezuogongju-04/main` after the schema merge ledger update.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
