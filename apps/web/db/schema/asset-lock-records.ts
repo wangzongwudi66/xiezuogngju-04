@@ -6,6 +6,9 @@ const assetLockStatusValues = ["draft", "needs_info", "disputed", "ready_to_lock
 const assetRiskValues = ["normal", "attention", "high"] as const;
 const assetTypeValues = ["character", "scene", "prop", "vehicle", "effect"] as const;
 const assetChangeTypeValues = ["new", "modified", "removed", "reused"] as const;
+const assetAttachmentTypeValues = ["reference", "production", "final"] as const;
+const assetAttachmentStatusValues = ["active", "deleted"] as const;
+const assetAttachmentMimeValues = ["image/jpeg", "image/png", "image/webp", "application/pdf"] as const;
 
 const quotedCheckValues = (values: readonly string[]) => values.map((value) => `'${value.replaceAll("'", "''")}'`).join(", ");
 const textEnumCheck = (column: AnyPgColumn, values: readonly string[]) =>
@@ -106,5 +109,56 @@ export const scriptSourceBindings = pgTable(
     check("script_source_bindings_line_range_valid", sql`${table.endLine} >= ${table.startLine}`),
     index("script_source_bindings_asset_lock_record_idx").on(table.assetLockRecordId),
     index("script_source_bindings_project_package_idx").on(table.projectId, table.deliveryPackageId)
+  ]
+);
+
+export const assetAttachments = pgTable(
+  "asset_attachments",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    assetLockRecordId: text("asset_lock_record_id")
+      .notNull()
+      .references(() => assetLockRecords.id, { onDelete: "cascade" }),
+    deliveryPackageId: text("delivery_package_id").notNull(),
+    fileId: text("file_id").notNull(),
+    fileName: text("file_name").notNull(),
+    mime: text("mime", { enum: assetAttachmentMimeValues }).notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    version: integer("version").notNull(),
+    attachmentType: text("attachment_type", { enum: assetAttachmentTypeValues }).notNull(),
+    uploadedByUserId: text("uploaded_by_user_id").notNull(),
+    uploadedAt: timestampWithTimezone("uploaded_at").notNull(),
+    note: text("note"),
+    status: text("status", { enum: assetAttachmentStatusValues }).default("active").notNull(),
+    deletedByUserId: text("deleted_by_user_id"),
+    deletedAt: timestampWithTimezone("deleted_at")
+  },
+  (table) => [
+    unique("asset_attachments_file_id_unique").on(table.fileId),
+    unique("asset_attachments_record_version_unique").on(table.assetLockRecordId, table.version),
+    check("asset_attachments_size_bytes_positive", sql`${table.sizeBytes} > 0`),
+    check("asset_attachments_version_positive", sql`${table.version} > 0`),
+    check("asset_attachments_type_check", textEnumCheck(table.attachmentType, assetAttachmentTypeValues)),
+    check("asset_attachments_mime_check", textEnumCheck(table.mime, assetAttachmentMimeValues)),
+    check("asset_attachments_status_check", textEnumCheck(table.status, assetAttachmentStatusValues)),
+    check(
+      "asset_attachments_delete_state_check",
+      sql`(
+        (${table.status} = 'active' and ${table.deletedByUserId} is null and ${table.deletedAt} is null)
+        or (${table.status} = 'deleted' and ${table.deletedByUserId} is not null and ${table.deletedAt} is not null)
+      )`
+    ),
+    check("asset_attachments_file_id_not_blank", sql`trim(${table.fileId}) <> ''`),
+    check("asset_attachments_file_name_not_blank", sql`trim(${table.fileName}) <> ''`),
+    check("asset_attachments_mime_not_blank", sql`trim(${table.mime}) <> ''`),
+    check("asset_attachments_uploaded_by_user_id_not_blank", sql`trim(${table.uploadedByUserId}) <> ''`),
+    index("asset_attachments_record_status_version_uploaded_idx").on(
+      table.assetLockRecordId,
+      table.status,
+      table.version,
+      table.uploadedAt
+    ),
+    index("asset_attachments_project_package_idx").on(table.projectId, table.deliveryPackageId)
   ]
 );
