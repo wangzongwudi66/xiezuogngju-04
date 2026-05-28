@@ -1,13 +1,25 @@
-import type { AssetLockRecord } from "@aigc/domain";
-import { describe, expect, it } from "vitest";
+import { seedWorkspace, type AssetLockRecord, type ScriptSourceBinding } from "@aigc/domain";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getAssetLockDbRuntime } from "../../../db/runtime";
+import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import {
+  createDbAssetLockRecordRepository,
   mapAssetLockRecordRows,
   mapAssetLockRecordToDbRows,
   mapScriptSourceBindingRows,
+  mapScriptSourceBindingToDbRow,
   type AssetLockRecordDbEpisodeRow,
   type AssetLockRecordDbRecordRow,
   type ScriptSourceBindingDbRow
 } from "./db-repository";
+
+vi.mock("../../../db/runtime", () => ({
+  getAssetLockDbRuntime: vi.fn()
+}));
+
+vi.mock("../delivery-import-jobs/persistence", () => ({
+  readDeliveryImportWorkspace: vi.fn()
+}));
 
 describe("asset lock record DB repository mappers", () => {
   it("maps DB record and episode rows into domain records", () => {
@@ -148,4 +160,130 @@ describe("asset lock record DB repository mappers", () => {
       }
     ]);
   });
+
+  it("maps a domain script source binding into an explicit DB insert row", () => {
+    const binding: ScriptSourceBinding = {
+      id: "source-binding-1",
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-1",
+      assetLockRecordId: "asset-lock-1",
+      episodeNo: 2,
+      startLine: 4,
+      endLine: 6,
+      excerptSnapshot: "Mine lift source excerpt",
+      createdByUserId: "user-head-writer",
+      createdAt: "2026-05-29T00:00:00.000Z"
+    };
+
+    expect(mapScriptSourceBindingToDbRow(binding)).toEqual({
+      id: "source-binding-1",
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-1",
+      assetLockRecordId: "asset-lock-1",
+      episodeNo: 2,
+      startLine: 4,
+      endLine: 6,
+      excerptSnapshot: "Mine lift source excerpt",
+      createdByUserId: "user-head-writer",
+      createdAt: "2026-05-29T00:00:00.000Z"
+    });
+  });
 });
+
+describe("asset lock record DB repository source binding writes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(readDeliveryImportWorkspace).mockResolvedValue({
+      state: seedWorkspace,
+      deliveryParseIssuesByPackageId: {}
+    });
+  });
+
+  it("inserts source bindings in a transaction and returns the refreshed snapshot", async () => {
+    const binding: ScriptSourceBinding = {
+      id: "source-binding-1",
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-1",
+      assetLockRecordId: "asset-lock-1",
+      episodeNo: 2,
+      startLine: 4,
+      endLine: 6,
+      excerptSnapshot: "Mine lift source excerpt",
+      createdByUserId: "user-head-writer",
+      createdAt: "2026-05-29T00:00:00.000Z"
+    };
+    const mockDb = createMockDb({
+      selectResults: [[], [], [mapScriptSourceBindingToDbRow(binding)]]
+    });
+    mockRuntime(mockDb.db);
+
+    const snapshot = await createDbAssetLockRecordRepository().createSourceBinding(binding);
+
+    expect(mockDb.transaction).toHaveBeenCalledTimes(1);
+    expect(mockDb.insertValues).toHaveBeenCalledWith(mapScriptSourceBindingToDbRow(binding));
+    expect(snapshot.scriptSourceBindings).toEqual([binding]);
+  });
+
+  it("hard deletes source bindings and returns the refreshed snapshot", async () => {
+    const mockDb = createMockDb({
+      deletedRows: [{ id: "source-binding-1" }],
+      selectResults: [[], [], []]
+    });
+    mockRuntime(mockDb.db);
+
+    const snapshot = await createDbAssetLockRecordRepository().removeSourceBinding("source-binding-1");
+
+    expect(mockDb.transaction).toHaveBeenCalledTimes(1);
+    expect(mockDb.deleteWhere).toHaveBeenCalledTimes(1);
+    expect(mockDb.deleteReturning).toHaveBeenCalledTimes(1);
+    expect(snapshot.scriptSourceBindings).toEqual([]);
+  });
+
+  it("throws a stable error when no source binding row is deleted", async () => {
+    const mockDb = createMockDb({
+      deletedRows: []
+    });
+    mockRuntime(mockDb.db);
+
+    await expect(createDbAssetLockRecordRepository().removeSourceBinding("missing-source-binding")).rejects.toThrow(
+      "script_source_binding_not_found"
+    );
+    expect(readDeliveryImportWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+function mockRuntime(db: unknown) {
+  vi.mocked(getAssetLockDbRuntime).mockReturnValue({
+    db,
+    pool: {}
+  } as ReturnType<typeof getAssetLockDbRuntime>);
+}
+
+function createMockDb(input: { deletedRows?: unknown[]; selectResults?: unknown[][] } = {}) {
+  const selectResults = [...(input.selectResults ?? [])];
+  const orderBy = vi.fn(async () => selectResults.shift() ?? []);
+  const from = vi.fn(() => ({ orderBy }));
+  const select = vi.fn(() => ({ from }));
+  const insertValues = vi.fn(async (_row: unknown) => undefined);
+  const insert = vi.fn(() => ({ values: insertValues }));
+  const deleteReturning = vi.fn(async () => input.deletedRows ?? []);
+  const deleteWhere = vi.fn(() => ({ returning: deleteReturning }));
+  const deleteFrom = vi.fn(() => ({ where: deleteWhere }));
+  const tx = {
+    insert,
+    delete: deleteFrom
+  };
+  const transaction = vi.fn(async (callback: (transactionClient: typeof tx) => Promise<unknown> | unknown) => callback(tx));
+  const db = {
+    select,
+    transaction
+  };
+
+  return {
+    db,
+    transaction,
+    insertValues,
+    deleteWhere,
+    deleteReturning
+  };
+}

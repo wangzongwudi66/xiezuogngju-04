@@ -1,5 +1,5 @@
 import type { AssetLockRecord, ScriptSourceBinding, WorkspaceState } from "@aigc/domain";
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { assetLockRecordEpisodes, assetLockRecords, scriptSourceBindings } from "../../../db/schema";
 import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
@@ -11,6 +11,7 @@ export type ScriptSourceBindingDbRow = typeof scriptSourceBindings.$inferSelect;
 
 type AssetLockRecordDbRecordInsert = typeof assetLockRecords.$inferInsert;
 type AssetLockRecordDbEpisodeInsert = typeof assetLockRecordEpisodes.$inferInsert;
+type ScriptSourceBindingDbInsert = typeof scriptSourceBindings.$inferInsert;
 
 export function createDbAssetLockRecordRepository(): DbAssetLockRecordRepository {
   async function read() {
@@ -53,6 +54,32 @@ export function createDbAssetLockRecordRepository(): DbAssetLockRecordRepository
       await db.transaction(async (tx) => {
         await tx.insert(assetLockRecords).values(rows.record);
         await tx.insert(assetLockRecordEpisodes).values(rows.episodes);
+      });
+
+      return read();
+    },
+    async createSourceBinding(binding) {
+      const { db } = getAssetLockDbRuntime();
+      const row = mapScriptSourceBindingToDbRow(binding);
+
+      await db.transaction(async (tx) => {
+        await tx.insert(scriptSourceBindings).values(row);
+      });
+
+      return read();
+    },
+    async removeSourceBinding(id) {
+      const { db } = getAssetLockDbRuntime();
+
+      await db.transaction(async (tx) => {
+        const deletedRows = await tx
+          .delete(scriptSourceBindings)
+          .where(eq(scriptSourceBindings.id, id))
+          .returning({ id: scriptSourceBindings.id });
+
+        if (deletedRows.length === 0) {
+          throw new Error("script_source_binding_not_found");
+        }
       });
 
       return read();
@@ -152,6 +179,21 @@ export function mapScriptSourceBindingRows(bindingRows: ScriptSourceBindingDbRow
     createdByUserId: row.createdByUserId,
     createdAt: row.createdAt
   }));
+}
+
+export function mapScriptSourceBindingToDbRow(binding: ScriptSourceBinding): ScriptSourceBindingDbInsert {
+  return {
+    id: binding.id,
+    projectId: binding.projectId,
+    deliveryPackageId: binding.deliveryPackageId,
+    assetLockRecordId: binding.assetLockRecordId,
+    episodeNo: binding.episodeNo,
+    startLine: binding.startLine,
+    endLine: binding.endLine,
+    excerptSnapshot: binding.excerptSnapshot,
+    createdByUserId: binding.createdByUserId,
+    createdAt: binding.createdAt
+  };
 }
 
 function toDbRepositorySnapshot(

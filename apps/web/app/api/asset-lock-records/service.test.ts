@@ -1,11 +1,13 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loginAsUser, seedWorkspace } from "@aigc/domain";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loginAsUser, seedWorkspace, type AssetLockRecord, type ScriptSourceBinding, type WorkspaceState } from "@aigc/domain";
 import { createDeliveryImportJob, getDeliveryImportWorkspace } from "../delivery-import-jobs/service";
 import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { mutateDeliveryPackage } from "../delivery-packages/service";
+import * as assetLockRecordRepositoryModule from "./repository";
+import type { AssetLockRecordRepositorySnapshot, DbAssetLockRecordRepository } from "./repository";
 import {
   listAssetLockRecords as listAssetLockRecordsForActor,
   mutateAssetLockRecord as mutateAssetLockRecordForActor
@@ -26,6 +28,7 @@ describe("asset lock record service", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
     delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
     delete process.env.DATABASE_URL;
@@ -77,6 +80,127 @@ describe("asset lock record service", () => {
       })
     ).rejects.toThrow("asset_lock_record_db_mutation_unsupported:writer_confirm");
     await expect(getDeliveryImportWorkspace()).resolves.toEqual(workspaceBefore);
+  });
+
+  it("binds source lines through the DB repository without mutating local workspace state", async () => {
+    const deliveryPackageId = await createDraft();
+    const record = (await createAssetRecord(deliveryPackageId)).record;
+    const workspace = await getDeliveryImportWorkspace();
+    const repository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
+
+    const result = await mutateAssetLockRecord({
+      action: "bind_source",
+      assetLockRecordId: record.id,
+      deliveryPackageId,
+      episodeNo: 1,
+      startLine: 1,
+      endLine: 1
+    });
+    const persisted = await getDeliveryImportWorkspace();
+
+    expect(repository.read).toHaveBeenCalledTimes(1);
+    expect(repository.createSourceBinding).toHaveBeenCalledTimes(1);
+    expect(repository.removeSourceBinding).not.toHaveBeenCalled();
+    expect(result.record).toEqual(record);
+    expect(result.sourceBinding).toEqual(
+      expect.objectContaining({
+        assetLockRecordId: record.id,
+        deliveryPackageId,
+        episodeNo: 1,
+        startLine: 1,
+        endLine: 1,
+        createdByUserId: "user-head-writer"
+      })
+    );
+    expect(result.sourceBindings).toEqual([result.sourceBinding]);
+    expect(persisted.state.scriptSourceBindings ?? []).toEqual([]);
+  });
+
+  it("removes source bindings through the DB repository without mutating local workspace state", async () => {
+    const deliveryPackageId = await createDraft();
+    const record = (await createAssetRecord(deliveryPackageId)).record;
+    const bound = await bindSource(record.id, deliveryPackageId);
+    const sourceBinding = bound.sourceBinding;
+
+    expect(sourceBinding).toBeTruthy();
+
+    const workspace = await getDeliveryImportWorkspace();
+    const repository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
+
+    const result = await mutateAssetLockRecord({
+      action: "remove_source_binding",
+      scriptSourceBindingId: sourceBinding?.id ?? ""
+    });
+    const persisted = await getDeliveryImportWorkspace();
+
+    expect(repository.read).toHaveBeenCalledTimes(1);
+    expect(repository.removeSourceBinding).toHaveBeenCalledWith(sourceBinding?.id);
+    expect(repository.createSourceBinding).not.toHaveBeenCalled();
+    expect(result.record).toEqual(record);
+    expect(result.removedSourceBindingId).toBe(sourceBinding?.id);
+    expect(result.sourceBindings).toEqual([]);
+    expect(persisted.state.scriptSourceBindings ?? []).toContainEqual(sourceBinding);
+  });
+
+  it("does not call DB source binding writes when validation rejects the mutation", async () => {
+    const deliveryPackageId = await createDraftForRange(1, 21);
+    const record = (await createAssetRecord(deliveryPackageId, "DB Validation Asset", [1, 21])).record;
+    const bound = await bindSource(record.id, deliveryPackageId, { episodeNo: 1, startLine: 1, endLine: 1 });
+    const sourceBinding = bound.sourceBinding;
+
+    expect(sourceBinding).toBeTruthy();
+
+    const workspace = await getDeliveryImportWorkspace();
+    const resolveRepository = vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository");
+    const duplicateRepository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    resolveRepository.mockReturnValue(duplicateRepository);
+
+    await expect(
+      mutateAssetLockRecord({
+        action: "bind_source",
+        assetLockRecordId: record.id,
+        deliveryPackageId,
+        episodeNo: 1,
+        startLine: 1,
+        endLine: 1
+      })
+    ).rejects.toThrow("Script source binding already exists");
+    expect(duplicateRepository.createSourceBinding).not.toHaveBeenCalled();
+
+    const permissionRepository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    resolveRepository.mockReturnValue(permissionRepository);
+    await login("user-writer");
+    await expect(
+      mutateAssetLockRecord({
+        action: "bind_source",
+        assetLockRecordId: record.id,
+        deliveryPackageId,
+        episodeNo: 21,
+        startLine: 1,
+        endLine: 1
+      })
+    ).rejects.toThrow("asset_lock_episode_scope_forbidden");
+    expect(permissionRepository.createSourceBinding).not.toHaveBeenCalled();
+
+    const lockedRepository = createMockDbAssetLockRecordRepository(
+      snapshotFromState({
+        ...workspace.state,
+        assetLockRecords: (workspace.state.assetLockRecords ?? []).map((item) =>
+          item.id === record.id ? { ...item, status: "locked" as const } : item
+        )
+      })
+    );
+    resolveRepository.mockReturnValue(lockedRepository);
+    await login("user-head-writer");
+    await expect(
+      mutateAssetLockRecord({
+        action: "remove_source_binding",
+        scriptSourceBindingId: sourceBinding?.id ?? ""
+      })
+    ).rejects.toThrow("Locked asset lock records cannot change source bindings");
+    expect(lockedRepository.removeSourceBinding).not.toHaveBeenCalled();
   });
 
   it("lists records by project and returns a summary", async () => {
@@ -849,6 +973,58 @@ async function bindSource(
     startLine: input.startLine ?? 1,
     endLine: input.endLine ?? input.startLine ?? 1
   });
+}
+
+function createMockDbAssetLockRecordRepository(initialSnapshot: AssetLockRecordRepositorySnapshot): DbAssetLockRecordRepository {
+  let currentSnapshot = initialSnapshot;
+
+  return {
+    mode: "db",
+    read: vi.fn(async () => currentSnapshot),
+    createAssetLockRecord: vi.fn(async (record: AssetLockRecord) => {
+      currentSnapshot = snapshotFromState({
+        ...currentSnapshot.state,
+        assetLockRecords: [...currentSnapshot.assetLockRecords, record]
+      });
+
+      return currentSnapshot;
+    }),
+    createSourceBinding: vi.fn(async (binding: ScriptSourceBinding) => {
+      currentSnapshot = snapshotFromState({
+        ...currentSnapshot.state,
+        scriptSourceBindings: [...currentSnapshot.scriptSourceBindings, binding]
+      });
+
+      return currentSnapshot;
+    }),
+    removeSourceBinding: vi.fn(async (id: string) => {
+      if (!currentSnapshot.scriptSourceBindings.some((binding) => binding.id === id)) {
+        throw new Error("script_source_binding_not_found");
+      }
+
+      currentSnapshot = snapshotFromState({
+        ...currentSnapshot.state,
+        scriptSourceBindings: currentSnapshot.scriptSourceBindings.filter((binding) => binding.id !== id)
+      });
+
+      return currentSnapshot;
+    })
+  };
+}
+
+function snapshotFromState(state: WorkspaceState): AssetLockRecordRepositorySnapshot {
+  const assetLockRecords = state.assetLockRecords ?? [];
+  const scriptSourceBindings = state.scriptSourceBindings ?? [];
+
+  return {
+    state: {
+      ...state,
+      assetLockRecords,
+      scriptSourceBindings
+    },
+    assetLockRecords,
+    scriptSourceBindings
+  };
 }
 
 async function login(userId: string) {

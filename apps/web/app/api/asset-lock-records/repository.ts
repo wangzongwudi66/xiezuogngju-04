@@ -20,6 +20,8 @@ export interface DbAssetLockRecordRepository {
   mode: "db";
   read(): Promise<AssetLockRecordRepositorySnapshot>;
   createAssetLockRecord(record: AssetLockRecord): Promise<AssetLockRecordRepositorySnapshot>;
+  createSourceBinding(binding: ScriptSourceBinding): Promise<AssetLockRecordRepositorySnapshot>;
+  removeSourceBinding(id: string): Promise<AssetLockRecordRepositorySnapshot>;
 }
 
 export type AssetLockRecordRepository = LocalAssetLockRecordRepository | DbAssetLockRecordRepository;

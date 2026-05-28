@@ -188,15 +188,48 @@ async function mutateAssetLockRecordInDb(
   input: AssetLockRecordMutationRequest,
   actor: WorkspaceRequestActor
 ): Promise<AssetLockRecordMutationResponse> {
-  if (input.action !== "create") {
+  if (input.action !== "create" && input.action !== "bind_source" && input.action !== "remove_source_binding") {
     throw new Error(`asset_lock_record_db_mutation_unsupported:${input.action}`);
   }
 
   const previousSnapshot = await repository.read();
+  const previousSourceBinding =
+    input.action === "remove_source_binding"
+      ? previousSnapshot.scriptSourceBindings.find((item) => item.id === input.scriptSourceBindingId)
+      : undefined;
   const nextState = applyAssetLockRecordMutation(previousSnapshot.state, input, actor);
-  const createdRecord = findCreatedAssetLockRecord(previousSnapshot, nextState);
-  const snapshot = await repository.createAssetLockRecord(createdRecord);
-  const record = snapshot.assetLockRecords.find((item) => item.id === createdRecord.id) ?? createdRecord;
+
+  let snapshot: AssetLockRecordRepositorySnapshot;
+  let record: AssetLockRecord;
+  let sourceBinding: ScriptSourceBinding | undefined;
+  let removedSourceBindingId: string | undefined;
+
+  if (input.action === "create") {
+    const createdRecord = findCreatedAssetLockRecord(previousSnapshot, nextState);
+    snapshot = await repository.createAssetLockRecord(createdRecord);
+    record = snapshot.assetLockRecords.find((item) => item.id === createdRecord.id) ?? createdRecord;
+  } else if (input.action === "bind_source") {
+    const createdSourceBinding = findCreatedSourceBinding(nextState, input);
+
+    if (!createdSourceBinding) {
+      throw new Error("script_source_binding_not_created");
+    }
+
+    snapshot = await repository.createSourceBinding(createdSourceBinding);
+    record =
+      snapshot.assetLockRecords.find((item) => item.id === input.assetLockRecordId) ??
+      requireAssetLockRecordForService(nextState, input.assetLockRecordId);
+    sourceBinding = snapshot.scriptSourceBindings.find((item) => item.id === createdSourceBinding.id) ?? createdSourceBinding;
+  } else {
+    if (!previousSourceBinding) {
+      throw new Error("script_source_binding_not_found");
+    }
+
+    snapshot = await repository.removeSourceBinding(previousSourceBinding.id);
+    record = findMutatedRecord(snapshot, input, previousSourceBinding.assetLockRecordId);
+    removedSourceBindingId = previousSourceBinding.id;
+  }
+
   const viewerUserId = actor.userId;
   const records = selectAssetLockRecords(snapshot, record.projectId, viewerUserId);
 
@@ -204,7 +237,9 @@ async function mutateAssetLockRecordInDb(
     record,
     records,
     sourceBindings: selectVisibleScriptSourceBindings(snapshot, records, viewerUserId),
-    summary: summarizeAssetLockRecords(records)
+    summary: summarizeAssetLockRecords(records),
+    sourceBinding,
+    removedSourceBindingId
   };
 }
 
