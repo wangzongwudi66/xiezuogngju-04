@@ -1,11 +1,15 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, pgTable, primaryKey, text, timestamp, unique } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, check, index, integer, pgTable, primaryKey, text, timestamp, unique } from "drizzle-orm/pg-core";
 
 const assetConfirmationValues = ["pending", "confirmed", "returned"] as const;
 const assetLockStatusValues = ["draft", "needs_info", "disputed", "ready_to_lock", "locked"] as const;
 const assetRiskValues = ["normal", "attention", "high"] as const;
 const assetTypeValues = ["character", "scene", "prop", "vehicle", "effect"] as const;
 const assetChangeTypeValues = ["new", "modified", "removed", "reused"] as const;
+
+const quotedCheckValues = (values: readonly string[]) => values.map((value) => `'${value.replaceAll("'", "''")}'`).join(", ");
+const textEnumCheck = (column: AnyPgColumn, values: readonly string[]) =>
+  sql`${column} in (${sql.raw(quotedCheckValues(values))})`;
 
 const timestampWithTimezone = (name: string) => timestamp(name, { mode: "string", withTimezone: true });
 
@@ -39,6 +43,15 @@ export const assetLockRecords = pgTable(
   },
   (table) => [
     unique("asset_lock_records_delivery_package_name_key_unique").on(table.deliveryPackageId, table.assetNameKey),
+    check("asset_lock_records_asset_type_check", textEnumCheck(table.assetType, assetTypeValues)),
+    check("asset_lock_records_change_type_check", textEnumCheck(table.changeType, assetChangeTypeValues)),
+    check("asset_lock_records_writer_confirmation_check", textEnumCheck(table.writerConfirmation, assetConfirmationValues)),
+    check(
+      "asset_lock_records_production_confirmation_check",
+      textEnumCheck(table.productionConfirmation, assetConfirmationValues)
+    ),
+    check("asset_lock_records_risk_check", textEnumCheck(table.risk, assetRiskValues)),
+    check("asset_lock_records_status_check", textEnumCheck(table.status, assetLockStatusValues)),
     index("asset_lock_records_project_updated_idx").on(table.projectId, table.updatedAt),
     index("asset_lock_records_delivery_package_idx").on(table.deliveryPackageId)
   ]

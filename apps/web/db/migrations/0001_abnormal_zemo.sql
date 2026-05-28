@@ -1,0 +1,6 @@
+ALTER TABLE "asset_lock_records" ADD CONSTRAINT "asset_lock_records_asset_type_check" CHECK ("asset_lock_records"."asset_type" in ('character', 'scene', 'prop', 'vehicle', 'effect'));--> statement-breakpoint
+ALTER TABLE "asset_lock_records" ADD CONSTRAINT "asset_lock_records_change_type_check" CHECK ("asset_lock_records"."change_type" in ('new', 'modified', 'removed', 'reused'));--> statement-breakpoint
+ALTER TABLE "asset_lock_records" ADD CONSTRAINT "asset_lock_records_writer_confirmation_check" CHECK ("asset_lock_records"."writer_confirmation" in ('pending', 'confirmed', 'returned'));--> statement-breakpoint
+ALTER TABLE "asset_lock_records" ADD CONSTRAINT "asset_lock_records_production_confirmation_check" CHECK ("asset_lock_records"."production_confirmation" in ('pending', 'confirmed', 'returned'));--> statement-breakpoint
+ALTER TABLE "asset_lock_records" ADD CONSTRAINT "asset_lock_records_risk_check" CHECK ("asset_lock_records"."risk" in ('normal', 'attention', 'high'));--> statement-breakpoint
+ALTER TABLE "asset_lock_records" ADD CONSTRAINT "asset_lock_records_status_check" CHECK ("asset_lock_records"."status" in ('draft', 'needs_info', 'disputed', 'ready_to_lock', 'locked'));
