@@ -5,31 +5,47 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-29 01:28:30 +08:00`.
+Timestamp: `2026-05-29 01:42:37 +08:00`.
 
-- Active branch: `codex/source-binding-db-read-mapper`.
-- Latest recorded `main` commit before this ledger update: `1550d17 Record source binding schema merge`.
-- Latest product/test code commit on `main`: `7e2c8e4 Add script source binding DB schema`.
-- Worktree at branch start: clean at `1550d17` before creating `codex/source-binding-db-read-mapper`.
-- Remote sync restored: `main@1550d17` was pushed to `xiezuogongju-04/main` after the source binding schema merge record.
+- Active branch: `main`.
+- Latest recorded `main` commit before this ledger update: `a5d7352 Add asset attachments schema`.
+- Latest product/test code commit on `main`: `a5d7352 Add asset attachments schema`.
+- Worktree at last check: clean after fast-forward merging `codex/source-binding-db-read-mapper` and rebased `codex/m3-asset-attachments-schema`.
+- Remote sync restored: `main@a5d7352` was pushed to `xiezuogongju-04/main` after the source binding DB read mapper and asset attachments schema merges.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
-Current implementation branch:
+Recently completed after the xiezuogongju-04 handoff:
 
-- `codex/source-binding-db-read-mapper`
+- `a5d7352 Add asset attachments schema`
+  - Adds Drizzle schema and generated migration `apps/web/db/migrations/0003_spotty_revanche.sql` for `asset_attachments`.
+  - Covers current attachment metadata fields, including record/package/project ids, file id/name/mime/size, version, attachment type, uploader, upload time, note, status, and delete metadata.
+  - Adds FK cascade to `asset_lock_records`, unique `file_id`, unique record/version, positive size/version checks, MIME/type/status checks, delete-state consistency check, non-empty text checks, and record plus project/package indexes.
+  - Keeps runtime behavior unchanged: no attachment metadata repository, no file byte migration, no object storage, no storage key/checksum, no attachment route/service/UI changes, no real DB migrate, and no browser QA.
+  - Rebases `codex/m3-asset-attachments-schema` onto `main@c7ee96e` after W merged, then fast-forward merged it into `main`. Z review found no P0/P1/P2; P3 noted `deleted_by_user_id` is only non-null, not trim-non-empty, which is acceptable until DB writes are enabled.
+  - Validation:
+    - `git diff --check main..HEAD`: passed after rebase.
+    - `npm.cmd run db:generate -w apps/web`: passed on the implementation branch and generated `apps/web/db/migrations/0003_spotty_revanche.sql`.
+    - `npm.cmd run db:check -w apps/web`: passed on the implementation branch and again before merge.
+    - `npm.cmd run typecheck -w apps/web`: passed on the implementation branch and again before merge.
+    - `npm.cmd run test -w apps/web -- asset-lock-attachments`: passed on the implementation branch and again before merge, 2 files / 33 tests.
+- `c7ee96e Map script source bindings in DB reads`
   - Reads `script_source_bindings` in the DB asset-lock repository snapshot and maps rows into domain `ScriptSourceBinding` values.
   - Returns DB-backed `scriptSourceBindings` through both `snapshot.state.scriptSourceBindings` and `snapshot.scriptSourceBindings` instead of hard-coding an empty list.
   - Adds a pure mapper unit test for DB script source binding rows.
   - Keeps the slice read-only: no `bind_source` DB create, no `remove_source_binding` DB delete, no repository/service behavior change, no migration generation, no real DB migrate, no attachments/timeline/delivery persistence/UI/browser QA work.
+  - Fast-forward merged `codex/source-binding-db-read-mapper` into `main` after Y review found no P0/P1/P2/P3.
   - Validation before commit:
     - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/db-repository.test.ts app/api/asset-lock-records/repository.test.ts app/api/asset-lock-records/service.test.ts`: passed, 3 files / 32 tests.
     - `npm.cmd run typecheck -w apps/web`: passed.
     - `npm.cmd run test -w packages/domain -- src/script-source-binding.test.ts`: passed, 1 file / 16 tests.
     - `npm.cmd run db:check -w apps/web`: passed; no migration/schema changes are included in this branch.
     - `git diff --check`: passed, with only the existing LF-to-CRLF working-copy warning for `docs/project-control-ledger.md`.
-
-Recently completed after the xiezuogongju-04 handoff:
+  - Validation before merge:
+    - `git diff --check main..HEAD`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/db-repository.test.ts app/api/asset-lock-records/repository.test.ts app/api/asset-lock-records/service.test.ts`: passed, 3 files / 32 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `npm.cmd run db:check -w apps/web`: passed.
 
 - `7e2c8e4 Add script source binding DB schema`
   - Adds Drizzle schema and generated migration `apps/web/db/migrations/0002_cynical_shocker.sql` for `script_source_bindings`.
