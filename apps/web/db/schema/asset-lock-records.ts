@@ -75,3 +75,36 @@ export const assetLockRecordEpisodes = pgTable(
     index("asset_lock_record_episodes_episode_no_idx").on(table.episodeNo)
   ]
 );
+
+export const scriptSourceBindings = pgTable(
+  "script_source_bindings",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    deliveryPackageId: text("delivery_package_id").notNull(),
+    assetLockRecordId: text("asset_lock_record_id")
+      .notNull()
+      .references(() => assetLockRecords.id, { onDelete: "cascade" }),
+    episodeNo: integer("episode_no").notNull(),
+    startLine: integer("start_line").notNull(),
+    endLine: integer("end_line").notNull(),
+    excerptSnapshot: text("excerpt_snapshot").notNull(),
+    createdByUserId: text("created_by_user_id").notNull(),
+    createdAt: timestampWithTimezone("created_at").notNull()
+  },
+  (table) => [
+    unique("script_source_bindings_record_package_episode_lines_unique").on(
+      table.assetLockRecordId,
+      table.deliveryPackageId,
+      table.episodeNo,
+      table.startLine,
+      table.endLine
+    ),
+    check("script_source_bindings_episode_no_positive", sql`${table.episodeNo} > 0`),
+    check("script_source_bindings_start_line_positive", sql`${table.startLine} > 0`),
+    check("script_source_bindings_end_line_positive", sql`${table.endLine} > 0`),
+    check("script_source_bindings_line_range_valid", sql`${table.endLine} >= ${table.startLine}`),
+    index("script_source_bindings_asset_lock_record_idx").on(table.assetLockRecordId),
+    index("script_source_bindings_project_package_idx").on(table.projectId, table.deliveryPackageId)
+  ]
+);
