@@ -67,18 +67,18 @@ describe("asset lock record service", () => {
     expect(persisted.state.assetLockRecords).toContainEqual(result.record);
   });
 
-  it("rejects unsupported DB-mode mutations before writing to local state", async () => {
+  it("rejects DB-mode mutations that are intentionally not DB-backed before writing to local state", async () => {
     process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
     process.env.DATABASE_URL = "postgres://example.invalid/aigc";
     const workspaceBefore = await getDeliveryImportWorkspace();
 
     await expect(
       mutateAssetLockRecord({
-        action: "writer_confirm",
-        assetLockRecordId: "asset-lock-record-1",
-        confirmedByUserId: "user-head-writer"
+        action: "prepare_demo",
+        projectId: "project-jincheng",
+        actorUserId: "user-head-writer"
       })
-    ).rejects.toThrow("asset_lock_record_db_mutation_unsupported:writer_confirm");
+    ).rejects.toThrow("asset_lock_record_db_mutation_unsupported:prepare_demo");
     await expect(getDeliveryImportWorkspace()).resolves.toEqual(workspaceBefore);
   });
 
@@ -144,6 +144,92 @@ describe("asset lock record service", () => {
     expect(persisted.state.scriptSourceBindings ?? []).toContainEqual(sourceBinding);
   });
 
+  it("updates lifecycle actions through the DB repository without mutating local workspace state", async () => {
+    const deliveryPackageId = await createDraft();
+    const lockRecord = (await createAssetRecord(deliveryPackageId, "DB Lifecycle Lock")).record;
+    const needsInfoRecord = (await createAssetRecord(deliveryPackageId, "DB Lifecycle Needs Info")).record;
+    const disputeRecord = (await createAssetRecord(deliveryPackageId, "DB Lifecycle Dispute")).record;
+    const workspace = await getDeliveryImportWorkspace();
+    const repository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
+
+    const writerConfirmed = await mutateAssetLockRecord({
+      action: "writer_confirm",
+      assetLockRecordId: lockRecord.id,
+      confirmedByUserId: "user-head-writer",
+      note: "writer ok"
+    });
+    await login("user-creator-a");
+    const productionConfirmed = await mutateAssetLockRecord({
+      action: "production_confirm",
+      assetLockRecordId: lockRecord.id,
+      confirmedByUserId: "user-creator-a",
+      note: "production ok"
+    });
+    await login("user-owner");
+    const locked = await mutateAssetLockRecord({
+      action: "final_lock",
+      assetLockRecordId: lockRecord.id,
+      lockedByUserId: "user-owner"
+    });
+    await login("user-creator-a");
+    const needsInfo = await mutateAssetLockRecord({
+      action: "needs_info",
+      assetLockRecordId: needsInfoRecord.id,
+      markedByUserId: "user-creator-a",
+      missingInfo: "front reference missing"
+    });
+    await login("user-head-writer");
+    const disputed = await mutateAssetLockRecord({
+      action: "dispute",
+      assetLockRecordId: disputeRecord.id,
+      markedByUserId: "user-head-writer",
+      disputeReason: "asset scope unclear"
+    });
+    const persisted = await getDeliveryImportWorkspace();
+
+    expect(repository.read).toHaveBeenCalledTimes(5);
+    expect(repository.updateAssetLockRecord).toHaveBeenCalledTimes(5);
+    expect(repository.createAssetLockRecord).not.toHaveBeenCalled();
+    expect(repository.createSourceBinding).not.toHaveBeenCalled();
+    expect(repository.removeSourceBinding).not.toHaveBeenCalled();
+    expect(writerConfirmed.record).toMatchObject({
+      id: lockRecord.id,
+      writerConfirmation: "confirmed",
+      writerConfirmedByUserId: "user-head-writer",
+      writerNote: "writer ok",
+      status: "draft"
+    });
+    expect(productionConfirmed.record).toMatchObject({
+      id: lockRecord.id,
+      productionConfirmation: "confirmed",
+      productionConfirmedByUserId: "user-creator-a",
+      productionNote: "production ok",
+      status: "ready_to_lock"
+    });
+    expect(locked.record).toMatchObject({
+      id: lockRecord.id,
+      status: "locked",
+      finalLockedByUserId: "user-owner"
+    });
+    expect(needsInfo.record).toMatchObject({
+      id: needsInfoRecord.id,
+      writerConfirmation: "returned",
+      productionConfirmation: "returned",
+      status: "needs_info",
+      missingInfo: "front reference missing"
+    });
+    expect(disputed.record).toMatchObject({
+      id: disputeRecord.id,
+      writerConfirmation: "returned",
+      productionConfirmation: "returned",
+      risk: "high",
+      status: "disputed",
+      disputeReason: "asset scope unclear"
+    });
+    expect(persisted.state.assetLockRecords).toEqual(workspace.state.assetLockRecords);
+  });
+
   it("does not call DB source binding writes when validation rejects the mutation", async () => {
     const deliveryPackageId = await createDraftForRange(1, 21);
     const record = (await createAssetRecord(deliveryPackageId, "DB Validation Asset", [1, 21])).record;
@@ -201,6 +287,56 @@ describe("asset lock record service", () => {
       })
     ).rejects.toThrow("Locked asset lock records cannot change source bindings");
     expect(lockedRepository.removeSourceBinding).not.toHaveBeenCalled();
+  });
+
+  it("does not call DB record updates when lifecycle validation rejects the mutation", async () => {
+    const deliveryPackageId = await createDraft();
+    const record = (await createAssetRecord(deliveryPackageId, "DB Lifecycle Validation Asset")).record;
+    const workspace = await getDeliveryImportWorkspace();
+    const resolveRepository = vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository");
+
+    const permissionRepository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    resolveRepository.mockReturnValue(permissionRepository);
+    await login("user-creator-a");
+    await expect(
+      mutateAssetLockRecord({
+        action: "writer_confirm",
+        assetLockRecordId: record.id,
+        confirmedByUserId: "user-creator-a"
+      })
+    ).rejects.toThrow("asset_lock_action_forbidden");
+    expect(permissionRepository.updateAssetLockRecord).not.toHaveBeenCalled();
+
+    const lockedRepository = createMockDbAssetLockRecordRepository(
+      snapshotFromState({
+        ...workspace.state,
+        assetLockRecords: (workspace.state.assetLockRecords ?? []).map((item) =>
+          item.id === record.id ? { ...item, status: "locked" as const } : item
+        )
+      })
+    );
+    resolveRepository.mockReturnValue(lockedRepository);
+    await login("user-head-writer");
+    await expect(
+      mutateAssetLockRecord({
+        action: "writer_confirm",
+        assetLockRecordId: record.id,
+        confirmedByUserId: "user-head-writer"
+      })
+    ).rejects.toThrow();
+    expect(lockedRepository.updateAssetLockRecord).not.toHaveBeenCalled();
+
+    const statusRepository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    resolveRepository.mockReturnValue(statusRepository);
+    await login("user-owner");
+    await expect(
+      mutateAssetLockRecord({
+        action: "final_lock",
+        assetLockRecordId: record.id,
+        lockedByUserId: "user-owner"
+      })
+    ).rejects.toThrow();
+    expect(statusRepository.updateAssetLockRecord).not.toHaveBeenCalled();
   });
 
   it("lists records by project and returns a summary", async () => {
@@ -985,6 +1121,18 @@ function createMockDbAssetLockRecordRepository(initialSnapshot: AssetLockRecordR
       currentSnapshot = snapshotFromState({
         ...currentSnapshot.state,
         assetLockRecords: [...currentSnapshot.assetLockRecords, record]
+      });
+
+      return currentSnapshot;
+    }),
+    updateAssetLockRecord: vi.fn(async (record: AssetLockRecord) => {
+      if (!currentSnapshot.assetLockRecords.some((item) => item.id === record.id)) {
+        throw new Error("asset_lock_record_not_found");
+      }
+
+      currentSnapshot = snapshotFromState({
+        ...currentSnapshot.state,
+        assetLockRecords: currentSnapshot.assetLockRecords.map((item) => (item.id === record.id ? record : item))
       });
 
       return currentSnapshot;

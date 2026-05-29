@@ -188,7 +188,7 @@ async function mutateAssetLockRecordInDb(
   input: AssetLockRecordMutationRequest,
   actor: WorkspaceRequestActor
 ): Promise<AssetLockRecordMutationResponse> {
-  if (input.action !== "create" && input.action !== "bind_source" && input.action !== "remove_source_binding") {
+  if (!isAssetLockRecordDbMutationSupported(input.action)) {
     throw new Error(`asset_lock_record_db_mutation_unsupported:${input.action}`);
   }
 
@@ -220,6 +220,10 @@ async function mutateAssetLockRecordInDb(
       snapshot.assetLockRecords.find((item) => item.id === input.assetLockRecordId) ??
       requireAssetLockRecordForService(nextState, input.assetLockRecordId);
     sourceBinding = snapshot.scriptSourceBindings.find((item) => item.id === createdSourceBinding.id) ?? createdSourceBinding;
+  } else if (isAssetLockRecordLifecycleUpdate(input)) {
+    const updatedRecord = requireAssetLockRecordForService(nextState, input.assetLockRecordId);
+    snapshot = await repository.updateAssetLockRecord(updatedRecord);
+    record = snapshot.assetLockRecords.find((item) => item.id === updatedRecord.id) ?? updatedRecord;
   } else {
     if (!previousSourceBinding) {
       throw new Error("script_source_binding_not_found");
@@ -241,6 +245,34 @@ async function mutateAssetLockRecordInDb(
     sourceBinding,
     removedSourceBindingId
   };
+}
+
+function isAssetLockRecordDbMutationSupported(action: AssetLockRecordMutationRequest["action"]) {
+  return (
+    action === "create" ||
+    action === "bind_source" ||
+    action === "remove_source_binding" ||
+    isAssetLockRecordLifecycleUpdateAction(action)
+  );
+}
+
+function isAssetLockRecordLifecycleUpdate(
+  input: AssetLockRecordMutationRequest
+): input is Extract<
+  AssetLockRecordMutationRequest,
+  { action: "writer_confirm" | "production_confirm" | "needs_info" | "dispute" | "final_lock" }
+> {
+  return isAssetLockRecordLifecycleUpdateAction(input.action);
+}
+
+function isAssetLockRecordLifecycleUpdateAction(action: AssetLockRecordMutationRequest["action"]) {
+  return (
+    action === "writer_confirm" ||
+    action === "production_confirm" ||
+    action === "needs_info" ||
+    action === "dispute" ||
+    action === "final_lock"
+  );
 }
 
 function applyAssetLockRecordMutation(state: WorkspaceState, input: AssetLockRecordMutationRequest, actor: WorkspaceRequestActor) {

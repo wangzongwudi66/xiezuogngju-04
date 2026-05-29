@@ -12,6 +12,24 @@ export type ScriptSourceBindingDbRow = typeof scriptSourceBindings.$inferSelect;
 type AssetLockRecordDbRecordInsert = typeof assetLockRecords.$inferInsert;
 type AssetLockRecordDbEpisodeInsert = typeof assetLockRecordEpisodes.$inferInsert;
 type ScriptSourceBindingDbInsert = typeof scriptSourceBindings.$inferInsert;
+type AssetLockRecordDbRecordUpdate = Pick<
+  AssetLockRecordDbRecordInsert,
+  | "writerConfirmation"
+  | "writerConfirmedByUserId"
+  | "writerConfirmedAt"
+  | "writerNote"
+  | "productionConfirmation"
+  | "productionConfirmedByUserId"
+  | "productionConfirmedAt"
+  | "productionNote"
+  | "risk"
+  | "status"
+  | "missingInfo"
+  | "disputeReason"
+  | "finalLockedByUserId"
+  | "finalLockedAt"
+  | "updatedAt"
+>;
 
 export function createDbAssetLockRecordRepository(): DbAssetLockRecordRepository {
   return {
@@ -25,6 +43,20 @@ export function createDbAssetLockRecordRepository(): DbAssetLockRecordRepository
         await tx.insert(assetLockRecords).values(rows.record);
         await tx.insert(assetLockRecordEpisodes).values(rows.episodes);
       });
+
+      return readDbAssetLockRecordRepositorySnapshot();
+    },
+    async updateAssetLockRecord(record) {
+      const { db } = getAssetLockDbRuntime();
+      const updatedRows = await db
+        .update(assetLockRecords)
+        .set(mapAssetLockRecordToDbUpdateRow(record))
+        .where(eq(assetLockRecords.id, record.id))
+        .returning();
+
+      if (updatedRows.length === 0) {
+        throw new Error("asset_lock_record_not_found");
+      }
 
       return readDbAssetLockRecordRepositorySnapshot();
     },
@@ -163,6 +195,26 @@ export function mapAssetLockRecordToDbRows(record: AssetLockRecord): {
       episodeNo,
       createdAt: record.createdAt
     }))
+  };
+}
+
+export function mapAssetLockRecordToDbUpdateRow(record: AssetLockRecord): AssetLockRecordDbRecordUpdate {
+  return {
+    writerConfirmation: record.writerConfirmation,
+    writerConfirmedByUserId: record.writerConfirmedByUserId ?? null,
+    writerConfirmedAt: record.writerConfirmedAt ?? null,
+    writerNote: record.writerNote ?? null,
+    productionConfirmation: record.productionConfirmation,
+    productionConfirmedByUserId: record.productionConfirmedByUserId ?? null,
+    productionConfirmedAt: record.productionConfirmedAt ?? null,
+    productionNote: record.productionNote ?? null,
+    risk: record.risk,
+    status: record.status,
+    missingInfo: record.missingInfo ?? null,
+    disputeReason: record.disputeReason ?? null,
+    finalLockedByUserId: record.finalLockedByUserId ?? null,
+    finalLockedAt: record.finalLockedAt ?? null,
+    updatedAt: record.updatedAt
   };
 }
 

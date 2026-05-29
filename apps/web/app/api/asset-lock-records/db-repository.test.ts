@@ -6,6 +6,7 @@ import {
   createDbAssetLockRecordRepository,
   mapAssetLockRecordRows,
   mapAssetLockRecordToDbRows,
+  mapAssetLockRecordToDbUpdateRow,
   mapScriptSourceBindingRows,
   mapScriptSourceBindingToDbRow,
   type AssetLockRecordDbEpisodeRow,
@@ -125,6 +126,44 @@ describe("asset lock record DB repository mappers", () => {
         createdAt: "2026-05-29T00:00:00.000Z"
       }
     ]);
+  });
+
+  it("maps a domain record into explicit DB lifecycle update fields", () => {
+    const record = buildRecord({
+      writerConfirmation: "confirmed",
+      writerConfirmedByUserId: "user-head-writer",
+      writerConfirmedAt: "2026-05-29T01:00:00.000Z",
+      writerNote: "writer ok",
+      productionConfirmation: "confirmed",
+      productionConfirmedByUserId: "user-creator-a",
+      productionConfirmedAt: "2026-05-29T02:00:00.000Z",
+      productionNote: "production ok",
+      risk: "high",
+      status: "locked",
+      missingInfo: undefined,
+      disputeReason: undefined,
+      finalLockedByUserId: "user-owner",
+      finalLockedAt: "2026-05-29T03:00:00.000Z",
+      updatedAt: "2026-05-29T03:00:00.000Z"
+    });
+
+    expect(mapAssetLockRecordToDbUpdateRow(record)).toEqual({
+      writerConfirmation: "confirmed",
+      writerConfirmedByUserId: "user-head-writer",
+      writerConfirmedAt: "2026-05-29T01:00:00.000Z",
+      writerNote: "writer ok",
+      productionConfirmation: "confirmed",
+      productionConfirmedByUserId: "user-creator-a",
+      productionConfirmedAt: "2026-05-29T02:00:00.000Z",
+      productionNote: "production ok",
+      risk: "high",
+      status: "locked",
+      missingInfo: null,
+      disputeReason: null,
+      finalLockedByUserId: "user-owner",
+      finalLockedAt: "2026-05-29T03:00:00.000Z",
+      updatedAt: "2026-05-29T03:00:00.000Z"
+    });
   });
 
   it("maps DB script source binding rows into domain bindings", () => {
@@ -252,6 +291,74 @@ describe("asset lock record DB repository source binding writes", () => {
   });
 });
 
+describe("asset lock record DB repository lifecycle writes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(readDeliveryImportWorkspace).mockResolvedValue({
+      state: seedWorkspace,
+      deliveryParseIssuesByPackageId: {}
+    });
+  });
+
+  it("updates explicit record fields, returns the refreshed snapshot, and preserves episode rows", async () => {
+    const updatedRecord = buildRecord({
+      writerConfirmation: "confirmed",
+      writerConfirmedByUserId: "user-head-writer",
+      writerConfirmedAt: "2026-05-29T01:00:00.000Z",
+      writerNote: "writer ok",
+      status: "draft",
+      updatedAt: "2026-05-29T01:00:00.000Z"
+    });
+    const rows = mapAssetLockRecordToDbRows(updatedRecord);
+    const mockDb = createMockDb({
+      updatedRows: [rows.record],
+      selectResults: [[rows.record], rows.episodes, []]
+    });
+    mockRuntime(mockDb.db);
+
+    const snapshot = await createDbAssetLockRecordRepository().updateAssetLockRecord(updatedRecord);
+
+    expect(mockDb.updateSet).toHaveBeenCalledWith(mapAssetLockRecordToDbUpdateRow(updatedRecord));
+    expect(mockDb.updateWhere).toHaveBeenCalledTimes(1);
+    expect(mockDb.updateReturning).toHaveBeenCalledTimes(1);
+    expect(mockDb.insertValues).not.toHaveBeenCalled();
+    expect(mockDb.deleteWhere).not.toHaveBeenCalled();
+    expect(snapshot.assetLockRecords).toEqual([updatedRecord]);
+  });
+
+  it("throws a stable error when no record row is updated", async () => {
+    const mockDb = createMockDb({
+      updatedRows: []
+    });
+    mockRuntime(mockDb.db);
+
+    await expect(createDbAssetLockRecordRepository().updateAssetLockRecord(buildRecord({ id: "missing-record" }))).rejects.toThrow(
+      "asset_lock_record_not_found"
+    );
+    expect(readDeliveryImportWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+function buildRecord(overrides: Partial<AssetLockRecord> = {}): AssetLockRecord {
+  return {
+    id: "asset-lock-1",
+    projectId: "project-jincheng",
+    deliveryPackageId: "delivery-1",
+    episodeNos: [1, 2],
+    assetName: "Mine Lift",
+    assetType: "scene",
+    changeType: "new",
+    writerConfirmation: "pending",
+    productionConfirmation: "pending",
+    risk: "attention",
+    status: "draft",
+    createdByUserId: "user-head-writer",
+    createdAt: "2026-05-29T00:00:00.000Z",
+    updatedAt: "2026-05-29T00:00:00.000Z",
+    ...overrides
+  };
+}
+
 function mockRuntime(db: unknown) {
   vi.mocked(getAssetLockDbRuntime).mockReturnValue({
     db,
@@ -259,13 +366,17 @@ function mockRuntime(db: unknown) {
   } as ReturnType<typeof getAssetLockDbRuntime>);
 }
 
-function createMockDb(input: { deletedRows?: unknown[]; selectResults?: unknown[][] } = {}) {
+function createMockDb(input: { deletedRows?: unknown[]; selectResults?: unknown[][]; updatedRows?: unknown[] } = {}) {
   const selectResults = [...(input.selectResults ?? [])];
   const orderBy = vi.fn(async () => selectResults.shift() ?? []);
   const from = vi.fn(() => ({ orderBy }));
   const select = vi.fn(() => ({ from }));
   const insertValues = vi.fn(async (_row: unknown) => undefined);
   const insert = vi.fn(() => ({ values: insertValues }));
+  const updateReturning = vi.fn(async () => input.updatedRows ?? []);
+  const updateWhere = vi.fn(() => ({ returning: updateReturning }));
+  const updateSet = vi.fn(() => ({ where: updateWhere }));
+  const update = vi.fn(() => ({ set: updateSet }));
   const deleteReturning = vi.fn(async () => input.deletedRows ?? []);
   const deleteWhere = vi.fn(() => ({ returning: deleteReturning }));
   const deleteFrom = vi.fn(() => ({ where: deleteWhere }));
@@ -276,6 +387,7 @@ function createMockDb(input: { deletedRows?: unknown[]; selectResults?: unknown[
   const transaction = vi.fn(async (callback: (transactionClient: typeof tx) => Promise<unknown> | unknown) => callback(tx));
   const db = {
     select,
+    update,
     transaction
   };
 
@@ -283,6 +395,9 @@ function createMockDb(input: { deletedRows?: unknown[]; selectResults?: unknown[
     db,
     transaction,
     insertValues,
+    updateSet,
+    updateWhere,
+    updateReturning,
     deleteWhere,
     deleteReturning
   };
