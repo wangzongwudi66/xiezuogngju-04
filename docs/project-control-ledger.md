@@ -5,18 +5,42 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-29 02:18:01 +08:00`.
+Timestamp: `2026-05-30 03:03:57 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `04c8621 Add asset attachment DB metadata read mapper`.
-- Latest product/test code commit on `main`: `04c8621 Add asset attachment DB metadata read mapper`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-source-binding-db-write-path` and rebased `codex/asset-attachment-db-metadata-read-mapper`.
-- Remote sync restored: `main@04c8621` was pushed to `xiezuogongju-04/main` after the source binding DB write path and attachment metadata read mapper merges.
+- Latest recorded `main` commit before this ledger update: `1c947e3 Implement asset attachment DB metadata writes`.
+- Latest product/test code commit on `main`: `1c947e3 Implement asset attachment DB metadata writes`.
+- Worktree at last check: clean after fast-forward merging `codex/timeline-db-backed-projection` and rebased `codex/m3-asset-attachment-db-writes`.
+- Remote sync restored: `main@1c947e3` was pushed to `xiezuogongju-04/main` after the timeline DB-backed projection and attachment DB metadata write merges.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `1c947e3 Implement asset attachment DB metadata writes`
+  - Adds DB-mode attachment metadata create and soft-delete write paths while preserving local mode workspace metadata behavior.
+  - Gates attachment DB mode on both `ASSET_LOCK_ATTACHMENTS_REPOSITORY=db` and the asset-lock-records DB mode/DATABASE_URL, avoiding the local/DB record split-brain found in AL review.
+  - Attachment DB repository now composes the DB asset-lock-record snapshot and overlays DB attachment metadata only; it does not fallback to local attachment metadata in DB mode.
+  - Upload keeps local file bytes but commits metadata to DB in DB mode, deleting the newly written file if metadata commit fails and avoiding reverse deletion after metadata commit succeeds.
+  - Adds route/service/repository coverage for DB-only records, stale local attachments, upload rollback, soft delete, permission/locked/0-row behavior, and route status mapping.
+  - Keeps the slice scoped: no schema/migration change, no object storage, no checksum/storage key, no file byte migration, no UI, and no browser QA.
+  - Fast-forward merged rebased `codex/m3-asset-attachment-db-writes` into `main` after AM review found no P0/P1/P2/P3.
+  - Validation:
+    - `git diff --check main..HEAD`: passed after rebase.
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-attachments/repository.test.ts app/api/asset-lock-attachments/db-repository.test.ts app/api/asset-lock-attachments/service.test.ts app/api/asset-lock-attachments/route.test.ts`: passed, 4 files / 51 tests.
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/db-repository.test.ts app/api/asset-lock-records/repository.test.ts app/api/asset-lock-records/service.test.ts`: passed, 3 files / 39 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+- `8b7fada Use asset lock repository for timeline projection`
+  - Updates asset decision timeline service to read projection inputs through the asset-lock-records repository resolver.
+  - Keeps the pure projection code unchanged and continues to call `buildAssetDecisionTimelineProjectionFromWorkspace`.
+  - Local fallback remains the repository local adapter; DB mode can now provide DB-backed asset lock records and script source bindings to the projection.
+  - Adds service tests proving repository snapshot records are used and repository snapshot source bindings take precedence over workspace/fallback bindings.
+  - Keeps the slice scoped: no UI/browser QA, no timeline mutation, no delivery persistence migration, no attachments, and no migration.
+  - Fast-forward merged `codex/timeline-db-backed-projection` into `main` after AK review found no P0/P1/P2/P3.
+  - Validation:
+    - `git diff --check main..HEAD`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/asset-decision-timeline/service.test.ts app/api/asset-decision-timeline/route.test.ts app/api/asset-lock-records/db-repository.test.ts`: passed, 3 files / 26 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
 - `04c8621 Add asset attachment DB metadata read mapper`
   - Adds `asset-lock-attachments` DB metadata repository skeleton and row-to-domain mapper for `asset_attachments`.
   - Adds local/default resolver tests; DB mode is only selected by the explicit attachment repository env and `DATABASE_URL`, so current attachment service/route behavior remains local.
