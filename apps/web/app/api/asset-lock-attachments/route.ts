@@ -121,6 +121,10 @@ function statusForAttachmentError(error: string) {
       return 403;
     case "asset_attachment_record_not_found":
       return 404;
+    case "asset_attachment_locked_record_upload_forbidden":
+      return 409;
+    case "asset_attachment_metadata_not_created":
+      return 500;
     default:
       return 400;
   }

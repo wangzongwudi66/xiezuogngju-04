@@ -1,12 +1,14 @@
-import { mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { finalLockAssetRecord, loginAsUser, seedWorkspace } from "@aigc/domain";
+import type { AssetAttachment, AssetLockRecord, WorkspaceState } from "@aigc/domain";
 import { createDeliveryImportJob, getDeliveryImportWorkspace } from "../delivery-import-jobs/service";
 import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { mutateDeliveryPackage } from "../delivery-packages/service";
 import { mutateAssetLockRecord } from "../asset-lock-records/service";
+import type { AssetAttachmentRepositorySnapshot, DbAssetAttachmentRepository } from "./repository";
 import {
   deleteAssetAttachment as deleteAssetAttachmentForActor,
   downloadAssetAttachment as downloadAssetAttachmentForActor,
@@ -40,6 +42,7 @@ describe("asset lock attachment service", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
     delete process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR;
     await rm(storeDir, { recursive: true, force: true });
@@ -317,7 +320,7 @@ describe("asset lock attachment service", () => {
       })
     );
 
-    await expect(upload(record.id)).rejects.toThrow();
+    await expect(upload(record.id)).rejects.toThrow("asset_attachment_locked_record_upload_forbidden");
     const workspace = await getDeliveryImportWorkspace();
 
     expect(workspace.state.assetAttachments ?? []).toHaveLength(0);
@@ -381,6 +384,212 @@ describe("asset lock attachment service", () => {
     const workspace = await getDeliveryImportWorkspace();
 
     expect(workspace.state.assetAttachments).toContainEqual(attachment);
+  });
+
+  it("uses only DB metadata for list, download, and delete when local metadata is stale", async () => {
+    const record = (await createAssetRecord()).record;
+    const staleLocal = buildAttachmentForRecord(record, {
+      id: "asset-attachment-local-stale",
+      fileId: "asset-att-123e4567-e89b-12d3-a456-426614174001",
+      fileName: "stale-local.png"
+    });
+    await mutateDeliveryImportWorkspace((state) => ({
+      ...state,
+      assetAttachments: [staleLocal]
+    }));
+
+    const workspace = await getDeliveryImportWorkspace();
+    const dbAttachment = buildAttachmentForRecord(record, {
+      id: "asset-attachment-db",
+      fileId: "asset-att-123e4567-e89b-12d3-a456-426614174002",
+      fileName: "db-reference.png"
+    });
+    await mkdir(attachmentDir, { recursive: true });
+    await writeFile(resolveAssetAttachmentFilePath(dbAttachment.fileId, ".png"), pngBytes());
+    await writeFile(resolveAssetAttachmentFilePath(staleLocal.fileId, ".png"), new Uint8Array([9, 9, 9]));
+
+    const repository = createMockDbAssetAttachmentRepository(
+      snapshotFromState({
+        ...workspace.state,
+        assetAttachments: [dbAttachment]
+      })
+    );
+
+    const listed = await listAssetAttachmentsForActor(record.id, { userId: currentActorUserId }, { repository });
+    const downloaded = await downloadAssetAttachmentForActor(dbAttachment.id, { userId: currentActorUserId }, { repository });
+    const deleted = await deleteAssetAttachmentForActor(dbAttachment.id, { userId: currentActorUserId }, { repository });
+    const listedAfterDelete = await listAssetAttachmentsForActor(record.id, { userId: currentActorUserId }, { repository });
+
+    expect(listed).toEqual([dbAttachment]);
+    await expect(downloadAssetAttachmentForActor(staleLocal.id, { userId: currentActorUserId }, { repository })).rejects.toThrow(
+      "asset_attachment_not_found"
+    );
+    expect(Buffer.from(downloaded.bytes)).toEqual(Buffer.from(pngBytes()));
+    expect(deleted).toMatchObject({
+      id: dbAttachment.id,
+      status: "deleted",
+      deletedByUserId: "user-head-writer"
+    });
+    expect(listedAfterDelete).toEqual([]);
+    await expect(getDeliveryImportWorkspace()).resolves.toMatchObject({
+      state: {
+        assetAttachments: [staleLocal]
+      }
+    });
+  });
+
+  it("uploads through the DB repository without mutating local workspace metadata", async () => {
+    const record = (await createAssetRecord()).record;
+    const workspace = await getDeliveryImportWorkspace();
+    const repository = createMockDbAssetAttachmentRepository(snapshotFromState(workspace.state));
+
+    const attachment = await uploadAssetAttachment(buildUploadInput(record.id), { userId: currentActorUserId }, { repository });
+    const persisted = await getDeliveryImportWorkspace();
+
+    expect(repository.read).toHaveBeenCalledTimes(1);
+    expect(repository.createAssetAttachmentMetadata).toHaveBeenCalledTimes(1);
+    expect(attachment).toMatchObject({
+      assetLockRecordId: record.id,
+      fileId: expect.stringMatching(/^asset-att-/),
+      status: "active"
+    });
+    expect(persisted.state.assetAttachments ?? []).toEqual([]);
+    await expect(readSavedFileNames()).resolves.toEqual([`${attachment.fileId}.png`]);
+  });
+
+  it("uses DB-only asset lock records for DB attachment upload, list, download, and delete validation", async () => {
+    const deliveryPackageId = await createPublishedDeliveryPackage([1, 2]);
+    const workspace = await getDeliveryImportWorkspace();
+    const dbOnlyRecord = buildDbOnlyAssetLockRecord({ deliveryPackageId });
+    const repository = createMockDbAssetAttachmentRepository(
+      snapshotFromState({
+        ...workspace.state,
+        assetLockRecords: [dbOnlyRecord],
+        assetAttachments: []
+      })
+    );
+
+    const attachment = await uploadAssetAttachment(
+      buildUploadInput(dbOnlyRecord.id, { fileName: "db-only.png", fileBuffer: pngBytes() }),
+      { userId: currentActorUserId },
+      { repository }
+    );
+    const listed = await listAssetAttachmentsForActor(dbOnlyRecord.id, { userId: currentActorUserId }, { repository });
+    const downloaded = await downloadAssetAttachmentForActor(attachment.id, { userId: currentActorUserId }, { repository });
+    const deleted = await deleteAssetAttachmentForActor(attachment.id, { userId: currentActorUserId }, { repository });
+    const listedAfterDelete = await listAssetAttachmentsForActor(dbOnlyRecord.id, { userId: currentActorUserId }, { repository });
+    const persisted = await getDeliveryImportWorkspace();
+
+    expect(workspace.state.assetLockRecords ?? []).not.toContainEqual(dbOnlyRecord);
+    expect(attachment).toMatchObject({
+      assetLockRecordId: dbOnlyRecord.id,
+      deliveryPackageId,
+      status: "active"
+    });
+    expect(listed).toEqual([attachment]);
+    expect(Buffer.from(downloaded.bytes)).toEqual(Buffer.from(pngBytes()));
+    expect(deleted).toMatchObject({
+      id: attachment.id,
+      status: "deleted",
+      deletedByUserId: "user-head-writer"
+    });
+    expect(listedAfterDelete).toEqual([]);
+    expect(persisted.state.assetLockRecords ?? []).not.toContainEqual(dbOnlyRecord);
+    expect(persisted.state.assetAttachments ?? []).toEqual([]);
+  });
+
+  it("cleans up the saved file if DB metadata commit fails", async () => {
+    const record = (await createAssetRecord()).record;
+    const workspace = await getDeliveryImportWorkspace();
+    const repository = createMockDbAssetAttachmentRepository(snapshotFromState(workspace.state), {
+      createError: new Error("forced_db_metadata_failure")
+    });
+
+    await expect(
+      uploadAssetAttachment(buildUploadInput(record.id), { userId: currentActorUserId }, { repository })
+    ).rejects.toThrow("forced_db_metadata_failure");
+
+    const persisted = await getDeliveryImportWorkspace();
+    expect(repository.createAssetAttachmentMetadata).toHaveBeenCalledTimes(1);
+    expect(persisted.state.assetAttachments ?? []).toHaveLength(0);
+    await expect(readSavedFileNames()).resolves.toEqual([]);
+  });
+
+  it("validates DB upload and delete permission before writing metadata", async () => {
+    const record = (await createAssetRecord()).record;
+    await addOutsider();
+    const workspace = await getDeliveryImportWorkspace();
+    const dbAttachment = buildAttachmentForRecord(record, {
+      uploadedByUserId: "user-creator-a"
+    });
+    const uploadRepository = createMockDbAssetAttachmentRepository(snapshotFromState(workspace.state));
+
+    await expect(
+      uploadAssetAttachment(buildUploadInput(record.id), { userId: "user-outsider" }, { repository: uploadRepository })
+    ).rejects.toThrow("asset_attachment_project_member_required");
+
+    const deleteRepository = createMockDbAssetAttachmentRepository(
+      snapshotFromState({
+        ...workspace.state,
+        assetAttachments: [dbAttachment]
+      })
+    );
+
+    await expect(
+      deleteAssetAttachmentForActor(dbAttachment.id, { userId: "user-head-writer" }, { repository: deleteRepository })
+    ).rejects.toThrow("asset_attachment_delete_forbidden");
+    expect(uploadRepository.createAssetAttachmentMetadata).not.toHaveBeenCalled();
+    expect(deleteRepository.softDeleteAssetAttachmentMetadata).not.toHaveBeenCalled();
+    await expect(readSavedFileNames()).resolves.toEqual([]);
+  });
+
+  it("validates locked records before DB upload and soft delete writes", async () => {
+    const record = (await createAssetRecord()).record;
+    await lockRecord(record.id);
+    const workspace = await getDeliveryImportWorkspace();
+    const lockedRecord = (workspace.state.assetLockRecords ?? []).find((item) => item.id === record.id);
+
+    if (!lockedRecord) {
+      throw new Error("locked record missing");
+    }
+
+    const dbAttachment = buildAttachmentForRecord(lockedRecord);
+    const uploadRepository = createMockDbAssetAttachmentRepository(snapshotFromState(workspace.state));
+    const deleteRepository = createMockDbAssetAttachmentRepository(
+      snapshotFromState({
+        ...workspace.state,
+        assetAttachments: [dbAttachment]
+      })
+    );
+
+    await expect(
+      uploadAssetAttachment(buildUploadInput(record.id), { userId: currentActorUserId }, { repository: uploadRepository })
+    ).rejects.toThrow("asset_attachment_locked_record_upload_forbidden");
+    await expect(
+      deleteAssetAttachmentForActor(dbAttachment.id, { userId: currentActorUserId }, { repository: deleteRepository })
+    ).rejects.toThrow("asset_attachment_locked_record_delete_forbidden");
+    expect(uploadRepository.createAssetAttachmentMetadata).not.toHaveBeenCalled();
+    expect(deleteRepository.softDeleteAssetAttachmentMetadata).not.toHaveBeenCalled();
+    await expect(readSavedFileNames()).resolves.toEqual([]);
+  });
+
+  it("propagates a stable DB soft-delete miss when the active row is already gone", async () => {
+    const record = (await createAssetRecord()).record;
+    const workspace = await getDeliveryImportWorkspace();
+    const dbAttachment = buildAttachmentForRecord(record);
+    const repository = createMockDbAssetAttachmentRepository(
+      snapshotFromState({
+        ...workspace.state,
+        assetAttachments: [dbAttachment]
+      }),
+      {
+        softDeleteError: new Error("asset_attachment_not_found")
+      }
+    );
+
+    await expect(
+      deleteAssetAttachmentForActor(dbAttachment.id, { userId: currentActorUserId }, { repository })
+    ).rejects.toThrow("asset_attachment_not_found");
   });
 
   async function createAssetRecord(input: { episodeNos?: number[] } = {}) {
@@ -508,6 +717,108 @@ describe("asset lock attachment service", () => {
       mime: overrides.mime ?? "image/png",
       fileBuffer: overrides.fileBuffer ?? pngBytes()
     } as const;
+  }
+
+  function buildAttachmentForRecord(record: AssetLockRecord, overrides: Partial<AssetAttachment> = {}): AssetAttachment {
+    return {
+      id: "asset-attachment-1",
+      projectId: record.projectId,
+      assetLockRecordId: record.id,
+      deliveryPackageId: record.deliveryPackageId,
+      fileId: "asset-att-123e4567-e89b-12d3-a456-426614174000",
+      fileName: "reference.png",
+      mime: "image/png",
+      size: pngBytes().byteLength,
+      version: 1,
+      attachmentType: "reference",
+      uploadedByUserId: "user-head-writer",
+      uploadedAt: "2026-05-29T00:00:00.000Z",
+      status: "active",
+      ...overrides
+    };
+  }
+
+  function buildDbOnlyAssetLockRecord(overrides: Partial<AssetLockRecord> = {}): AssetLockRecord {
+    return {
+      id: "asset-lock-db-only",
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-1",
+      episodeNos: [1, 2],
+      assetName: "DB Only Mine Lift",
+      assetType: "scene",
+      changeType: "new",
+      writerConfirmation: "pending",
+      productionConfirmation: "pending",
+      risk: "attention",
+      status: "draft",
+      createdByUserId: "user-head-writer",
+      createdAt: "2026-05-29T00:00:00.000Z",
+      updatedAt: "2026-05-29T00:00:00.000Z",
+      ...overrides
+    };
+  }
+
+  function createMockDbAssetAttachmentRepository(
+    initialSnapshot: AssetAttachmentRepositorySnapshot,
+    options: { createError?: Error; softDeleteError?: Error } = {}
+  ): DbAssetAttachmentRepository {
+    let currentSnapshot = initialSnapshot;
+
+    return {
+      mode: "db",
+      read: vi.fn(async () => currentSnapshot),
+      createAssetAttachmentMetadata: vi.fn(async (command) => {
+        if (options.createError) {
+          throw options.createError;
+        }
+
+        currentSnapshot = snapshotFromState({
+          ...currentSnapshot.state,
+          assetAttachments: [...currentSnapshot.assetAttachments, command.attachment]
+        });
+
+        return command.attachment;
+      }),
+      softDeleteAssetAttachmentMetadata: vi.fn(async (input) => {
+        if (options.softDeleteError) {
+          throw options.softDeleteError;
+        }
+
+        const attachment = currentSnapshot.assetAttachments.find(
+          (item) => item.id === input.assetAttachmentId && item.status === "active"
+        );
+
+        if (!attachment) {
+          throw new Error("asset_attachment_not_found");
+        }
+
+        const deleted: AssetAttachment = {
+          ...attachment,
+          status: "deleted",
+          deletedByUserId: input.deletedByUserId,
+          deletedAt: "2026-05-29T03:00:00.000Z"
+        };
+
+        currentSnapshot = snapshotFromState({
+          ...currentSnapshot.state,
+          assetAttachments: currentSnapshot.assetAttachments.map((item) => (item.id === deleted.id ? deleted : item))
+        });
+
+        return deleted;
+      })
+    };
+  }
+
+  function snapshotFromState(state: WorkspaceState): AssetAttachmentRepositorySnapshot {
+    const assetAttachments = state.assetAttachments ?? [];
+
+    return {
+      state: {
+        ...state,
+        assetAttachments
+      },
+      assetAttachments
+    };
   }
 
   async function readSavedFileNames() {

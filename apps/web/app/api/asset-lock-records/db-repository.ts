@@ -14,39 +14,9 @@ type AssetLockRecordDbEpisodeInsert = typeof assetLockRecordEpisodes.$inferInser
 type ScriptSourceBindingDbInsert = typeof scriptSourceBindings.$inferInsert;
 
 export function createDbAssetLockRecordRepository(): DbAssetLockRecordRepository {
-  async function read() {
-    const workspace = await readDeliveryImportWorkspace();
-    const { db } = getAssetLockDbRuntime();
-    const [recordRows, episodeRows, sourceBindingRows] = await Promise.all([
-      db.select().from(assetLockRecords).orderBy(asc(assetLockRecords.createdAt), asc(assetLockRecords.id)),
-      db
-        .select()
-        .from(assetLockRecordEpisodes)
-        .orderBy(asc(assetLockRecordEpisodes.assetLockRecordId), asc(assetLockRecordEpisodes.episodeNo)),
-      db
-        .select()
-        .from(scriptSourceBindings)
-        .orderBy(
-          asc(scriptSourceBindings.projectId),
-          asc(scriptSourceBindings.deliveryPackageId),
-          asc(scriptSourceBindings.assetLockRecordId),
-          asc(scriptSourceBindings.episodeNo),
-          asc(scriptSourceBindings.startLine),
-          asc(scriptSourceBindings.endLine),
-          asc(scriptSourceBindings.id)
-        )
-    ]);
-
-    return toDbRepositorySnapshot(
-      workspace.state,
-      mapAssetLockRecordRows(recordRows, episodeRows),
-      mapScriptSourceBindingRows(sourceBindingRows)
-    );
-  }
-
   return {
     mode: "db",
-    read,
+    read: readDbAssetLockRecordRepositorySnapshot,
     async createAssetLockRecord(record) {
       const { db } = getAssetLockDbRuntime();
       const rows = mapAssetLockRecordToDbRows(record);
@@ -56,7 +26,7 @@ export function createDbAssetLockRecordRepository(): DbAssetLockRecordRepository
         await tx.insert(assetLockRecordEpisodes).values(rows.episodes);
       });
 
-      return read();
+      return readDbAssetLockRecordRepositorySnapshot();
     },
     async createSourceBinding(binding) {
       const { db } = getAssetLockDbRuntime();
@@ -66,7 +36,7 @@ export function createDbAssetLockRecordRepository(): DbAssetLockRecordRepository
         await tx.insert(scriptSourceBindings).values(row);
       });
 
-      return read();
+      return readDbAssetLockRecordRepositorySnapshot();
     },
     async removeSourceBinding(id) {
       const { db } = getAssetLockDbRuntime();
@@ -82,9 +52,39 @@ export function createDbAssetLockRecordRepository(): DbAssetLockRecordRepository
         }
       });
 
-      return read();
+      return readDbAssetLockRecordRepositorySnapshot();
     }
   };
+}
+
+export async function readDbAssetLockRecordRepositorySnapshot() {
+  const workspace = await readDeliveryImportWorkspace();
+  const { db } = getAssetLockDbRuntime();
+  const [recordRows, episodeRows, sourceBindingRows] = await Promise.all([
+    db.select().from(assetLockRecords).orderBy(asc(assetLockRecords.createdAt), asc(assetLockRecords.id)),
+    db
+      .select()
+      .from(assetLockRecordEpisodes)
+      .orderBy(asc(assetLockRecordEpisodes.assetLockRecordId), asc(assetLockRecordEpisodes.episodeNo)),
+    db
+      .select()
+      .from(scriptSourceBindings)
+      .orderBy(
+        asc(scriptSourceBindings.projectId),
+        asc(scriptSourceBindings.deliveryPackageId),
+        asc(scriptSourceBindings.assetLockRecordId),
+        asc(scriptSourceBindings.episodeNo),
+        asc(scriptSourceBindings.startLine),
+        asc(scriptSourceBindings.endLine),
+        asc(scriptSourceBindings.id)
+      )
+  ]);
+
+  return toDbRepositorySnapshot(
+    workspace.state,
+    mapAssetLockRecordRows(recordRows, episodeRows),
+    mapScriptSourceBindingRows(sourceBindingRows)
+  );
 }
 
 export function mapAssetLockRecordRows(

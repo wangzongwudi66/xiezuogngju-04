@@ -1,10 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createAssetAttachmentMetadata, listAssetAttachmentsForRecord, selectPrimaryRole, softDeleteAssetAttachment } from "@aigc/domain";
-import type { AssetAttachment, AssetAttachmentType, AssetLockRecord, EpisodeAssignment, ProjectRole, WorkspaceState } from "@aigc/domain";
-import { mutateDeliveryImportWorkspace, readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import { createAssetAttachmentMetadata, listAssetAttachmentsForRecord, selectPrimaryRole } from "@aigc/domain";
+import type {
+  AssetAttachment,
+  AssetAttachmentMetadataInput,
+  AssetAttachmentType,
+  AssetLockRecord,
+  EpisodeAssignment,
+  ProjectRole,
+  WorkspaceState
+} from "@aigc/domain";
+import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import type { WorkspaceRequestActor } from "../workspace-actor";
+import { createLocalAssetAttachmentRepository, resolveAssetAttachmentRepository } from "./repository";
+import type { AssetAttachmentRepository } from "./repository";
 
 const attachmentFileDirEnvKey = "AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR";
 const defaultAttachmentFileDir = path.join(process.cwd(), ".local-data", "asset-lock-attachments");
@@ -33,12 +43,15 @@ export interface AssetAttachmentDownload {
   size: number;
 }
 
+export interface AssetAttachmentServiceOptions {
+  persistMetadata?: typeof mutateDeliveryImportWorkspace;
+  repository?: AssetAttachmentRepository;
+}
+
 export async function uploadAssetAttachment(
   input: AssetAttachmentUploadInput,
   actor: WorkspaceRequestActor,
-  options: {
-    persistMetadata?: typeof mutateDeliveryImportWorkspace;
-  } = {}
+  options: AssetAttachmentServiceOptions = {}
 ): Promise<AssetAttachment> {
   const bytes = input.fileBuffer instanceof Uint8Array ? input.fileBuffer : new Uint8Array(input.fileBuffer);
   const fileRule = validateAttachmentFile({
@@ -47,7 +60,7 @@ export async function uploadAssetAttachment(
     size: bytes.byteLength
   });
   const fileId = createAssetAttachmentFileId();
-  const metadataInput = {
+  const metadataInput: AssetAttachmentMetadataInput = {
     assetLockRecordId: input.assetLockRecordId,
     fileId,
     fileName: input.fileName,
@@ -57,41 +70,53 @@ export async function uploadAssetAttachment(
     uploadedByUserId: actor.userId,
     note: input.note
   };
+  const repository = resolveServiceRepository(options);
+  const snapshot = await repository.read();
 
-  const workspace = await readDeliveryImportWorkspace();
-  assertKnownActor(workspace.state, actor);
-  requireVisibleRecordAccess(workspace.state, input.assetLockRecordId, actor);
-  createAssetAttachmentMetadata(workspace.state, metadataInput);
+  assertKnownActor(snapshot.state, actor);
+  const { record } = requireVisibleRecordAccess(snapshot.state, input.assetLockRecordId, actor);
+  assertCanUploadAttachment(record);
+
+  const nextState = createAssetAttachmentMetadata(snapshot.state, metadataInput);
+  const attachment = findCreatedAttachment(nextState, fileId);
+
+  if (!attachment) {
+    throw new Error("asset_attachment_metadata_not_created");
+  }
+
   const filePath = resolveAssetAttachmentFilePath(fileId, fileRule.extension);
-  const persistMetadata = options.persistMetadata ?? mutateDeliveryImportWorkspace;
 
   await mkdir(/* turbopackIgnore: true */ path.dirname(filePath), { recursive: true });
   await writeFile(/* turbopackIgnore: true */ filePath, bytes);
 
   try {
-    const snapshot = await persistMetadata((state) => createAssetAttachmentMetadata(state, metadataInput));
-    const attachment = findCreatedAttachment(snapshot.state, fileId);
-
-    if (!attachment) {
-      throw new Error("asset_attachment_metadata_not_created");
-    }
-
-    return attachment;
+    return await repository.createAssetAttachmentMetadata({ attachment, metadataInput });
   } catch (error) {
     await rm(/* turbopackIgnore: true */ filePath, { force: true });
     throw error;
   }
 }
 
-export async function listAssetAttachments(recordId: string, actor: WorkspaceRequestActor) {
-  const workspace = await readDeliveryImportWorkspace();
-  const { record } = requireVisibleRecordAccess(workspace.state, recordId, actor);
-  return listAssetAttachmentsForRecord(workspace.state, record.id);
+export async function listAssetAttachments(
+  recordId: string,
+  actor: WorkspaceRequestActor,
+  options: AssetAttachmentServiceOptions = {}
+) {
+  const repository = resolveServiceRepository(options);
+  const snapshot = await repository.read();
+  const { record } = requireVisibleRecordAccess(snapshot.state, recordId, actor);
+
+  return listAssetAttachmentsForRecord(snapshot.state, record.id);
 }
 
-export async function downloadAssetAttachment(attachmentId: string, actor: WorkspaceRequestActor): Promise<AssetAttachmentDownload> {
-  const workspace = await readDeliveryImportWorkspace();
-  const { attachment } = requireActiveAttachmentAccess(workspace.state, attachmentId, actor);
+export async function downloadAssetAttachment(
+  attachmentId: string,
+  actor: WorkspaceRequestActor,
+  options: AssetAttachmentServiceOptions = {}
+): Promise<AssetAttachmentDownload> {
+  const repository = resolveServiceRepository(options);
+  const snapshot = await repository.read();
+  const { attachment } = requireActiveAttachmentAccess(snapshot.state, attachmentId, actor);
   const filePath = resolveAssetAttachmentFilePath(attachment.fileId, path.extname(attachment.fileName));
   let bytes: Uint8Array;
 
@@ -109,29 +134,21 @@ export async function downloadAssetAttachment(attachmentId: string, actor: Works
   };
 }
 
-export async function deleteAssetAttachment(attachmentId: string, actor: WorkspaceRequestActor): Promise<AssetAttachment> {
-  let deletedAttachment: AssetAttachment | null = null;
-  const snapshot = await mutateDeliveryImportWorkspace((state) => {
-    const { attachment, record, viewerRole, viewerUserId } = requireActiveAttachmentAccess(state, attachmentId, actor);
+export async function deleteAssetAttachment(
+  attachmentId: string,
+  actor: WorkspaceRequestActor,
+  options: AssetAttachmentServiceOptions = {}
+): Promise<AssetAttachment> {
+  const repository = resolveServiceRepository(options);
+  const snapshot = await repository.read();
+  const { attachment, record, viewerRole, viewerUserId } = requireActiveAttachmentAccess(snapshot.state, attachmentId, actor);
 
-    assertCanDeleteAttachment(attachment, record, viewerUserId, viewerRole);
+  assertCanDeleteAttachment(attachment, record, viewerUserId, viewerRole);
 
-    const nextState = softDeleteAssetAttachment(state, {
-      assetAttachmentId: attachment.id,
-      deletedByUserId: viewerUserId
-    });
-    deletedAttachment = findAttachmentById(nextState, attachment.id);
-
-    return nextState;
+  return repository.softDeleteAssetAttachmentMetadata({
+    assetAttachmentId: attachment.id,
+    deletedByUserId: viewerUserId
   });
-
-  const attachment = deletedAttachment ?? findAttachmentById(snapshot.state, attachmentId);
-
-  if (!attachment) {
-    throw new Error("asset_attachment_not_found");
-  }
-
-  return attachment;
 }
 
 export function resolveAssetAttachmentFilePath(fileId: string, extension: string) {
@@ -175,6 +192,20 @@ function validateAttachmentFile(input: { fileName: string; mime: string; size: n
 
 function findCreatedAttachment(state: WorkspaceState, fileId: string) {
   return (state.assetAttachments ?? []).find((attachment) => attachment.fileId === fileId) ?? null;
+}
+
+function resolveServiceRepository(options: AssetAttachmentServiceOptions) {
+  if (options.repository) {
+    return options.repository;
+  }
+
+  const repository = resolveAssetAttachmentRepository();
+
+  if (repository.mode === "local" && options.persistMetadata) {
+    return createLocalAssetAttachmentRepository(options.persistMetadata);
+  }
+
+  return repository;
 }
 
 function requireActiveAttachmentAccess(state: WorkspaceState, attachmentId: string, actor: WorkspaceRequestActor) {
@@ -283,6 +314,12 @@ function assertCanDeleteAttachment(
   }
 
   throw new Error("asset_attachment_delete_forbidden");
+}
+
+function assertCanUploadAttachment(record: AssetLockRecord) {
+  if (record.status === "locked") {
+    throw new Error("asset_attachment_locked_record_upload_forbidden");
+  }
 }
 
 function hasFullAssetLockAccess(role: ProjectRole) {

@@ -173,6 +173,21 @@ describe("asset lock attachment route", () => {
     await expect(readSavedFileNames()).resolves.toEqual([]);
   });
 
+  it("returns conflict when uploading to a locked record", async () => {
+    const recordId = (await createAssetRecord()).record.id;
+    await lockRecord(recordId);
+    await login("user-owner");
+
+    const response = await POST(formRequest(buildUploadForm(recordId)));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "asset_attachment_locked_record_upload_forbidden",
+      message: "asset_attachment_locked_record_upload_forbidden"
+    });
+    await expect(readSavedFileNames()).resolves.toEqual([]);
+  });
+
   it("downloads an active attachment without exposing storage paths", async () => {
     const recordId = (await createAssetRecord()).record.id;
     const uploadResponse = await POST(formRequest(buildUploadForm(recordId, { fileName: "asset 参考.png" })));

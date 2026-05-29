@@ -1,5 +1,10 @@
-import type { AssetAttachment, WorkspaceState } from "@aigc/domain";
-import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import {
+  createAssetAttachmentMetadata as createAssetAttachmentMetadataInWorkspace,
+  softDeleteAssetAttachment as softDeleteAssetAttachmentInWorkspace
+} from "@aigc/domain";
+import type { AssetAttachment, AssetAttachmentDeleteInput, AssetAttachmentMetadataInput, WorkspaceState } from "@aigc/domain";
+import { mutateDeliveryImportWorkspace, readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import { isAssetLockRecordDbRepositoryEnabled } from "../asset-lock-records/repository";
 import { createDbAssetAttachmentRepository } from "./db-repository";
 
 export interface AssetAttachmentRepositorySnapshot {
@@ -7,29 +12,77 @@ export interface AssetAttachmentRepositorySnapshot {
   assetAttachments: AssetAttachment[];
 }
 
+export interface AssetAttachmentMetadataCreateCommand {
+  attachment: AssetAttachment;
+  metadataInput: AssetAttachmentMetadataInput;
+}
+
 export interface LocalAssetAttachmentRepository {
   mode: "local";
   read(): Promise<AssetAttachmentRepositorySnapshot>;
+  createAssetAttachmentMetadata(command: AssetAttachmentMetadataCreateCommand): Promise<AssetAttachment>;
+  softDeleteAssetAttachmentMetadata(input: AssetAttachmentDeleteInput): Promise<AssetAttachment>;
 }
 
 export interface DbAssetAttachmentRepository {
   mode: "db";
   read(): Promise<AssetAttachmentRepositorySnapshot>;
+  createAssetAttachmentMetadata(command: AssetAttachmentMetadataCreateCommand): Promise<AssetAttachment>;
+  softDeleteAssetAttachmentMetadata(input: AssetAttachmentDeleteInput): Promise<AssetAttachment>;
 }
 
 export type AssetAttachmentRepository = LocalAssetAttachmentRepository | DbAssetAttachmentRepository;
 
 const assetAttachmentRepositoryEnvKey = "ASSET_LOCK_ATTACHMENTS_REPOSITORY";
 type AssetAttachmentRepositoryEnv = Record<string, string | undefined>;
+type PersistAssetAttachmentMetadata = typeof mutateDeliveryImportWorkspace;
 
-export const localAssetAttachmentRepository: LocalAssetAttachmentRepository = {
-  mode: "local",
-  async read() {
-    const workspace = await readDeliveryImportWorkspace();
+export const localAssetAttachmentRepository = createLocalAssetAttachmentRepository();
 
-    return toAssetAttachmentRepositorySnapshot(workspace.state);
-  }
-};
+export function createLocalAssetAttachmentRepository(
+  persistMetadata: PersistAssetAttachmentMetadata = mutateDeliveryImportWorkspace
+): LocalAssetAttachmentRepository {
+  return {
+    mode: "local",
+    async read() {
+      const workspace = await readDeliveryImportWorkspace();
+
+      return toAssetAttachmentRepositorySnapshot(workspace.state);
+    },
+    async createAssetAttachmentMetadata(command) {
+      let createdAttachment: AssetAttachment | null = null;
+      const snapshot = await persistMetadata((state) => {
+        const nextState = createAssetAttachmentMetadataInWorkspace(state, command.metadataInput);
+        createdAttachment = findAttachmentByFileId(nextState, command.metadataInput.fileId);
+
+        return nextState;
+      });
+      const attachment = createdAttachment ?? findAttachmentByFileId(snapshot.state, command.metadataInput.fileId);
+
+      if (!attachment) {
+        throw new Error("asset_attachment_metadata_not_created");
+      }
+
+      return attachment;
+    },
+    async softDeleteAssetAttachmentMetadata(input) {
+      let deletedAttachment: AssetAttachment | null = null;
+      const snapshot = await persistMetadata((state) => {
+        const nextState = softDeleteAssetAttachmentInWorkspace(state, input);
+        deletedAttachment = findAttachmentById(nextState, input.assetAttachmentId);
+
+        return nextState;
+      });
+      const attachment = deletedAttachment ?? findAttachmentById(snapshot.state, input.assetAttachmentId);
+
+      if (!attachment) {
+        throw new Error("asset_attachment_not_found");
+      }
+
+      return attachment;
+    }
+  };
+}
 
 export function resolveAssetAttachmentRepository(env: AssetAttachmentRepositoryEnv = process.env): AssetAttachmentRepository {
   if (isAssetAttachmentDbRepositoryEnabled(env)) {
@@ -40,7 +93,7 @@ export function resolveAssetAttachmentRepository(env: AssetAttachmentRepositoryE
 }
 
 export function isAssetAttachmentDbRepositoryEnabled(env: AssetAttachmentRepositoryEnv = process.env) {
-  return env[assetAttachmentRepositoryEnvKey]?.trim().toLowerCase() === "db" && Boolean(env.DATABASE_URL?.trim());
+  return env[assetAttachmentRepositoryEnvKey]?.trim().toLowerCase() === "db" && isAssetLockRecordDbRepositoryEnabled(env);
 }
 
 function toAssetAttachmentRepositorySnapshot(state: WorkspaceState): AssetAttachmentRepositorySnapshot {
@@ -48,4 +101,12 @@ function toAssetAttachmentRepositorySnapshot(state: WorkspaceState): AssetAttach
     state,
     assetAttachments: state.assetAttachments ?? []
   };
+}
+
+function findAttachmentByFileId(state: WorkspaceState, fileId: string) {
+  return (state.assetAttachments ?? []).find((attachment) => attachment.fileId === fileId) ?? null;
+}
+
+function findAttachmentById(state: WorkspaceState, attachmentId: string) {
+  return (state.assetAttachments ?? []).find((attachment) => attachment.id === attachmentId) ?? null;
 }
