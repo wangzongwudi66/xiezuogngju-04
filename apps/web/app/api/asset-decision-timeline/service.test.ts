@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   AssetLockRecord,
   DeliveryPackage,
@@ -11,12 +11,131 @@ import type {
   User,
   WorkspaceState
 } from "@aigc/domain";
-import { buildAssetDecisionTimelineProjectionFromWorkspace as buildAssetDecisionTimelineProjectionFromWorkspaceForActor } from "./service";
+import * as assetLockRecordRepositoryModule from "../asset-lock-records/repository";
+import type { AssetLockRecordRepositorySnapshot, LocalAssetLockRecordRepository } from "../asset-lock-records/repository";
+import {
+  buildAssetDecisionTimelineProjectionFromWorkspace as buildAssetDecisionTimelineProjectionFromWorkspaceForActor,
+  getAssetDecisionTimelineProjection
+} from "./service";
 import type { AssetDecisionTimelineProjectionRequest } from "./service";
 
 const now = "2026-05-24T00:00:00.000Z";
 
 describe("asset decision timeline service", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reads asset records from the asset lock repository snapshot", async () => {
+    const workspaceRecord = buildRecord({
+      id: "asset-workspace",
+      assetName: "Workspace Lift",
+      episodeNos: [1]
+    });
+    const repositoryRecord = buildRecord({
+      id: "asset-repository",
+      assetName: "Repository Lift",
+      episodeNos: [1]
+    });
+    const state = buildWorkspace({
+      currentUserId: "user-coordinator",
+      members: [buildMember("user-coordinator", "coordinator")],
+      deliveryPackages: [buildPackage("delivery-current", "project-jincheng", "published")],
+      deliveryPackageEpisodes: [buildPackageEpisode(1, "Repository Lift appears.\nWorkspace Lift appears.")],
+      assetLockRecords: [workspaceRecord]
+    });
+    const repository = createReadOnlyAssetLockRecordRepository({
+      state,
+      assetLockRecords: [repositoryRecord],
+      scriptSourceBindings: []
+    });
+    const resolveRepository = vi
+      .spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository")
+      .mockReturnValue(repository);
+
+    const result = await getAssetDecisionTimelineProjection({
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      actor: { userId: "user-coordinator" }
+    });
+
+    expect(resolveRepository).toHaveBeenCalledTimes(1);
+    expect(repository.read).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      ok: true,
+      projection: {
+        decisionQueue: [expect.objectContaining({ assetLockRecordId: "asset-repository" })],
+        sourceExcerpts: [expect.objectContaining({ relatedAssetNames: ["Repository Lift"] })]
+      }
+    });
+    if (result.ok) {
+      expect(result.projection.decisionQueue.map((item) => item.assetLockRecordId)).toEqual(["asset-repository"]);
+    }
+  });
+
+  it("prefers repository script source bindings over workspace fallback source data", async () => {
+    const record = buildRecord({
+      id: "asset-map",
+      assetName: "Mine Map",
+      assetType: "prop",
+      episodeNos: [2]
+    });
+    const state = buildWorkspace({
+      currentUserId: "user-coordinator",
+      members: [buildMember("user-coordinator", "coordinator")],
+      deliveryPackages: [buildPackage("delivery-current", "project-jincheng", "published")],
+      deliveryPackageEpisodes: [buildPackageEpisode(2, "Mine Map fallback line.")],
+      assetLockRecords: [record],
+      scriptSourceBindings: [
+        buildSourceBinding({
+          id: "binding-workspace",
+          assetLockRecordId: "asset-map",
+          episodeNo: 2,
+          excerptSnapshot: "Workspace bound source"
+        })
+      ]
+    });
+    const repository = createReadOnlyAssetLockRecordRepository({
+      state,
+      assetLockRecords: [record],
+      scriptSourceBindings: [
+        buildSourceBinding({
+          id: "binding-db",
+          assetLockRecordId: "asset-map",
+          episodeNo: 2,
+          excerptSnapshot: "DB bound source"
+        })
+      ]
+    });
+    vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
+
+    const result = await getAssetDecisionTimelineProjection({
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      actor: { userId: "user-coordinator" }
+    });
+
+    expect(repository.read).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      ok: true,
+      projection: {
+        sourceExcerpts: [
+          expect.objectContaining({
+            id: "source-binding-binding-db",
+            sourceKind: "explicit_binding",
+            excerpt: "DB bound source"
+          })
+        ],
+        decisionQueue: [expect.objectContaining({ sourceExcerptIds: ["source-binding-binding-db"] })]
+      }
+    });
+    if (result.ok) {
+      expect(result.projection.sourceExcerpts.map((excerpt) => excerpt.id)).toEqual(["source-binding-binding-db"]);
+      expect(JSON.stringify(result.projection)).not.toContain("Workspace bound source");
+      expect(JSON.stringify(result.projection)).not.toContain("Mine Map fallback line.");
+    }
+  });
+
   it("builds a read-only projection from workspace state for the current member", () => {
     const state = buildWorkspace({
       currentUserId: "user-coordinator",
@@ -466,6 +585,33 @@ function buildAssetDecisionTimelineProjectionFromWorkspace(
 
 function actorFromState(state: WorkspaceState): AssetDecisionTimelineProjectionRequest["actor"] {
   return state.currentUserId ? { userId: state.currentUserId } : null;
+}
+
+function createReadOnlyAssetLockRecordRepository(
+  snapshot: AssetLockRecordRepositorySnapshot
+): LocalAssetLockRecordRepository {
+  return {
+    mode: "local",
+    read: vi.fn(async () => snapshot),
+    mutate: vi.fn(async (mutate: (snapshot: AssetLockRecordRepositorySnapshot) => WorkspaceState) =>
+      snapshotFromState(mutate(snapshot))
+    )
+  };
+}
+
+function snapshotFromState(state: WorkspaceState): AssetLockRecordRepositorySnapshot {
+  const assetLockRecords = state.assetLockRecords ?? [];
+  const scriptSourceBindings = state.scriptSourceBindings ?? [];
+
+  return {
+    state: {
+      ...state,
+      assetLockRecords,
+      scriptSourceBindings
+    },
+    assetLockRecords,
+    scriptSourceBindings
+  };
 }
 
 function buildUser(id: string, defaultRole: User["defaultRole"]): User {

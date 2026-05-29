@@ -2,7 +2,7 @@ import { selectPrimaryRole } from "@aigc/domain";
 import type { WorkspaceState } from "@aigc/domain";
 import { buildAssetTimelineProjection } from "../../asset-decision-timeline/projection";
 import type { RoleScopedAssetTimelineViewModel } from "../../ui/asset-decision-timeline-data";
-import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import { resolveAssetLockRecordRepository } from "../asset-lock-records/repository";
 import type { WorkspaceRequestActor } from "../workspace-actor";
 
 export type AssetDecisionTimelineProjectionError =
@@ -37,9 +37,14 @@ export type AssetDecisionTimelineProjectionResponse =
 export async function getAssetDecisionTimelineProjection(
   input: AssetDecisionTimelineProjectionRequest
 ): Promise<AssetDecisionTimelineProjectionResponse> {
-  const snapshot = await readDeliveryImportWorkspace();
+  const snapshot = await resolveAssetLockRecordRepository().read();
+  const state: WorkspaceState = {
+    ...snapshot.state,
+    assetLockRecords: snapshot.assetLockRecords,
+    scriptSourceBindings: snapshot.scriptSourceBindings
+  };
 
-  return buildAssetDecisionTimelineProjectionFromWorkspace(snapshot.state, input);
+  return buildAssetDecisionTimelineProjectionFromWorkspace(state, input);
 }
 
 export function buildAssetDecisionTimelineProjectionFromWorkspace(
