@@ -4,9 +4,9 @@ This runbook is the minimum checklist for running the real Postgres smoke safely
 
 ## Safety rule
 
-Use only a dedicated disposable Postgres database for this smoke.
+Use only a dedicated disposable Postgres database for this smoke. This is a disposable DB smoke, not a validation that should ever run against shared, production, staging, or development databases.
 
-Do not point `TEST_DATABASE_URL` at production, shared development, staging data that must be preserved, or a copied value from `DATABASE_URL`. The smoke intentionally ignores raw `DATABASE_URL`; it reads `TEST_DATABASE_URL`, maps it to `DATABASE_URL` inside the Vitest process, runs migrations, writes smoke rows, and deletes rows matching its smoke identifiers.
+Do not point `TEST_DATABASE_URL` at production, shared development, local development, staging data that must be preserved, or a copied value from `DATABASE_URL`. The smoke intentionally ignores raw `DATABASE_URL`; it reads `TEST_DATABASE_URL`, maps it to `DATABASE_URL` inside the Vitest process, runs migrations, writes smoke rows, and deletes rows matching its smoke identifiers and smoke project scope.
 
 If `TEST_DATABASE_URL` is missing, the smoke must fail with `db_smoke_test_database_url_required`. In that state, do not claim the real smoke passed.
 
@@ -62,21 +62,21 @@ The smoke writes rows in these application tables:
 - `project_member_permissions`: ids beginning `smoke-permission-`;
 - `episodes`: ids beginning `smoke-episode-`;
 - `episode_assignments`: ids beginning `smoke-assignment-`;
-- `delivery_packages`: ids beginning `smoke-delivery-`;
-- `delivery_package_episodes`: rows for the two smoke packages;
-- `asset_lock_records`: generated and manually created smoke asset records for `smoke-delivery-%`;
+- `delivery_packages`: smoke import packages in fixed project `project-jincheng`, including ids beginning `smoke-delivery-`;
+- `delivery_package_episodes`: rows for the smoke packages;
+- `asset_lock_records`: generated and manually created smoke asset records for `project-jincheng` and `smoke-delivery-%`;
 - `asset_lock_record_episodes`: episode join rows for those smoke asset records;
-- `script_source_bindings`: explicit binding rows for `smoke-delivery-%`;
-- `asset_attachments`: attachment metadata rows for `smoke-delivery-%`.
+- `script_source_bindings`: explicit binding rows for `project-jincheng` and `smoke-delivery-%`;
+- `asset_attachments`: attachment metadata rows for `project-jincheng` and `smoke-delivery-%`.
 
-Cleanup deletes, in FK-safe order:
+Cleanup deletes smoke-owned rows, in FK-safe order. It is broader than `delivery_package_id like 'smoke-delivery-%'`: several tables are also cleaned by the fixed smoke project id `project-jincheng` / `project_id` scope, which is why this must only run against a disposable database.
 
-- `asset_attachments` where `delivery_package_id like 'smoke-delivery-%'`;
-- `script_source_bindings` where `delivery_package_id like 'smoke-delivery-%'`;
-- `asset_lock_record_episodes` attached to `asset_lock_records` where `delivery_package_id like 'smoke-delivery-%'`;
-- `asset_lock_records` where `delivery_package_id like 'smoke-delivery-%'`;
-- `delivery_package_episodes` where `delivery_package_id like 'smoke-delivery-%'`;
-- `delivery_packages` where `id like 'smoke-delivery-%'`;
+- `asset_attachments` where `project_id = 'project-jincheng'` or `delivery_package_id like 'smoke-delivery-%'`;
+- `script_source_bindings` where `project_id = 'project-jincheng'` or `delivery_package_id like 'smoke-delivery-%'`;
+- `asset_lock_record_episodes` attached to `asset_lock_records` where `project_id = 'project-jincheng'` or `delivery_package_id like 'smoke-delivery-%'`;
+- `asset_lock_records` where `project_id = 'project-jincheng'` or `delivery_package_id like 'smoke-delivery-%'`;
+- `delivery_package_episodes` where `delivery_package_id like 'smoke-delivery-%'` or the delivery package belongs to `project-jincheng`;
+- `delivery_packages` where `project_id = 'project-jincheng'` or `id like 'smoke-delivery-%'`;
 - `episode_assignments` where `id like 'smoke-assignment-%'`;
 - `episodes` where `id like 'smoke-episode-%'`;
 - `project_member_permissions` where `id like 'smoke-permission-%'`;
@@ -89,7 +89,7 @@ The temp attachment directory and temp delivery import store are removed by the 
 ## Failure triage
 
 - Migration failure: run `npm.cmd run db:check -w apps/web` first, verify `TEST_DATABASE_URL` points to an empty disposable database, and inspect the failing migration name from the smoke output. A partially migrated disposable database should be dropped and recreated before retrying.
-- FK failure: confirm no pre-existing data in the disposable database references the fixed smoke ids or `project-jincheng`. The cleanup assumes smoke-owned rows only and deletes in dependency order.
+- FK failure: confirm no pre-existing data in the disposable database references the fixed smoke ids or `project-jincheng`. The cleanup assumes a disposable database where `project-jincheng` and `smoke-delivery-%` are smoke-owned only, then deletes in dependency order.
 - Unique constraint failure: look for collisions on fixed values such as `users.name`, `projects.code = 'SMK-JC'`, `delivery_packages.id like 'smoke-delivery-%'`, `asset_lock_records.delivery_package_id + asset_name_key`, or source binding uniqueness. Recreate the disposable database if there is any doubt.
 - Cleanup failure: check which cleanup query failed and whether new FK relationships were added after this runbook. The smoke asserts all tracked smoke row counts return to zero after two cleanup calls.
 - Attachment temp dir failure: verify the OS temp directory is writable and that the process can create and remove `aigc-postgres-smoke-*` directories. Attachment files are local temp files; only metadata is stored in Postgres.
