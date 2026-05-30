@@ -5,13 +5,13 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 18:00:40 +08:00`.
+Timestamp: `2026-05-30 18:05:27 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `1c815b7 Record auth scope schema read merge`.
+- Latest recorded `main` checkpoint: `0ba6fac Record auth scope overlay merge`.
 - Latest product/test code commit on `main`: `653da0f Overlay DB auth scope in workspace snapshot`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-auth-scope-read-tests` and rebased `codex/m3-auth-scope-workspace-overlay`; ledger update pending commit.
-- Remote sync pending for this ledger update; `main@1c815b7` was the last pushed checkpoint before the auth/scope read-test and overlay merges.
+- Worktree at last check: clean after pushing `main@0ba6fac`.
+- Remote sync: `xiezuogongju-04/main` is synced to `0ba6fac`.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
