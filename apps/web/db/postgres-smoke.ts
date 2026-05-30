@@ -14,6 +14,12 @@ import {
   uploadAssetAttachment
 } from "../app/api/asset-lock-attachments/service";
 import { getAssetDecisionTimelineProjection } from "../app/api/asset-decision-timeline/service";
+import { createDeliveryImportJob, getDeliveryImportWorkspace } from "../app/api/delivery-import-jobs/service";
+import { readDeliveryImportLocalWorkspaceState } from "../app/api/delivery-import-jobs/persistence";
+import {
+  readDbDeliveryPackageSnapshot,
+  updateDbDeliveryPackage
+} from "../app/api/delivery-packages/db-repository";
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
 
@@ -34,12 +40,11 @@ const originalEnv = {
 const projectId = "project-jincheng";
 const deliveryPackagePrefix = "smoke-delivery-";
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const deliveryPackageId = `${deliveryPackagePrefix}${runId}`;
-const generatedDeliveryPackageId = `${deliveryPackagePrefix}generated-${runId}`;
 const now = "2026-05-30T00:00:00.000Z";
 
 let tempDir = "";
 let attachmentDir = "";
+let deliveryPackageId = "";
 
 describe("real Postgres asset lock smoke", () => {
   beforeAll(async () => {
@@ -55,7 +60,6 @@ describe("real Postgres asset lock smoke", () => {
     await applyMigrations();
     await cleanupSmokeRows();
     await seedSmokeAuthScope();
-    await seedSmokeDeliveryPackages();
     await writeSmokeWorkspaceStore();
   });
 
@@ -70,18 +74,20 @@ describe("real Postgres asset lock smoke", () => {
   });
 
   it("generates, creates, binds, uploads, deletes, projects, locks, and cleans asset data through Postgres", async () => {
+    deliveryPackageId = await createSmokeDeliveryImportDraft();
+
     const generated = await mutateAssetLockRecord(
       {
         action: "generate_from_package",
         projectId,
-        deliveryPackageId: generatedDeliveryPackageId
+        deliveryPackageId
       },
       { userId: "user-head-writer" }
     );
-    const generatedRecords = generated.records.filter((record) => record.deliveryPackageId === generatedDeliveryPackageId);
+    const generatedRecords = generated.records.filter((record) => record.deliveryPackageId === deliveryPackageId);
     const generatedSnapshot = await readDbAssetLockRecordRepositorySnapshot();
     const generatedSnapshotRecords = generatedSnapshot.assetLockRecords.filter(
-      (record) => record.deliveryPackageId === generatedDeliveryPackageId
+      (record) => record.deliveryPackageId === deliveryPackageId
     );
 
     expect(generatedRecords.length).toBeGreaterThan(1);
@@ -89,14 +95,14 @@ describe("real Postgres asset lock smoke", () => {
       expect.arrayContaining([
         expect.objectContaining({
           projectId,
-          deliveryPackageId: generatedDeliveryPackageId,
+          deliveryPackageId,
           assetType: "scene",
           episodeNos: [1],
           createdByUserId: "user-head-writer"
         }),
         expect.objectContaining({
           projectId,
-          deliveryPackageId: generatedDeliveryPackageId,
+          deliveryPackageId,
           assetType: "prop",
           createdByUserId: "user-head-writer"
         })
@@ -302,31 +308,33 @@ async function cleanupSmokeRows() {
   try {
     await runtime.pool.query("begin");
     await runtime.pool.query(
-      "delete from asset_attachments where delivery_package_id like $1",
-      [`${deliveryPackagePrefix}%`]
+      "delete from asset_attachments where project_id = $1 or delivery_package_id like $2",
+      [projectId, `${deliveryPackagePrefix}%`]
     );
     await runtime.pool.query(
-      "delete from script_source_bindings where delivery_package_id like $1",
-      [`${deliveryPackagePrefix}%`]
+      "delete from script_source_bindings where project_id = $1 or delivery_package_id like $2",
+      [projectId, `${deliveryPackagePrefix}%`]
     );
     await runtime.pool.query(
       `delete from asset_lock_record_episodes
        where asset_lock_record_id in (
-         select id from asset_lock_records where delivery_package_id like $1
+         select id from asset_lock_records where project_id = $1 or delivery_package_id like $2
        )`,
-      [`${deliveryPackagePrefix}%`]
+      [projectId, `${deliveryPackagePrefix}%`]
     );
     await runtime.pool.query(
-      "delete from asset_lock_records where delivery_package_id like $1",
-      [`${deliveryPackagePrefix}%`]
+      "delete from asset_lock_records where project_id = $1 or delivery_package_id like $2",
+      [projectId, `${deliveryPackagePrefix}%`]
     );
     await runtime.pool.query(
-      "delete from delivery_package_episodes where delivery_package_id like $1",
-      [`${deliveryPackagePrefix}%`]
+      `delete from delivery_package_episodes
+       where delivery_package_id like $1
+          or delivery_package_id in (select id from delivery_packages where project_id = $2)`,
+      [`${deliveryPackagePrefix}%`, projectId]
     );
     await runtime.pool.query(
-      "delete from delivery_packages where id like $1",
-      [`${deliveryPackagePrefix}%`]
+      "delete from delivery_packages where project_id = $1 or id like $2",
+      [projectId, `${deliveryPackagePrefix}%`]
     );
     await runtime.pool.query(
       "delete from episode_assignments where id like 'smoke-assignment-%'"
@@ -378,18 +386,22 @@ async function countSmokeRows() {
       projects,
       users
     ] = await Promise.all([
-      countRows(runtime, "select count(*)::int as count from asset_attachments where delivery_package_id like $1"),
-      countRows(runtime, "select count(*)::int as count from script_source_bindings where delivery_package_id like $1"),
+      countRows(runtime, "select count(*)::int as count from asset_attachments where project_id = $1"),
+      countRows(runtime, "select count(*)::int as count from script_source_bindings where project_id = $1"),
       countRows(
         runtime,
         `select count(*)::int as count from asset_lock_record_episodes
          where asset_lock_record_id in (
-           select id from asset_lock_records where delivery_package_id like $1
+           select id from asset_lock_records where project_id = $1
          )`
       ),
-      countRows(runtime, "select count(*)::int as count from asset_lock_records where delivery_package_id like $1"),
-      countRows(runtime, "select count(*)::int as count from delivery_package_episodes where delivery_package_id like $1"),
-      countRows(runtime, "select count(*)::int as count from delivery_packages where id like $1"),
+      countRows(runtime, "select count(*)::int as count from asset_lock_records where project_id = $1"),
+      countRows(
+        runtime,
+        `select count(*)::int as count from delivery_package_episodes
+         where delivery_package_id in (select id from delivery_packages where project_id = $1)`
+      ),
+      countRows(runtime, "select count(*)::int as count from delivery_packages where project_id = $1"),
       countRows(runtime, "select count(*)::int as count from episode_assignments where id like 'smoke-assignment-%'", []),
       countRows(runtime, "select count(*)::int as count from episodes where id like 'smoke-episode-%'", []),
       countRows(runtime, "select count(*)::int as count from project_member_permissions where id like 'smoke-permission-%'", []),
@@ -424,7 +436,7 @@ async function countSmokeRows() {
 async function countRows(
   runtime: ReturnType<typeof createAssetLockDbRuntime>,
   sql: string,
-  params: unknown[] = [`${deliveryPackagePrefix}%`]
+  params: unknown[] = [projectId]
 ) {
   const result = await runtime.pool.query<{ count: number }>(sql, params);
 
@@ -497,71 +509,6 @@ async function seedSmokeAuthScope() {
   }
 }
 
-async function seedSmokeDeliveryPackages() {
-  const runtime = createAssetLockDbRuntime(testDatabaseUrl);
-
-  try {
-    await runtime.pool.query("begin");
-    await runtime.pool.query(
-      `insert into delivery_packages (
-         id,
-         project_id,
-         type,
-         title,
-         source_file_name,
-         declared_episode_from,
-         declared_episode_to,
-         status,
-         uploaded_by_user_id,
-         submitted_by_user_id,
-         reviewed_by_user_id,
-         rejection_reason,
-         created_at,
-         submitted_at,
-         published_at,
-         rejected_at
-       )
-       values
-         ($1, $2, 'range', 'M3 real Postgres smoke delivery', null, 1, 2, 'published', $3, $3, $4, null, $5, $5, $5, null),
-         ($6, $2, 'range', 'M3 real Postgres generated smoke delivery', null, 1, 2, 'published', $3, $3, $4, null, $5, $5, $5, null)`,
-      [deliveryPackageId, projectId, "user-head-writer", "user-owner", now, generatedDeliveryPackageId]
-    );
-    await runtime.pool.query(
-      `insert into delivery_package_episodes (
-         id,
-         delivery_package_id,
-         episode_no,
-         title,
-         content,
-         is_confirmed_change
-       )
-       values
-         ($1, $2, 1, 'Smoke episode 1', $3, true),
-         ($4, $2, 2, 'Smoke episode 2', $5, true),
-         ($6, $7, 1, 'Generated smoke episode 1', $8, true),
-         ($9, $7, 2, 'Generated smoke episode 2', $10, true)`,
-      [
-        `${deliveryPackageId}-episode-1`,
-        deliveryPackageId,
-        "Smoke Mine Lift appears.\nSmoke Mine Lift source binding line.\nSmoke Mine Lift exits.",
-        `${deliveryPackageId}-episode-2`,
-        "Smoke background continuity line.",
-        `${generatedDeliveryPackageId}-episode-1`,
-        generatedDeliveryPackageId,
-        "\u9435\u7926\u4e95\u5165\u53e3\u65b0\u589e\u5347\u964d\u7b3c\uff0c\u4f17\u4eba\u7b2c\u4e00\u6b21\u8fdb\u5165\u5317\u4e95\u3002",
-        `${generatedDeliveryPackageId}-episode-2`,
-        "\u7ea2\u8272\u5b89\u5168\u706f\u6cbf\u7528\uff0c\u5730\u56fe\u5c55\u5f00\uff0c\u7c89\u5c18\u7206\u95ea\u4f5c\u4e3a\u584c\u65b9\u524d\u5146\u3002"
-      ]
-    );
-    await runtime.pool.query("commit");
-  } catch (error) {
-    await runtime.pool.query("rollback").catch(() => undefined);
-    throw error;
-  } finally {
-    await runtime.pool.end();
-  }
-}
-
 async function writeSmokeWorkspaceStore() {
   const workspace = buildSmokeWorkspace();
   const store = {
@@ -572,6 +519,72 @@ async function writeSmokeWorkspaceStore() {
   };
 
   await writeFile(process.env.AIGC_DELIVERY_IMPORT_STORE_PATH ?? "", JSON.stringify(store, null, 2), "utf8");
+}
+
+async function createSmokeDeliveryImportDraft() {
+  const result = await createDeliveryImportJob({
+    source: "text",
+    projectId,
+    uploadedByUserId: "user-head-writer",
+    declaredRangeText: "1-2",
+    rawText: [
+      "\u7b2c 1 \u96c6 \u70df\u96fe\u77ff\u4e95",
+      "\u9435\u7926\u4e95\u5165\u53e3\u65b0\u589e\u5347\u964d\u7b3c\uff0c\u4f17\u4eba\u7b2c\u4e00\u6b21\u8fdb\u5165\u5317\u4e95\u3002",
+      "Smoke Mine Lift source binding line.",
+      "Smoke Mine Lift appears.",
+      "\u7b2c 2 \u96c6 \u7ea2\u706f\u5730\u56fe",
+      "\u7ea2\u8272\u5b89\u5168\u706f\u6cbf\u7528\uff0c\u5730\u56fe\u5c55\u5f00\uff0c\u7c89\u5c18\u7206\u95ea\u4f5c\u4e3a\u584c\u65b9\u524d\u5146\u3002"
+    ].join("\n")
+  });
+
+  expect(result.ok).toBe(true);
+  if (!result.ok) {
+    throw new Error("smoke_delivery_import_failed");
+  }
+
+  const importedDeliveryPackageId = result.job.deliveryPackageId;
+  expect(importedDeliveryPackageId).toBeTruthy();
+  if (!importedDeliveryPackageId) {
+    throw new Error("smoke_delivery_import_package_id_missing");
+  }
+
+  const dbWorkspace = await getDeliveryImportWorkspace();
+  const dbDeliveryPackage = dbWorkspace.state.deliveryPackages.find((item) => item.id === importedDeliveryPackageId);
+  const dbPackageEpisodes = dbWorkspace.state.deliveryPackageEpisodes.filter(
+    (item) => item.deliveryPackageId === importedDeliveryPackageId
+  );
+
+  expect(dbDeliveryPackage).toMatchObject({
+    projectId,
+    status: "draft",
+    declaredEpisodeFrom: 1,
+    declaredEpisodeTo: 2
+  });
+  expect(dbPackageEpisodes.map((episode) => episode.episodeNo).sort()).toEqual([1, 2]);
+  expect(dbPackageEpisodes.map((episode) => episode.content).join("\n")).toContain("Smoke Mine Lift source binding line.");
+
+  const localWorkspace = await readDeliveryImportLocalWorkspaceState();
+  expect(localWorkspace.deliveryPackages).toEqual([]);
+  expect(localWorkspace.deliveryPackageEpisodes).toEqual([]);
+
+  const dbSnapshot = await readDbDeliveryPackageSnapshot();
+  const importedPackage = dbSnapshot.deliveryPackages.find((item) => item.id === importedDeliveryPackageId);
+
+  expect(importedPackage).toEqual(dbDeliveryPackage);
+  if (!importedPackage) {
+    throw new Error("smoke_delivery_import_package_missing");
+  }
+
+  await updateDbDeliveryPackage({
+    ...importedPackage,
+    status: "published",
+    submittedByUserId: "user-head-writer",
+    reviewedByUserId: "user-owner",
+    submittedAt: now,
+    publishedAt: now
+  });
+
+  return importedDeliveryPackageId;
 }
 
 function buildSmokeWorkspace(): WorkspaceState {
