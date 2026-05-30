@@ -5,19 +5,29 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 16:25:21 +08:00`.
+Timestamp: `2026-05-30 16:31:52 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `010531a Record expanded Postgres smoke coverage`.
-- Latest product/test code commit on `main`: `1d0efaa test: assert DB package generation validation avoids writes`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-generate-db-validation-no-write-tests`; ledger update pending commit.
-- Remote sync pending for this ledger update; `main@010531a` was the last pushed checkpoint before the validation no-write test merge.
+- Latest recorded `main` commit before this ledger update: `792e944 Record DB generation validation tests`.
+- Latest product/test code commit on `main`: `c015ef1 Add delivery package DB read schema`.
+- Worktree at last check: clean after rebasing and fast-forward merging `codex/m3-delivery-package-schema-read`; ledger update pending commit.
+- Remote sync pending for this ledger update; `main@792e944` was the last pushed checkpoint before the delivery package schema/read merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
-- Pending branch `codex/m3-delivery-package-schema-read` remains unmerged; the pasted child review 13 content duplicated review 12, so delivery package schema/read mapper still needs a valid read-only review.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `c015ef1 Add delivery package DB read schema`
+  - Rebases `codex/m3-delivery-package-schema-read` onto `main@792e944` and fast-forward merges it into `main`; original implementation review commit was `14cfe3b`.
+  - Adds Drizzle schema and generated migration `apps/web/db/migrations/0004_hesitant_invaders.sql` for `delivery_packages` and `delivery_package_episodes`.
+  - Adds a read-only delivery package DB mapper/helper and focused mapper test.
+  - Keeps the slice scoped: no asset-lock FK backfill, no delivery package mutation DB path, no `prepare_demo` DB mode, no users/members/assignments DB migration, no UI, and no browser QA.
+  - Child review 13 found no P0/P2/P3 schema or mapper blockers after noting the branch had to be rebased onto current main before merge.
+  - Validation after merge:
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/delivery-packages/db-repository.test.ts app/api/asset-lock-records/db-repository.test.ts`: passed, 2 files / 13 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `1d0efaa test: assert DB package generation validation avoids writes`
   - Adds DB-mode `generate_from_package` service tests proving validation failures do not call `createAssetLockRecords`.
   - Covers draft/unpublished package rejection and empty candidate rejection as `rejects + no-write`.
