@@ -16,7 +16,11 @@ import {
   resolveAssetAttachmentFilePath,
   uploadAssetAttachment
 } from "./service";
-import { AssetAttachmentStorageFileNotFoundError, createLocalAssetAttachmentStorage } from "./storage";
+import {
+  AssetAttachmentStorageFileNotFoundError,
+  createLocalAssetAttachmentStorage,
+  resolveAssetAttachmentStorageProvider
+} from "./storage";
 import type { AssetAttachmentStorage } from "./storage";
 
 type UploadOverrides = {
@@ -47,6 +51,8 @@ describe("asset lock attachment service", () => {
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
     process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR = attachmentDir;
+    delete process.env.ASSET_LOCK_ATTACHMENT_STORAGE_PROVIDER;
+    delete process.env.ASSET_LOCK_ATTACHMENT_S3_BUCKET;
     await login("user-head-writer");
   });
 
@@ -54,7 +60,37 @@ describe("asset lock attachment service", () => {
     vi.restoreAllMocks();
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
     delete process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR;
+    delete process.env.ASSET_LOCK_ATTACHMENT_STORAGE_PROVIDER;
+    delete process.env.ASSET_LOCK_ATTACHMENT_S3_BUCKET;
     await rm(storeDir, { recursive: true, force: true });
+  });
+
+  it("defaults attachment storage to local and fails closed for s3 without a bucket", async () => {
+    expect(resolveAssetAttachmentStorageProvider({})).toBe("local");
+    expect(resolveAssetAttachmentStorageProvider({ ASSET_LOCK_ATTACHMENT_STORAGE_PROVIDER: "local" })).toBe("local");
+    expect(() => resolveAssetAttachmentStorageProvider({ ASSET_LOCK_ATTACHMENT_STORAGE_PROVIDER: "s3" })).toThrow(
+      "asset_attachment_storage_bucket_required"
+    );
+    expect(
+      resolveAssetAttachmentStorageProvider({
+        ASSET_LOCK_ATTACHMENT_STORAGE_PROVIDER: "s3",
+        ASSET_LOCK_ATTACHMENT_S3_BUCKET: "asset-bucket"
+      })
+    ).toBe("s3");
+  });
+
+  it("fails closed before upload writes when s3 storage is enabled without a bucket", async () => {
+    const record = (await createAssetRecord()).record;
+    process.env.ASSET_LOCK_ATTACHMENT_STORAGE_PROVIDER = "s3";
+    delete process.env.ASSET_LOCK_ATTACHMENT_S3_BUCKET;
+
+    await expect(uploadAssetAttachment(buildUploadInput(record.id), { userId: currentActorUserId })).rejects.toThrow(
+      "asset_attachment_storage_bucket_required"
+    );
+
+    const workspace = await getDeliveryImportWorkspace();
+    expect(workspace.state.assetAttachments ?? []).toHaveLength(0);
+    await expect(readSavedFileNames()).resolves.toEqual([]);
   });
 
   it("uploads valid PNG, JPEG, and PDF files and persists active metadata", async () => {

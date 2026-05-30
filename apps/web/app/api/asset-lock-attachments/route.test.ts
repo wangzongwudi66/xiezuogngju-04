@@ -1,12 +1,13 @@
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { finalLockAssetRecord, loginAsUser } from "@aigc/domain";
 import { createDeliveryImportJob } from "../delivery-import-jobs/service";
 import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { mutateDeliveryPackage } from "../delivery-packages/service";
 import { mutateAssetLockRecord } from "../asset-lock-records/service";
+import * as assetAttachmentService from "./service";
 import { createWorkspaceSessionCookieValue, WORKSPACE_SESSION_COOKIE_NAME } from "../workspace-session/session-cookie";
 import { GET, POST } from "./route";
 import { DELETE as DELETE_ATTACHMENT, GET as GET_ATTACHMENT } from "./[attachmentId]/route";
@@ -29,6 +30,7 @@ describe("asset lock attachment route", () => {
 
   afterEach(async () => {
     sessionCookie = "";
+    vi.restoreAllMocks();
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
     delete process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR;
     delete process.env.AIGC_WORKSPACE_SESSION_SECRET;
@@ -177,6 +179,28 @@ describe("asset lock attachment route", () => {
       message: "asset_attachment_record_not_found"
     });
     await expect(readSavedFileNames()).resolves.toEqual([]);
+  });
+
+  it("does not expose raw storage upload errors", async () => {
+    const recordId = (await createAssetRecord()).record.id;
+    vi.spyOn(assetAttachmentService, "uploadAssetAttachment").mockRejectedValue(
+      new Error(
+        "PutObject failed for bucket asset-bucket key asset-lock-attachments/asset-att-123e4567-e89b-12d3-a456-426614174000.png endpoint https://objects.example"
+      )
+    );
+
+    const response = await POST(formRequest(buildUploadForm(recordId)));
+    const payload = await response.json();
+    const serialized = JSON.stringify(payload);
+
+    expect(response.status).toBe(400);
+    expect(payload).toEqual({
+      error: "asset_attachment_upload_failed",
+      message: "asset_attachment_upload_failed"
+    });
+    expect(serialized).not.toContain("asset-bucket");
+    expect(serialized).not.toContain("asset-lock-attachments");
+    expect(serialized).not.toContain("objects.example");
   });
 
   it("returns conflict when uploading to a locked record", async () => {

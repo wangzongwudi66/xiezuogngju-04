@@ -42,13 +42,12 @@ export async function POST(request: Request) {
     const attachment = await uploadAssetAttachment(parsed.input, actor);
     return NextResponse.json({ attachment });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "asset attachment upload failed";
-    const errorCode = message.startsWith("asset_attachment_") ? message : "asset_attachment_upload_failed";
+    const errorCode = errorCodeFromUnknown(error, "asset_attachment_upload_failed");
 
     return NextResponse.json(
       {
         error: errorCode,
-        message
+        message: errorCode
       },
       { status: statusForAttachmentError(errorCode) }
     );

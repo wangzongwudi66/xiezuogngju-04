@@ -17,7 +17,7 @@ import type { AssetAttachmentRepository } from "./repository";
 import {
   AssetAttachmentStorageFileNotFoundError,
   allowedAssetAttachmentFileTypes,
-  createLocalAssetAttachmentStorage
+  resolveAssetAttachmentStorage
 } from "./storage";
 import type { AssetAttachmentStorage } from "./storage";
 
@@ -205,7 +205,7 @@ function resolveServiceRepository(options: AssetAttachmentServiceOptions) {
 }
 
 function resolveServiceStorage(options: AssetAttachmentServiceOptions) {
-  return options.storage ?? createLocalAssetAttachmentStorage();
+  return options.storage ?? resolveAssetAttachmentStorage();
 }
 
 function requireActiveAttachmentAccess(state: WorkspaceState, attachmentId: string, actor: WorkspaceRequestActor) {
