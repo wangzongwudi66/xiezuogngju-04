@@ -5,18 +5,31 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 19:25:56 +08:00`.
+Timestamp: `2026-05-30 19:31:03 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `8cede26 Record Postgres smoke import draft coverage`.
-- Latest product/test code commit on `main`: `075cb85 test: cover postgres smoke delivery import draft`.
-- Worktree at last check: clean after recording the `codex/m3-postgres-smoke-import-draft` merge and smoke coverage ledger update.
-- Remote sync complete for this checkpoint: local `main` and `xiezuogongju-04/main` both point at `8cede26`.
+- Latest recorded `main` checkpoint: `f27bfa1 Support delivery package DB basic mutations`.
+- Latest product/test code commit on `main`: `f27bfa1 Support delivery package DB basic mutations`.
+- Worktree at last check: clean after rebasing and fast-forward merging `codex/m3-delivery-package-db-basic-mutations`; ledger update pending commit.
+- Remote sync pending for this ledger update; `main@d723bf2` was the last pushed checkpoint before the delivery package DB basic mutations merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `f27bfa1 Support delivery package DB basic mutations`
+  - Rebases `codex/m3-delivery-package-db-basic-mutations` onto `main@d723bf2` and fast-forward merges it into `main`; original implementation commit was `6807b91`.
+  - DB mode now supports `/api/delivery-packages` basic mutations for `update_confirmation`, `submit`, and `reject` through the delivery package DB repository.
+  - `publish` remains stable fail-closed in DB mode with `delivery_package_db_mutation_not_supported:publish`; no publish runtime, `episodeRevisions`, `episodeCurrents`, `notifications`, UI/browser QA, or object storage work was added.
+  - Domain validation runs against the DB-overlaid workspace before repository writes, and validation failures do not write DB rows or local workspace package arrays.
+  - Local mode continues to use the existing local workspace mutation path.
+  - Child review 47 found no P0/P1/P2/P3 and approved the slice after noting the branch required rebase before merge. Real `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run test -w apps/web -- app/api/delivery-packages/service.test.ts app/api/delivery-packages/db-repository.test.ts`: passed, 2 files / 21 tests.
+    - `npm.cmd run test -w apps/web -- app/api/delivery-import-jobs/service.test.ts app/api/asset-lock-records/service.test.ts`: passed, 2 files / 55 tests.
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `075cb85 test: cover postgres smoke delivery import draft`
   - Updates `apps/web/db/postgres-smoke.ts` so the smoke harness creates a DB draft delivery package through `createDeliveryImportJob` instead of only seeding delivery package rows manually.
   - Verifies the DB workspace overlay can see the import-created package/episodes, while the local canonical `deliveryPackages` and `deliveryPackageEpisodes` arrays remain empty.
