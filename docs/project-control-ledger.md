@@ -5,18 +5,26 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 19:40:28 +08:00`.
+Timestamp: `2026-05-30 19:53:21 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `1f27d66 test: cover Postgres smoke delivery package basic mutations`.
+- Latest recorded `main` checkpoint: `6644ee2 Clarify Postgres smoke cleanup scope`.
 - Latest product/test code commit on `main`: `1f27d66 test: cover Postgres smoke delivery package basic mutations`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-postgres-smoke-basic-mutations` and running post-merge validation.
-- Remote sync note: `main@4ff3141` was the last pushed checkpoint before this smoke basic-mutations coverage merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
+- Worktree at last check: clean after fast-forward merging `codex/postgres-smoke-cleanup-doc` and running post-merge validation.
+- Remote sync note: `main@de3435c` was the last pushed checkpoint before this smoke cleanup runbook merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `6644ee2 Clarify Postgres smoke cleanup scope`
+  - Updates `docs/m3-postgres-smoke-runbook.md` to accurately describe smoke cleanup scope: cleanup is scoped by smoke delivery package prefix and by the smoke project/projectId for related asset rows.
+  - Clarifies that the smoke target must be a disposable `TEST_DATABASE_URL` database and must not be a shared, development, staging, or production database.
+  - Keeps the slice documentation-only: no business code, schema/migration, smoke runtime, package script, UI/browser QA, or object storage changes.
+  - Child review 4 found no P0/P1/P2/P3 and approved fast-forward merge. Real `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `1f27d66 test: cover Postgres smoke delivery package basic mutations`
   - Extends `apps/web/db/postgres-smoke.ts` so the smoke harness covers DB mode delivery package `update_confirmation`, `submit`, and `reject` mutations.
   - Keeps the main import-created package path intact for `submit` and subsequent `generate_from_package`; uses a separate package for `reject` so it does not pollute the generation happy path.
