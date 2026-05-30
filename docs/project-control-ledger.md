@@ -5,12 +5,12 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-31 00:05:20 +08:00`.
+Timestamp: `2026-05-31 00:25:57 +08:00`.
 
 - Active branch: `main`.
-- Latest merged checkpoint covered by this ledger update: `3b8181d Use signed cookie for workspace actors`.
-- Latest product/test code commit on `main`: `3b8181d Use signed cookie for workspace actors`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-session-cookie-backed-actor`.
+- Latest merged checkpoint covered by this ledger update: `f0108ca Add asset attachment object storage provider`.
+- Latest product/test code commit on `main`: `f0108ca Add asset attachment object storage provider`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-asset-attachment-object-storage-provider`.
 - Remote sync target for this checkpoint: push local `main` to `xiezuogongju-04/main` after recording this ledger update.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
@@ -27,11 +27,29 @@ Timestamp: `2026-05-31 00:05:20 +08:00`.
 - Child 44 reviewed the amended fix at `88504d3` and found no P0/P1/P2/P3; the branch is suitable for fast-forward merge into `main`.
 - Child 45 confirmed the GitHub Actions `db-smoke` run for `7a080302bbc6aed551089bae934c24cb2f352f78` passed with no connection string leakage observed. This unlocks the next phase: start with `session/cookie-backed actor`, then object storage provider, then auth/scope seed/admin write contract.
 - Child 46 reviewed `codex/m3-session-cookie-backed-actor` and found no blocking code issue. It did not run npm verification because the worktree had been switched externally, so the main control conversation reran target branch validation before merge.
-- Child 47 implemented `codex/m3-asset-attachment-object-storage-provider` at `2db9e01`; it is not yet reviewed or merged.
+- Child 47 implemented `codex/m3-asset-attachment-object-storage-provider`; after rebase and P2 fix the merged commit is `f0108ca`.
 - Child 48 completed the auth/scope seed/admin write contract split. Recommended order: seed contract, DB write service/repository, then admin route after session cookie actor is on `main`.
+- Child 49 reviewed the object storage provider and found a P2: upload errors could leak raw S3/bucket/key/endpoint details via the API `message`.
+- Child 50 implemented `codex/m3-auth-scope-seed-contract` at `7cf5a87`; it is reviewed by child 53 but must be rebased after the object storage merge before final merge.
+- Child 51 confirmed the GitHub Actions `db-smoke` run for `73268d32d6f6c47401fabcaadcf2b81b207892cb` passed with no connection string leakage observed.
+- Child 52 reviewed the amended object storage provider at `f0108ca` and found no P0/P1/P2/P3; the P2 is fixed.
+- Child 53 reviewed `codex/m3-auth-scope-seed-contract` at `7cf5a87` and found no blocking issue, but the branch was reviewed before the object storage provider moved `main`.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `f0108ca Add asset attachment object storage provider`
+  - Adds S3-compatible object storage support behind the existing `AssetAttachmentStorage` contract.
+  - Keeps default attachment byte storage local; object storage is enabled explicitly with `ASSET_LOCK_ATTACHMENT_STORAGE_PROVIDER=s3`.
+  - Adds `ASSET_LOCK_ATTACHMENT_S3_BUCKET` as the required bucket setting and optional region, endpoint, prefix, and force path style settings. Explicit `s3` mode without a bucket fails closed instead of falling back to local.
+  - Uses deterministic object keys derived from the existing `fileId + extension`, with optional normalized prefix. It does not add `storageKey`, `checksum`, or `contentLength` fields and does not change DB schema/migrations.
+  - Upload still writes bytes before metadata and compensates failed metadata persistence by deleting the just-uploaded object. User DELETE still only soft deletes metadata and does not physically delete committed bytes.
+  - Fixes the child 49 P2 by returning stable upload error codes instead of raw storage/S3 exception messages, preventing bucket/key/endpoint leakage in API responses.
+  - Keeps the slice scoped: no UI, readiness doc, DB schema/migration, Postgres byte storage, or `codex/timeline-mobile-crop-hardening` changes.
+  - Child review 49 found the upload error leakage P2; child review 52 confirmed the amended fix and found no P0/P1/P2/P3. Real local `db:smoke` was not run.
+  - Validation before merge:
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-attachments/storage.test.ts app/api/asset-lock-attachments/service.test.ts app/api/asset-lock-attachments/route.test.ts app/api/asset-lock-attachments/db-repository.test.ts`: passed, 4 files / 69 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check main..codex/m3-asset-attachment-object-storage-provider`: passed.
 - `3b8181d Use signed cookie for workspace actors`
   - Replaces shared workspace `currentUserId` actor derivation on protected API routes with a request-scoped signed HttpOnly cookie.
   - Adds `apps/web/app/api/workspace-session/session-cookie.ts` using an HMAC-signed `aigc_workspace_session` cookie with expiration, `HttpOnly`, `SameSite=Lax`, `Path=/`, and production `Secure`.
