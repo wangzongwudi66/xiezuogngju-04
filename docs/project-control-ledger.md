@@ -5,18 +5,28 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 22:01:30 +08:00`.
+Timestamp: `2026-05-30 22:35:44 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `0588d61 Require asset attachment storage delete`.
+- Latest recorded `main` checkpoint: `76b3db9 Document M3 DB-backed readiness status`.
 - Latest product/test code commit on `main`: `0588d61 Require asset attachment storage delete`.
-- Worktree at last check: clean after fast-forward merging `codex/asset-attachment-storage-contract` and running post-merge validation.
-- Remote sync note: `main@315aaaa` was the last pushed checkpoint before this attachment storage contract merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
+- Worktree at last check: clean after fast-forward merging `codex/m3-db-readiness-status-doc` and running post-merge validation.
+- Remote sync note: `main@71fad75` was the last pushed checkpoint before this DB readiness status document merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `76b3db9 Document M3 DB-backed readiness status`
+  - Adds `docs/m3-db-backed-readiness-status.md` as the current status document for the M3 DB-backed prototype.
+  - Summarizes implemented DB-backed capabilities across delivery import/package mutations, publish read-model overlay, asset-lock records/source bindings, auth/scope overlay, delivery route server actors, attachment metadata DB plus storage abstraction, and the Postgres smoke harness.
+  - Explicitly states that the project cannot claim formal backend readiness until real `db:smoke` passes on a disposable `TEST_DATABASE_URL`, and records remaining blockers around session/auth, auth/scope admin writes, object storage, and happy-path-biased smoke coverage.
+  - Documents the current pause line: do not merge further DB schema/runtime expansion before real `db:smoke` passes.
+  - Keeps the slice documentation-only: no business code, schema/migration, tests, UI/browser QA, `db:smoke`, or `codex/timeline-mobile-crop-hardening` changes.
+  - Child review 33 found no P0/P1/P2/P3 and approved fast-forward merge. Real `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `0588d61 Require asset attachment storage delete`
   - Fast-forward merges `codex/asset-attachment-storage-contract`, including the original storage abstraction commit `c12dfb9` and the P2 fix commit `0588d61`.
   - Adds `apps/web/app/api/asset-lock-attachments/storage.ts` and routes attachment bytes through a storage abstraction while preserving current local filesystem behavior and schema.
