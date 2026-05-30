@@ -5,18 +5,31 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 15:52:15 +08:00`.
+Timestamp: `2026-05-30 16:09:57 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `ddaf020 Record Postgres smoke harness merge`.
-- Latest product/test code commit on `main`: `6ee78d6 Harden DB attachment version allocation`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-generate-from-package-db-path` and rebased `codex/m3-attachment-version-db-allocation`; ledger update pending commit.
-- Remote sync pending for this ledger update; `main@ddaf020` was the last pushed checkpoint before these two backend DB slices.
+- Latest recorded `main` commit before this ledger update: `c4cecf5 Record DB generation and attachment version merges`.
+- Latest product/test code commit on `main`: `db7fb6a test: expand Postgres smoke asset coverage`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-postgres-smoke-expanded-coverage`; ledger update pending commit.
+- Remote sync pending for this ledger update; `main@c4cecf5` was the last pushed checkpoint before the expanded smoke harness merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
+- Pending branch `codex/m3-generate-db-validation-no-write-tests` remains unmerged after child review 9 found a blocking test-semantics issue around the `all existing` path.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `db7fb6a test: expand Postgres smoke asset coverage`
+  - Expands `apps/web/db/postgres-smoke.ts` to cover the latest DB-backed capabilities without changing business repository/service code.
+  - Adds smoke harness coverage for `generate_from_package` DB happy path and verifies generated records are visible through the DB snapshot.
+  - Adds two consecutive attachment uploads on the same record and verifies DB-assigned versions `1` and `2`.
+  - Keeps cleanup repeatable by the smoke delivery package prefix and preserves fail-closed behavior when `TEST_DATABASE_URL` is missing.
+  - Keeps the slice scoped: no schema/migration, no `drizzle.config.ts`, no object storage, no UI/browser QA changes.
+  - Child review 10 found no P0/P1/P2/P3 and approved merge. Real `db:smoke` was not run because no `TEST_DATABASE_URL` is available in the current environment.
+  - Validation after merge:
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/db-repository.test.ts app/api/asset-lock-attachments/db-repository.test.ts app/api/asset-decision-timeline/service.test.ts`: passed, 3 files / 36 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `6ee78d6 Harden DB attachment version allocation`
   - Rebased `codex/m3-attachment-version-db-allocation` onto `main@c14e1b3` and fast-forward merged it into `main`; original implementation review commit was `5d9e01b`.
   - DB attachment metadata create now allocates `version` inside the DB transaction by reading the current maximum `asset_attachments.version` for the record and inserting the next version.
