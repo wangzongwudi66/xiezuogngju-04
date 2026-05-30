@@ -5,18 +5,29 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 03:03:57 +08:00`.
+Timestamp: `2026-05-30 14:42:25 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `1c947e3 Implement asset attachment DB metadata writes`.
-- Latest product/test code commit on `main`: `1c947e3 Implement asset attachment DB metadata writes`.
-- Worktree at last check: clean after fast-forward merging `codex/timeline-db-backed-projection` and rebased `codex/m3-asset-attachment-db-writes`.
-- Remote sync restored: `main@1c947e3` was pushed to `xiezuogongju-04/main` after the timeline DB-backed projection and attachment DB metadata write merges.
+- Latest recorded `main` commit before this ledger update: `44bd93b Add DB lifecycle updates for asset lock records`.
+- Latest product/test code commit on `main`: `44bd93b Add DB lifecycle updates for asset lock records`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-record-db-lifecycle-updates`.
+- Remote sync pending for this ledger update; `main@3d54e9c` was the last pushed checkpoint before the lifecycle update merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `44bd93b Add DB lifecycle updates for asset lock records`
+  - Adds DB-mode `updateAssetLockRecord` support for existing record lifecycle updates.
+  - DB mode now supports `writer_confirm`, `production_confirm`, `needs_info`, `dispute`, and `final_lock`.
+  - The DB update writes explicit `asset_lock_records` fields only and does not modify `asset_lock_record_episodes`.
+  - Service still reads the repository snapshot first and reuses existing domain/service actor, permission, state-machine, locked-record, and status validation before persisting the updated record.
+  - Keeps the slice scoped: no `prepare_demo`/`generate_from_package` DB support, no delivery/project/user DB migration, no source binding/attachment/timeline/UI changes, no schema/migration, no real DB migrate, and no browser QA.
+  - Fast-forward merged `codex/m3-record-db-lifecycle-updates` into `main` after AP review found no P0/P1/P2/P3.
+  - Validation:
+    - `git diff --check main..HEAD`: passed.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/db-repository.test.ts app/api/asset-lock-records/service.test.ts app/api/asset-lock-records/route.test.ts`: passed, 3 files / 56 tests.
 - `1c947e3 Implement asset attachment DB metadata writes`
   - Adds DB-mode attachment metadata create and soft-delete write paths while preserving local mode workspace metadata behavior.
   - Gates attachment DB mode on both `ASSET_LOCK_ATTACHMENTS_REPOSITORY=db` and the asset-lock-records DB mode/DATABASE_URL, avoiding the local/DB record split-brain found in AL review.
