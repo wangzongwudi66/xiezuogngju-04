@@ -147,7 +147,13 @@ export async function mutateDeliveryImportWorkspace(
   mutate: (state: WorkspaceState) => WorkspaceState
 ): Promise<DeliveryImportWorkspaceSnapshot> {
   const store = await readDeliveryImportJobStore();
-  const nextWorkspace = mutate(store.workspace);
+  const repositoryMode = resolveDeliveryImportWorkspaceRepositoryMode();
+  const previousAuthScopeArrays = repositoryMode.authScope === "db" ? serializeAuthScopeLocalArrays(store.workspace) : null;
+  const nextWorkspace = mutate(cloneWorkspaceState(store.workspace));
+
+  if (previousAuthScopeArrays) {
+    assertAuthScopeLocalArraysUnchanged(previousAuthScopeArrays, nextWorkspace);
+  }
 
   await writeDeliveryImportJobStore({
     ...store,
@@ -157,13 +163,39 @@ export async function mutateDeliveryImportWorkspace(
   return {
     state: nextWorkspace,
     deliveryParseIssuesByPackageId: store.deliveryParseIssuesByPackageId,
-    repositoryMode: { authScope: "local" }
+    repositoryMode
   };
 }
 
 function resolveDeliveryImportWorkspaceRepositoryMode(): DeliveryImportWorkspaceRepositoryMode {
   return { authScope: isAssetLockRecordDbRepositoryEnabled() ? "db" : "local" };
 }
+
+function assertAuthScopeLocalArraysUnchanged(previous: Record<AuthScopeLocalArrayKey, string>, next: WorkspaceState) {
+  const changedKey = authScopeLocalArrayKeys.find((key) => previous[key] !== JSON.stringify(next[key]));
+
+  if (changedKey) {
+    throw new Error(`auth_scope_local_mutation_forbidden_in_db_mode:${changedKey}`);
+  }
+}
+
+function serializeAuthScopeLocalArrays(state: WorkspaceState): Record<AuthScopeLocalArrayKey, string> {
+  return Object.fromEntries(authScopeLocalArrayKeys.map((key) => [key, JSON.stringify(state[key])])) as Record<
+    AuthScopeLocalArrayKey,
+    string
+  >;
+}
+
+type AuthScopeLocalArrayKey = (typeof authScopeLocalArrayKeys)[number];
+
+const authScopeLocalArrayKeys = [
+  "users",
+  "projects",
+  "members",
+  "memberPermissions",
+  "episodes",
+  "assignments"
+] as const satisfies readonly (keyof WorkspaceState)[];
 
 export async function saveDeliveryImportJobFile(input: { fileBuffer: ArrayBuffer | Uint8Array; fileId: string }) {
   const filePath = resolveDeliveryImportJobFilePath(input.fileId);
@@ -193,7 +225,7 @@ async function readDeliveryImportJobStore(): Promise<DeliveryImportJobStore> {
     return {
       version: 1,
       results: parsed.results,
-      workspace: parsed.workspace && typeof parsed.workspace === "object" ? parsed.workspace : seedWorkspace,
+      workspace: parsed.workspace && typeof parsed.workspace === "object" ? parsed.workspace : cloneWorkspaceState(seedWorkspace),
       deliveryParseIssuesByPackageId:
         parsed.deliveryParseIssuesByPackageId && typeof parsed.deliveryParseIssuesByPackageId === "object"
           ? parsed.deliveryParseIssuesByPackageId
@@ -239,5 +271,9 @@ function assertDeliveryImportFileId(fileId: string) {
 }
 
 function emptyStore(): DeliveryImportJobStore {
-  return { version: 1, results: [], workspace: seedWorkspace, deliveryParseIssuesByPackageId: {} };
+  return { version: 1, results: [], workspace: cloneWorkspaceState(seedWorkspace), deliveryParseIssuesByPackageId: {} };
+}
+
+function cloneWorkspaceState(state: WorkspaceState): WorkspaceState {
+  return JSON.parse(JSON.stringify(state)) as WorkspaceState;
 }
