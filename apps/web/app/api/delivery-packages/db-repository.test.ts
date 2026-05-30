@@ -1,9 +1,14 @@
+import type { DeliveryPackage, DeliveryPackageEpisode } from "@aigc/domain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { deliveryPackageEpisodes, deliveryPackages } from "../../../db/schema";
 import {
+  createDbDeliveryPackageWithEpisodes,
+  mapDeliveryPackageEpisodeToDbInsertRow,
   mapDeliveryPackageRows,
+  mapDeliveryPackageToDbInsertRow,
   readDbDeliveryPackageSnapshot,
+  updateDbDeliveryPackage,
   type DeliveryPackageDbRow,
   type DeliveryPackageEpisodeDbRow
 } from "./db-repository";
@@ -232,6 +237,110 @@ describe("delivery package DB repository reads", () => {
   });
 });
 
+describe("delivery package DB repository writes", () => {
+  it("inserts package and episode rows inside one transaction", async () => {
+    const deliveryPackage = buildDeliveryPackage({
+      id: "delivery-create-1",
+      sourceFileName: "create-delivery.docx"
+    });
+    const episodes = [
+      buildDeliveryPackageEpisode({ id: "delivery-create-1-episode-1", deliveryPackageId: deliveryPackage.id, episodeNo: 1 }),
+      buildDeliveryPackageEpisode({ id: "delivery-create-1-episode-2", deliveryPackageId: deliveryPackage.id, episodeNo: 2 })
+    ];
+    const mockDb = createMockDb([[toDeliveryPackageDbRow(deliveryPackage)], episodes.map(toDeliveryPackageEpisodeDbRow)]);
+    const mockTx = createMockWriteTx();
+    const transaction = vi.fn(async (callback: (tx: typeof mockTx.tx) => Promise<void>) => callback(mockTx.tx));
+    mockRuntime({ ...mockDb.db, transaction });
+
+    const snapshot = await createDbDeliveryPackageWithEpisodes(deliveryPackage, episodes);
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(mockTx.insert).toHaveBeenCalledTimes(2);
+    expect(mockTx.insert).toHaveBeenNthCalledWith(1, deliveryPackages);
+    expect(mockTx.insert).toHaveBeenNthCalledWith(2, deliveryPackageEpisodes);
+    expect(mockTx.values).toHaveBeenNthCalledWith(1, mapDeliveryPackageToDbInsertRow(deliveryPackage));
+    expect(mockTx.values).toHaveBeenNthCalledWith(2, episodes.map(mapDeliveryPackageEpisodeToDbInsertRow));
+    expect(snapshot.deliveryPackages).toEqual([deliveryPackage]);
+    expect(snapshot.deliveryPackageEpisodes).toEqual(episodes);
+  });
+
+  it("does not insert episode rows when a package has no episodes", async () => {
+    const deliveryPackage = buildDeliveryPackage({ id: "delivery-empty-episodes" });
+    const mockDb = createMockDb([[toDeliveryPackageDbRow(deliveryPackage)], []]);
+    const mockTx = createMockWriteTx();
+    const transaction = vi.fn(async (callback: (tx: typeof mockTx.tx) => Promise<void>) => callback(mockTx.tx));
+    mockRuntime({ ...mockDb.db, transaction });
+
+    await expect(createDbDeliveryPackageWithEpisodes(deliveryPackage, [])).resolves.toEqual({
+      deliveryPackages: [deliveryPackage],
+      deliveryPackageEpisodes: []
+    });
+
+    expect(mockTx.insert).toHaveBeenCalledTimes(1);
+    expect(mockTx.insert).toHaveBeenCalledWith(deliveryPackages);
+    expect(mockTx.values).toHaveBeenCalledWith(mapDeliveryPackageToDbInsertRow(deliveryPackage));
+  });
+
+  it("updates package status fields and returns the mapped package", async () => {
+    const deliveryPackage = buildDeliveryPackage({
+      id: "delivery-status-update",
+      status: "published",
+      submittedByUserId: "user-head-writer",
+      reviewedByUserId: "user-owner",
+      submittedAt: "2026-05-29T01:00:00.000Z",
+      publishedAt: "2026-05-29T02:00:00.000Z"
+    });
+    const mockDb = createMockUpdateDb([toDeliveryPackageDbRow(deliveryPackage)]);
+    mockRuntime(mockDb.db);
+
+    await expect(updateDbDeliveryPackage(deliveryPackage)).resolves.toEqual(deliveryPackage);
+
+    expect(mockDb.update).toHaveBeenCalledWith(deliveryPackages);
+    expect(mockDb.set).toHaveBeenCalledWith({
+      projectId: "project-jincheng",
+      type: "range",
+      title: "Episodes 1-2 delivery",
+      sourceFileName: null,
+      declaredEpisodeFrom: 1,
+      declaredEpisodeTo: 2,
+      status: "published",
+      uploadedByUserId: "user-head-writer",
+      submittedByUserId: "user-head-writer",
+      reviewedByUserId: "user-owner",
+      rejectionReason: null,
+      createdAt: "2026-05-29T00:00:00.000Z",
+      submittedAt: "2026-05-29T01:00:00.000Z",
+      publishedAt: "2026-05-29T02:00:00.000Z",
+      rejectedAt: null
+    });
+    expect(mockDb.where).toHaveBeenCalledTimes(1);
+    expect(mockDb.returning).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws a stable error when update touches no rows", async () => {
+    const mockDb = createMockUpdateDb([]);
+    mockRuntime(mockDb.db);
+
+    await expect(updateDbDeliveryPackage(buildDeliveryPackage({ id: "delivery-missing" }))).rejects.toThrow(
+      "delivery_package_not_found"
+    );
+  });
+
+  it("does not swallow unique conflicts during insert", async () => {
+    const uniqueConflict = Object.assign(new Error("duplicate delivery package"), {
+      code: "23505",
+      constraint: "delivery_packages_pkey"
+    });
+    const mockTx = createMockWriteTx(uniqueConflict);
+    const select = vi.fn();
+    const transaction = vi.fn(async (callback: (tx: typeof mockTx.tx) => Promise<void>) => callback(mockTx.tx));
+    mockRuntime({ select, transaction });
+
+    await expect(createDbDeliveryPackageWithEpisodes(buildDeliveryPackage(), [])).rejects.toBe(uniqueConflict);
+    expect(select).not.toHaveBeenCalled();
+  });
+});
+
 function mockRuntime(db: unknown) {
   vi.mocked(getAssetLockDbRuntime).mockReturnValue({
     db,
@@ -251,5 +360,96 @@ function createMockDb(selectResults: unknown[][]) {
     select,
     from,
     orderBy
+  };
+}
+
+function createMockWriteTx(error?: unknown) {
+  const values = vi.fn(async () => {
+    if (error) {
+      throw error;
+    }
+  });
+  const insert = vi.fn(() => ({ values }));
+  const tx = { insert };
+
+  return {
+    tx,
+    insert,
+    values
+  };
+}
+
+function createMockUpdateDb(updatedRows: DeliveryPackageDbRow[]) {
+  const returning = vi.fn(async () => updatedRows);
+  const where = vi.fn(() => ({ returning }));
+  const set = vi.fn(() => ({ where }));
+  const update = vi.fn(() => ({ set }));
+  const db = { update };
+
+  return {
+    db,
+    update,
+    set,
+    where,
+    returning
+  };
+}
+
+function buildDeliveryPackage(overrides: Partial<DeliveryPackage> = {}): DeliveryPackage {
+  return {
+    id: "delivery-1",
+    projectId: "project-jincheng",
+    type: "range",
+    title: "Episodes 1-2 delivery",
+    declaredEpisodeFrom: 1,
+    declaredEpisodeTo: 2,
+    status: "draft",
+    uploadedByUserId: "user-head-writer",
+    createdAt: "2026-05-29T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+function buildDeliveryPackageEpisode(overrides: Partial<DeliveryPackageEpisode> = {}): DeliveryPackageEpisode {
+  return {
+    id: "delivery-1-episode-1",
+    deliveryPackageId: "delivery-1",
+    episodeNo: 1,
+    title: "Episode 1",
+    content: "Episode 1 content",
+    isConfirmedChange: false,
+    ...overrides
+  };
+}
+
+function toDeliveryPackageDbRow(deliveryPackage: DeliveryPackage): DeliveryPackageDbRow {
+  return {
+    id: deliveryPackage.id,
+    projectId: deliveryPackage.projectId,
+    type: deliveryPackage.type,
+    title: deliveryPackage.title,
+    sourceFileName: deliveryPackage.sourceFileName ?? null,
+    declaredEpisodeFrom: deliveryPackage.declaredEpisodeFrom,
+    declaredEpisodeTo: deliveryPackage.declaredEpisodeTo,
+    status: deliveryPackage.status,
+    uploadedByUserId: deliveryPackage.uploadedByUserId,
+    submittedByUserId: deliveryPackage.submittedByUserId ?? null,
+    reviewedByUserId: deliveryPackage.reviewedByUserId ?? null,
+    rejectionReason: deliveryPackage.rejectionReason ?? null,
+    createdAt: deliveryPackage.createdAt,
+    submittedAt: deliveryPackage.submittedAt ?? null,
+    publishedAt: deliveryPackage.publishedAt ?? null,
+    rejectedAt: deliveryPackage.rejectedAt ?? null
+  };
+}
+
+function toDeliveryPackageEpisodeDbRow(episode: DeliveryPackageEpisode): DeliveryPackageEpisodeDbRow {
+  return {
+    id: episode.id,
+    deliveryPackageId: episode.deliveryPackageId,
+    episodeNo: episode.episodeNo,
+    title: episode.title,
+    content: episode.content,
+    isConfirmedChange: episode.isConfirmedChange
   };
 }

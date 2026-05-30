@@ -1,10 +1,13 @@
 import type { DeliveryPackage, DeliveryPackageEpisode } from "@aigc/domain";
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { deliveryPackageEpisodes, deliveryPackages } from "../../../db/schema";
 
 export type DeliveryPackageDbRow = typeof deliveryPackages.$inferSelect;
 export type DeliveryPackageEpisodeDbRow = typeof deliveryPackageEpisodes.$inferSelect;
+type DeliveryPackageDbInsert = typeof deliveryPackages.$inferInsert;
+type DeliveryPackageEpisodeDbInsert = typeof deliveryPackageEpisodes.$inferInsert;
+type DeliveryPackageDbUpdate = Omit<DeliveryPackageDbInsert, "id">;
 
 export interface DeliveryPackageDbSnapshot {
   deliveryPackages: DeliveryPackage[];
@@ -35,6 +38,40 @@ export async function readDbDeliveryPackageSnapshot(): Promise<DeliveryPackageDb
   return mapDeliveryPackageRows(packageRows, episodeRows);
 }
 
+export async function createDbDeliveryPackageWithEpisodes(
+  deliveryPackage: DeliveryPackage,
+  episodes: DeliveryPackageEpisode[]
+): Promise<DeliveryPackageDbSnapshot> {
+  const { db } = getAssetLockDbRuntime();
+
+  await db.transaction(async (tx) => {
+    await tx.insert(deliveryPackages).values(mapDeliveryPackageToDbInsertRow(deliveryPackage));
+
+    if (episodes.length > 0) {
+      await tx.insert(deliveryPackageEpisodes).values(episodes.map(mapDeliveryPackageEpisodeToDbInsertRow));
+    }
+  });
+
+  return readDbDeliveryPackageSnapshot();
+}
+
+export async function updateDbDeliveryPackage(deliveryPackage: DeliveryPackage): Promise<DeliveryPackage> {
+  const { db } = getAssetLockDbRuntime();
+  const updatedRows = await db
+    .update(deliveryPackages)
+    .set(mapDeliveryPackageToDbUpdateRow(deliveryPackage))
+    .where(eq(deliveryPackages.id, deliveryPackage.id))
+    .returning();
+
+  const updatedPackage = mapDeliveryPackageRows(updatedRows, []).deliveryPackages[0];
+
+  if (!updatedPackage) {
+    throw new Error("delivery_package_not_found");
+  }
+
+  return updatedPackage;
+}
+
 export function mapDeliveryPackageRows(
   packageRows: DeliveryPackageDbRow[],
   episodeRows: DeliveryPackageEpisodeDbRow[]
@@ -42,6 +79,46 @@ export function mapDeliveryPackageRows(
   return {
     deliveryPackages: packageRows.map(mapDeliveryPackageRow),
     deliveryPackageEpisodes: episodeRows.map(mapDeliveryPackageEpisodeRow)
+  };
+}
+
+export function mapDeliveryPackageToDbInsertRow(deliveryPackage: DeliveryPackage): DeliveryPackageDbInsert {
+  return {
+    id: deliveryPackage.id,
+    ...mapDeliveryPackageToDbUpdateRow(deliveryPackage)
+  };
+}
+
+export function mapDeliveryPackageEpisodeToDbInsertRow(
+  episode: DeliveryPackageEpisode
+): DeliveryPackageEpisodeDbInsert {
+  return {
+    id: episode.id,
+    deliveryPackageId: episode.deliveryPackageId,
+    episodeNo: episode.episodeNo,
+    title: episode.title,
+    content: episode.content,
+    isConfirmedChange: episode.isConfirmedChange
+  };
+}
+
+function mapDeliveryPackageToDbUpdateRow(deliveryPackage: DeliveryPackage): DeliveryPackageDbUpdate {
+  return {
+    projectId: deliveryPackage.projectId,
+    type: deliveryPackage.type,
+    title: deliveryPackage.title,
+    sourceFileName: deliveryPackage.sourceFileName ?? null,
+    declaredEpisodeFrom: deliveryPackage.declaredEpisodeFrom,
+    declaredEpisodeTo: deliveryPackage.declaredEpisodeTo,
+    status: deliveryPackage.status,
+    uploadedByUserId: deliveryPackage.uploadedByUserId,
+    submittedByUserId: deliveryPackage.submittedByUserId ?? null,
+    reviewedByUserId: deliveryPackage.reviewedByUserId ?? null,
+    rejectionReason: deliveryPackage.rejectionReason ?? null,
+    createdAt: deliveryPackage.createdAt,
+    submittedAt: deliveryPackage.submittedAt ?? null,
+    publishedAt: deliveryPackage.publishedAt ?? null,
+    rejectedAt: deliveryPackage.rejectedAt ?? null
   };
 }
 
