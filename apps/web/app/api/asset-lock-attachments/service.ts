@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createAssetAttachmentMetadata, listAssetAttachmentsForRecord, selectPrimaryRole } from "@aigc/domain";
 import type {
@@ -15,17 +14,16 @@ import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persisten
 import type { WorkspaceRequestActor } from "../workspace-actor";
 import { createLocalAssetAttachmentRepository, resolveAssetAttachmentRepository } from "./repository";
 import type { AssetAttachmentRepository } from "./repository";
+import {
+  AssetAttachmentStorageFileNotFoundError,
+  allowedAssetAttachmentFileTypes,
+  createLocalAssetAttachmentStorage
+} from "./storage";
+import type { AssetAttachmentStorage } from "./storage";
 
-const attachmentFileDirEnvKey = "AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR";
-const defaultAttachmentFileDir = path.join(process.cwd(), ".local-data", "asset-lock-attachments");
 const maxAttachmentBytes = 20 * 1024 * 1024;
-const allowedAttachmentTypes: Record<string, { extension: string; mime: string }> = {
-  ".jpg": { extension: ".jpg", mime: "image/jpeg" },
-  ".jpeg": { extension: ".jpeg", mime: "image/jpeg" },
-  ".png": { extension: ".png", mime: "image/png" },
-  ".webp": { extension: ".webp", mime: "image/webp" },
-  ".pdf": { extension: ".pdf", mime: "application/pdf" }
-};
+
+export { resolveAssetAttachmentFilePath } from "./storage";
 
 export interface AssetAttachmentUploadInput {
   assetLockRecordId: string;
@@ -46,6 +44,7 @@ export interface AssetAttachmentDownload {
 export interface AssetAttachmentServiceOptions {
   persistMetadata?: typeof mutateDeliveryImportWorkspace;
   repository?: AssetAttachmentRepository;
+  storage?: AssetAttachmentStorage;
 }
 
 export async function uploadAssetAttachment(
@@ -71,6 +70,7 @@ export async function uploadAssetAttachment(
     note: input.note
   };
   const repository = resolveServiceRepository(options);
+  const storage = resolveServiceStorage(options);
   const snapshot = await repository.read();
 
   assertKnownActor(snapshot.state, actor);
@@ -84,15 +84,18 @@ export async function uploadAssetAttachment(
     throw new Error("asset_attachment_metadata_not_created");
   }
 
-  const filePath = resolveAssetAttachmentFilePath(fileId, fileRule.extension);
+  const storageKey = storage.makeKey({ fileId, extension: fileRule.extension });
 
-  await mkdir(/* turbopackIgnore: true */ path.dirname(filePath), { recursive: true });
-  await writeFile(/* turbopackIgnore: true */ filePath, bytes);
+  await storage.put({ key: storageKey, bytes, mime: fileRule.mime });
 
   try {
     return await repository.createAssetAttachmentMetadata({ attachment, metadataInput });
   } catch (error) {
-    await rm(/* turbopackIgnore: true */ filePath, { force: true });
+    try {
+      await storage.delete?.({ key: storageKey });
+    } catch {
+      // Keep the metadata failure as the upload result; cleanup is compensating work.
+    }
     throw error;
   }
 }
@@ -115,15 +118,20 @@ export async function downloadAssetAttachment(
   options: AssetAttachmentServiceOptions = {}
 ): Promise<AssetAttachmentDownload> {
   const repository = resolveServiceRepository(options);
+  const storage = resolveServiceStorage(options);
   const snapshot = await repository.read();
   const { attachment } = requireActiveAttachmentAccess(snapshot.state, attachmentId, actor);
-  const filePath = resolveAssetAttachmentFilePath(attachment.fileId, path.extname(attachment.fileName));
+  const storageKey = storage.makeKey({ fileId: attachment.fileId, extension: path.extname(attachment.fileName) });
   let bytes: Uint8Array;
 
   try {
-    bytes = await readFile(/* turbopackIgnore: true */ filePath);
-  } catch {
-    throw new Error("asset_attachment_file_not_found");
+    bytes = await storage.get({ key: storageKey });
+  } catch (error) {
+    if (error instanceof AssetAttachmentStorageFileNotFoundError || (error as Error).message === "asset_attachment_file_not_found") {
+      throw new Error("asset_attachment_file_not_found");
+    }
+
+    throw error;
   }
 
   return {
@@ -151,18 +159,6 @@ export async function deleteAssetAttachment(
   });
 }
 
-export function resolveAssetAttachmentFilePath(fileId: string, extension: string) {
-  const baseDir = path.resolve(/* turbopackIgnore: true */ resolveAssetAttachmentFileDir());
-  const filePath = path.resolve(/* turbopackIgnore: true */ baseDir, `${assertAssetAttachmentFileId(fileId)}${assertSafeExtension(extension)}`);
-  const relativePath = path.relative(baseDir, filePath);
-
-  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
-    throw new Error("asset_attachment_file_path_invalid");
-  }
-
-  return filePath;
-}
-
 function validateAttachmentFile(input: { fileName: string; mime: string; size: number }) {
   if (!input.fileName.trim()) {
     throw new Error("asset_attachment_file_required");
@@ -177,7 +173,7 @@ function validateAttachmentFile(input: { fileName: string; mime: string; size: n
   }
 
   const extension = path.extname(input.fileName).toLowerCase();
-  const fileRule = allowedAttachmentTypes[extension];
+  const fileRule = allowedAssetAttachmentFileTypes[extension];
 
   if (!fileRule) {
     throw new Error("asset_attachment_file_type_invalid");
@@ -206,6 +202,10 @@ function resolveServiceRepository(options: AssetAttachmentServiceOptions) {
   }
 
   return repository;
+}
+
+function resolveServiceStorage(options: AssetAttachmentServiceOptions) {
+  return options.storage ?? createLocalAssetAttachmentStorage();
 }
 
 function requireActiveAttachmentAccess(state: WorkspaceState, attachmentId: string, actor: WorkspaceRequestActor) {
@@ -350,28 +350,6 @@ function intersects(left: number[], right: number[]) {
 
 function findAttachmentById(state: WorkspaceState, attachmentId: string) {
   return (state.assetAttachments ?? []).find((attachment) => attachment.id === attachmentId) ?? null;
-}
-
-function resolveAssetAttachmentFileDir() {
-  return process.env[attachmentFileDirEnvKey] || defaultAttachmentFileDir;
-}
-
-function assertAssetAttachmentFileId(fileId: string) {
-  if (!/^asset-att-[a-f0-9-]{36}$/i.test(fileId)) {
-    throw new Error("asset_attachment_file_id_invalid");
-  }
-
-  return fileId;
-}
-
-function assertSafeExtension(extension: string) {
-  const normalized = extension.toLowerCase();
-
-  if (!allowedAttachmentTypes[normalized]) {
-    throw new Error("asset_attachment_file_type_invalid");
-  }
-
-  return normalized;
 }
 
 function createAssetAttachmentFileId() {

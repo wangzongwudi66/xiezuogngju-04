@@ -16,6 +16,8 @@ import {
   resolveAssetAttachmentFilePath,
   uploadAssetAttachment
 } from "./service";
+import { AssetAttachmentStorageFileNotFoundError, createLocalAssetAttachmentStorage } from "./storage";
+import type { AssetAttachmentStorage } from "./storage";
 
 type UploadOverrides = {
   attachmentType: "reference" | "production" | "final";
@@ -62,6 +64,39 @@ describe("asset lock attachment service", () => {
     ]);
     expect(workspace.state.assetAttachments).toHaveLength(3);
     expect(await readSavedFileNames()).toHaveLength(3);
+  });
+
+  it("writes bytes through storage before persisting upload metadata", async () => {
+    const record = (await createAssetRecord()).record;
+    const storage = createMockAssetAttachmentStorage();
+
+    const attachment = await uploadAssetAttachment(buildUploadInput(record.id), { userId: currentActorUserId }, { storage });
+    const workspace = await getDeliveryImportWorkspace();
+
+    expect(storage.makeKey).toHaveBeenCalledWith({ fileId: attachment.fileId, extension: ".png" });
+    expect(storage.put).toHaveBeenCalledWith({
+      key: `${attachment.fileId}.png`,
+      bytes: pngBytes(),
+      mime: "image/png"
+    });
+    expect(workspace.state.assetAttachments).toContainEqual(attachment);
+  });
+
+  it("does not write upload metadata when storage put fails", async () => {
+    const record = (await createAssetRecord()).record;
+    const storage = createMockAssetAttachmentStorage({
+      put: vi.fn(async () => {
+        throw new Error("forced_storage_put_failure");
+      })
+    });
+
+    await expect(
+      uploadAssetAttachment(buildUploadInput(record.id), { userId: currentActorUserId }, { storage })
+    ).rejects.toThrow("forced_storage_put_failure");
+
+    const workspace = await getDeliveryImportWorkspace();
+    expect(workspace.state.assetAttachments ?? []).toHaveLength(0);
+    expect(storage.delete).not.toHaveBeenCalled();
   });
 
   it("returns metadata without file paths or storage internals", async () => {
@@ -139,6 +174,51 @@ describe("asset lock attachment service", () => {
     expect(serialized).not.toContain(resolve(attachmentDir));
   });
 
+  it("downloads attachment bytes from storage", async () => {
+    const record = (await createAssetRecord()).record;
+    const storage = createMockAssetAttachmentStorage({
+      get: vi.fn(async () => new Uint8Array([1, 2, 3, 4]))
+    });
+    const attachment = await uploadAssetAttachment(buildUploadInput(record.id), { userId: currentActorUserId }, { storage });
+
+    const downloaded = await downloadAssetAttachmentForActor(attachment.id, { userId: currentActorUserId }, { storage });
+
+    expect(storage.get).toHaveBeenCalledWith({ key: `${attachment.fileId}.png` });
+    expect(Buffer.from(downloaded.bytes)).toEqual(Buffer.from([1, 2, 3, 4]));
+    expect(downloaded).toMatchObject({
+      fileName: "reference.png",
+      mime: "image/png",
+      size: 4
+    });
+  });
+
+  it("maps missing storage bytes to a stable download error without leaking keys or paths", async () => {
+    const record = (await createAssetRecord()).record;
+    const storage = createMockAssetAttachmentStorage();
+    const attachment = await uploadAssetAttachment(buildUploadInput(record.id), { userId: currentActorUserId }, { storage });
+    const missingStorage = createMockAssetAttachmentStorage({
+      get: vi.fn(async () => {
+        throw new AssetAttachmentStorageFileNotFoundError();
+      })
+    });
+
+    await expect(downloadAssetAttachmentForActor(attachment.id, { userId: currentActorUserId }, { storage: missingStorage })).rejects.toThrow(
+      "asset_attachment_file_not_found"
+    );
+
+    try {
+      await downloadAssetAttachmentForActor(attachment.id, { userId: currentActorUserId }, { storage: missingStorage });
+    } catch (error) {
+      const message = (error as Error).message;
+
+      expect(message).toBe("asset_attachment_file_not_found");
+      expect(message).not.toContain(attachment.fileId);
+      expect(message).not.toContain(".png");
+      expect(message).not.toContain(storeDir);
+      expect(message).not.toContain(attachmentDir);
+    }
+  });
+
   it("uses the explicit actor when workspace currentUserId differs for upload and delete", async () => {
     const record = (await createAssetRecord()).record;
     await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: "user-creator-b" }));
@@ -190,6 +270,21 @@ describe("asset lock attachment service", () => {
     expect(serialized).not.toContain(".local-data");
     expect(serialized).not.toContain(storeDir);
     expect(serialized).not.toContain(resolve(attachmentDir));
+  });
+
+  it("does not call storage delete when soft deleting attachment metadata", async () => {
+    const record = (await createAssetRecord()).record;
+    const storage = createMockAssetAttachmentStorage();
+    const attachment = await uploadAssetAttachment(buildUploadInput(record.id), { userId: currentActorUserId }, { storage });
+
+    vi.mocked(storage.delete).mockClear();
+    const deleted = await deleteAssetAttachmentForActor(attachment.id, { userId: currentActorUserId }, { storage });
+
+    expect(deleted).toMatchObject({
+      id: attachment.id,
+      status: "deleted"
+    });
+    expect(storage.delete).not.toHaveBeenCalled();
   });
 
   it("allows owner and coordinator deletes but blocks head writer deletes for attachments uploaded by someone else", async () => {
@@ -343,6 +438,15 @@ describe("asset lock attachment service", () => {
     );
   });
 
+  it("rejects local storage keys that attempt path traversal", async () => {
+    const storage = createLocalAssetAttachmentStorage();
+
+    await expect(storage.put({ key: "../asset-att-123e4567-e89b-12d3-a456-426614174000.png", bytes: pngBytes(), mime: "image/png" })).rejects.toThrow(
+      "asset_attachment_file_id_invalid"
+    );
+    await expect(readSavedFileNames()).resolves.toEqual([]);
+  });
+
   it("rejects damaged fileId metadata before resolving a download path", async () => {
     const record = (await createAssetRecord()).record;
     const attachment = await upload(record.id);
@@ -374,6 +478,31 @@ describe("asset lock attachment service", () => {
     const workspace = await getDeliveryImportWorkspace();
     expect(workspace.state.assetAttachments ?? []).toHaveLength(0);
     await expect(readSavedFileNames()).resolves.toEqual([]);
+  });
+
+  it("calls storage delete as compensation if metadata persistence fails", async () => {
+    const record = (await createAssetRecord()).record;
+    const storage = createMockAssetAttachmentStorage();
+
+    await expect(
+      uploadAssetAttachment(
+        buildUploadInput(record.id),
+        { userId: currentActorUserId },
+        {
+          persistMetadata: async () => {
+            throw new Error("forced_metadata_failure");
+          },
+          storage
+        }
+      )
+    ).rejects.toThrow("forced_metadata_failure");
+
+    expect(storage.put).toHaveBeenCalledTimes(1);
+    expect(storage.delete).toHaveBeenCalledTimes(1);
+    expect(storage.delete).toHaveBeenCalledWith({ key: expect.stringMatching(/^asset-att-.*\.png$/) });
+
+    const workspace = await getDeliveryImportWorkspace();
+    expect(workspace.state.assetAttachments ?? []).toHaveLength(0);
   });
 
   it("writes assetAttachments for legacy workspaces without the array", async () => {
@@ -850,6 +979,16 @@ describe("asset lock attachment service", () => {
         assetAttachments
       },
       assetAttachments
+    };
+  }
+
+  function createMockAssetAttachmentStorage(overrides: Partial<AssetAttachmentStorage> = {}) {
+    return {
+      makeKey: vi.fn(({ fileId, extension }: { fileId: string; extension: string }) => `${fileId}${extension.toLowerCase()}`),
+      put: vi.fn(async () => {}),
+      get: vi.fn(async () => pngBytes()),
+      delete: vi.fn(async () => {}),
+      ...overrides
     };
   }
 

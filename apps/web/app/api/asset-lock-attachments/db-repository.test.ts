@@ -2,8 +2,10 @@ import { seedWorkspace, type AssetAttachment, type AssetLockRecord } from "@aigc
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { mapAssetLockRecordToDbRows } from "../asset-lock-records/db-repository";
-import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import { readDbAuthScopeSnapshot } from "../auth-scope/db-repository";
+import { readDeliveryImportLocalWorkspaceState, readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { readDbDeliveryPackageSnapshot } from "../delivery-packages/db-repository";
+import { readDbPublishReadModelSnapshot } from "../publish-read-model/db-repository";
 import {
   createDbAssetAttachmentRepository,
   mapAssetAttachmentRows,
@@ -16,11 +18,20 @@ vi.mock("../../../db/runtime", () => ({
 }));
 
 vi.mock("../delivery-import-jobs/persistence", () => ({
+  readDeliveryImportLocalWorkspaceState: vi.fn(),
   readDeliveryImportWorkspace: vi.fn()
 }));
 
 vi.mock("../delivery-packages/db-repository", () => ({
   readDbDeliveryPackageSnapshot: vi.fn()
+}));
+
+vi.mock("../auth-scope/db-repository", () => ({
+  readDbAuthScopeSnapshot: vi.fn()
+}));
+
+vi.mock("../publish-read-model/db-repository", () => ({
+  readDbPublishReadModelSnapshot: vi.fn()
 }));
 
 describe("asset lock attachment DB repository mappers", () => {
@@ -143,10 +154,24 @@ describe("asset lock attachment DB repository writes", () => {
       deliveryPackages: seedWorkspace.deliveryPackages,
       deliveryPackageEpisodes: seedWorkspace.deliveryPackageEpisodes
     });
+    vi.mocked(readDbAuthScopeSnapshot).mockResolvedValue({
+      users: seedWorkspace.users,
+      projects: seedWorkspace.projects,
+      members: seedWorkspace.members,
+      memberPermissions: seedWorkspace.memberPermissions,
+      episodes: seedWorkspace.episodes,
+      assignments: seedWorkspace.assignments
+    });
+    vi.mocked(readDbPublishReadModelSnapshot).mockResolvedValue({
+      episodeRevisions: seedWorkspace.episodeRevisions,
+      episodeCurrents: seedWorkspace.episodeCurrents,
+      notifications: seedWorkspace.notifications
+    });
     vi.mocked(readDeliveryImportWorkspace).mockResolvedValue({
       state: seedWorkspace,
       deliveryParseIssuesByPackageId: {}
     });
+    vi.mocked(readDeliveryImportLocalWorkspaceState).mockResolvedValue(seedWorkspace);
   });
 
   it("reads DB asset lock records before overlaying DB attachment metadata", async () => {
@@ -181,6 +206,11 @@ describe("asset lock attachment DB repository writes", () => {
       },
       deliveryParseIssuesByPackageId: {}
     });
+    vi.mocked(readDeliveryImportLocalWorkspaceState).mockResolvedValue({
+      ...seedWorkspace,
+      assetLockRecords: [],
+      assetAttachments: [staleLocal]
+    });
     mockRuntime(mockDb.db);
 
     const snapshot = await createDbAssetAttachmentRepository().read();
@@ -189,7 +219,7 @@ describe("asset lock attachment DB repository writes", () => {
     expect(snapshot.assetAttachments).toEqual([dbAttachment]);
     expect(snapshot.state.assetAttachments).toEqual([dbAttachment]);
     expect(snapshot.state.assetAttachments).not.toContainEqual(staleLocal);
-    expect(readDeliveryImportWorkspace).toHaveBeenCalledTimes(1);
+    expect(readDeliveryImportLocalWorkspaceState).toHaveBeenCalledTimes(1);
   });
 
   it("inserts attachment metadata and returns the committed row", async () => {
