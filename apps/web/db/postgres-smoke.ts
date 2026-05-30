@@ -16,10 +16,7 @@ import {
 import { getAssetDecisionTimelineProjection } from "../app/api/asset-decision-timeline/service";
 import { createDeliveryImportJob, getDeliveryImportWorkspace } from "../app/api/delivery-import-jobs/service";
 import { readDeliveryImportLocalWorkspaceState } from "../app/api/delivery-import-jobs/persistence";
-import {
-  readDbDeliveryPackageSnapshot,
-  updateDbDeliveryPackage
-} from "../app/api/delivery-packages/db-repository";
+import { readDbDeliveryPackageSnapshot } from "../app/api/delivery-packages/db-repository";
 import { mutateDeliveryPackage } from "../app/api/delivery-packages/service";
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -74,10 +71,10 @@ describe("real Postgres asset lock smoke", () => {
     }
   });
 
-  it("generates, creates, binds, uploads, deletes, projects, locks, and cleans asset data through Postgres", async () => {
+  it("imports, publishes, generates, creates, binds, uploads, deletes, projects, locks, and cleans data through Postgres", async () => {
     deliveryPackageId = await createSmokeDeliveryImportDraft();
     await verifySmokeDeliveryPackageBasicMutations(deliveryPackageId);
-    await markDeliveryPackagePublishedForAssetGeneration(deliveryPackageId);
+    await publishSmokeDeliveryPackage(deliveryPackageId);
 
     const generated = await mutateAssetLockRecord(
       {
@@ -281,9 +278,12 @@ describe("real Postgres asset lock smoke", () => {
       assignments: 0,
       deliveryPackageEpisodes: 0,
       deliveryPackages: 0,
+      episodeCurrents: 0,
+      episodeRevisions: 0,
       episodes: 0,
       memberPermissions: 0,
       members: 0,
+      notifications: 0,
       projects: 0,
       records: 0,
       recordEpisodes: 0,
@@ -328,6 +328,18 @@ async function cleanupSmokeRows() {
     await runtime.pool.query(
       "delete from asset_lock_records where project_id = $1 or delivery_package_id like $2",
       [projectId, `${deliveryPackagePrefix}%`]
+    );
+    await runtime.pool.query(
+      "delete from notifications where project_id = $1",
+      [projectId]
+    );
+    await runtime.pool.query(
+      "delete from episode_currents where project_id = $1",
+      [projectId]
+    );
+    await runtime.pool.query(
+      "delete from episode_revisions where project_id = $1",
+      [projectId]
     );
     await runtime.pool.query(
       `delete from delivery_package_episodes
@@ -382,10 +394,13 @@ async function countSmokeRows() {
       records,
       deliveryPackageEpisodes,
       deliveryPackages,
+      episodeCurrents,
+      episodeRevisions,
       assignments,
       episodes,
       memberPermissions,
       members,
+      notifications,
       projects,
       users
     ] = await Promise.all([
@@ -405,10 +420,13 @@ async function countSmokeRows() {
          where delivery_package_id in (select id from delivery_packages where project_id = $1)`
       ),
       countRows(runtime, "select count(*)::int as count from delivery_packages where project_id = $1"),
+      countRows(runtime, "select count(*)::int as count from episode_currents where project_id = $1"),
+      countRows(runtime, "select count(*)::int as count from episode_revisions where project_id = $1"),
       countRows(runtime, "select count(*)::int as count from episode_assignments where id like 'smoke-assignment-%'", []),
       countRows(runtime, "select count(*)::int as count from episodes where id like 'smoke-episode-%'", []),
       countRows(runtime, "select count(*)::int as count from project_member_permissions where id like 'smoke-permission-%'", []),
       countRows(runtime, "select count(*)::int as count from project_members where id like 'smoke-member-%'", []),
+      countRows(runtime, "select count(*)::int as count from notifications where project_id = $1"),
       countRows(runtime, "select count(*)::int as count from projects where id = $1", [projectId]),
       countRows(runtime, "select count(*)::int as count from users where id in ($1, $2, $3)", [
         "user-head-writer",
@@ -422,9 +440,12 @@ async function countSmokeRows() {
       assignments,
       deliveryPackageEpisodes,
       deliveryPackages,
+      episodeCurrents,
+      episodeRevisions,
       episodes,
       memberPermissions,
       members,
+      notifications,
       projects,
       records,
       recordEpisodes,
@@ -491,7 +512,7 @@ async function seedSmokeAuthScope() {
          asset_todo_count
        )
        values
-         ('smoke-episode-jc-1', $1, 1, 'Smoke episode 1', 'key_update', true, 0, 0),
+         ('smoke-episode-jc-1', $1, 1, 'Smoke episode 1', 'not_started', false, 0, 0),
          ('smoke-episode-jc-2', $1, 2, 'Smoke episode 2', 'in_progress', false, 0, 0)`,
       [projectId]
     );
@@ -640,24 +661,85 @@ async function verifySmokeDeliveryPackageBasicMutations(importedDeliveryPackageI
   await expectLocalDeliveryPackageStateToStayCanonical();
 }
 
-async function markDeliveryPackagePublishedForAssetGeneration(importedDeliveryPackageId: string) {
-  const dbSnapshot = await readDbDeliveryPackageSnapshot();
-  const submittedPackage = dbSnapshot.deliveryPackages.find((item) => item.id === importedDeliveryPackageId);
+async function publishSmokeDeliveryPackage(importedDeliveryPackageId: string) {
+  const beforePublishWorkspace = await getDeliveryImportWorkspace();
+  const beforePublishPackage = beforePublishWorkspace.state.deliveryPackages.find(
+    (item) => item.id === importedDeliveryPackageId
+  );
+  const beforePublishEpisode = beforePublishWorkspace.state.episodes.find((episode) => episode.id === "smoke-episode-jc-1");
+  const beforeRevisionIds = new Set(beforePublishWorkspace.state.episodeRevisions.map((revision) => revision.id));
+  const beforeNotificationIds = new Set(beforePublishWorkspace.state.notifications.map((notification) => notification.id));
 
-  expect(submittedPackage).toMatchObject({
+  expect(beforePublishPackage).toMatchObject({
     status: "pending_review",
     submittedByUserId: "user-head-writer"
   });
-  if (!submittedPackage) {
-    throw new Error("smoke_delivery_import_package_missing");
-  }
-
-  await updateDbDeliveryPackage({
-    ...submittedPackage,
-    status: "published",
-    reviewedByUserId: "user-owner",
-    publishedAt: now
+  expect(beforePublishEpisode).toMatchObject({
+    productionStatus: "not_started",
+    hasUnreadKeyChange: false
   });
+
+  const publishedSnapshot = await mutateDeliveryPackage({
+    action: "publish",
+    deliveryPackageId: importedDeliveryPackageId,
+    actorUserId: "user-owner"
+  });
+  const state = publishedSnapshot.state;
+  const publishedPackage = state.deliveryPackages.find((item) => item.id === importedDeliveryPackageId);
+  const newRevisions = state.episodeRevisions.filter(
+    (revision) => revision.deliveryPackageId === importedDeliveryPackageId && !beforeRevisionIds.has(revision.id)
+  );
+  const newNotifications = state.notifications.filter((notification) => !beforeNotificationIds.has(notification.id));
+  const touchedEpisode = state.episodes.find((episode) => episode.id === "smoke-episode-jc-1");
+  const untouchedEpisode = state.episodes.find((episode) => episode.id === "smoke-episode-jc-2");
+  const current = state.episodeCurrents.find((item) => item.episodeId === "smoke-episode-jc-1");
+
+  expect(publishedPackage).toMatchObject({
+    status: "published",
+    reviewedByUserId: "user-owner"
+  });
+  expect(publishedPackage?.publishedAt).toBeTruthy();
+  expect(state.episodeRevisions).toHaveLength(beforePublishWorkspace.state.episodeRevisions.length + 1);
+  expect(newRevisions).toHaveLength(1);
+  expect(newRevisions[0]).toMatchObject({
+    projectId,
+    episodeId: "smoke-episode-jc-1",
+    episodeNo: 1,
+    deliveryPackageId: importedDeliveryPackageId,
+    revisionNo: 1
+  });
+  expect(newRevisions[0]?.content).toContain("Smoke Mine Lift source binding line.");
+  expect(state.episodeCurrents).toHaveLength(beforePublishWorkspace.state.episodeCurrents.length + 1);
+  expect(current).toEqual(
+    expect.objectContaining({
+      projectId,
+      episodeId: "smoke-episode-jc-1",
+      currentRevisionId: newRevisions[0]?.id
+    })
+  );
+  expect(touchedEpisode).toMatchObject({
+    productionStatus: "key_update",
+    hasUnreadKeyChange: true
+  });
+  expect(untouchedEpisode).toMatchObject({
+    productionStatus: "in_progress",
+    hasUnreadKeyChange: false
+  });
+  expect(state.notifications).toHaveLength(beforePublishWorkspace.state.notifications.length + 2);
+  expect(newNotifications.map((notification) => notification.recipientId).sort()).toEqual([
+    "user-creator-a",
+    "user-head-writer"
+  ]);
+  expect(newNotifications).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        projectId,
+        episodeId: "smoke-episode-jc-1",
+        type: "key_change"
+      })
+    ])
+  );
+  await expectLocalDeliveryPackageStateToStayCanonical();
 }
 
 async function expectLocalDeliveryPackageStateToStayCanonical() {
