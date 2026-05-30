@@ -5,18 +5,28 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 14:42:25 +08:00`.
+Timestamp: `2026-05-30 14:57:30 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `44bd93b Add DB lifecycle updates for asset lock records`.
-- Latest product/test code commit on `main`: `44bd93b Add DB lifecycle updates for asset lock records`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-record-db-lifecycle-updates`.
-- Remote sync pending for this ledger update; `main@3d54e9c` was the last pushed checkpoint before the lifecycle update merge.
+- Latest recorded `main` commit before this ledger update: `37ce1dc Fail closed for DB repository env gates`.
+- Latest product/test code commit on `main`: `37ce1dc Fail closed for DB repository env gates`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-db-env-fail-closed`.
+- Remote sync pending for this ledger update; `main@3663479` was the last pushed checkpoint before the fail-closed merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `37ce1dc Fail closed for DB repository env gates`
+  - Records repository now fails closed when `ASSET_LOCK_RECORDS_REPOSITORY=db` is set without `DATABASE_URL`, raising `asset_lock_record_database_url_required` instead of falling back to local workspace state.
+  - Attachments repository now fails closed when `ASSET_LOCK_ATTACHMENTS_REPOSITORY=db` is requested without records DB mode and `DATABASE_URL`, preventing record/attachment storage split-brain.
+  - Default local prototype behavior remains unchanged when DB env flags are unset.
+  - Keeps the slice scoped: no schema/migration, no DB runtime change, no Postgres smoke, no `prepare_demo`/`generate_from_package`, no UI, and no browser QA.
+  - Fast-forward merged `codex/m3-db-env-fail-closed` into `main` after AS review found no P0/P1/P2/P3.
+  - Validation:
+    - `git diff --check main..HEAD`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/repository.test.ts app/api/asset-lock-attachments/repository.test.ts app/api/asset-lock-records/service.test.ts`: passed, 3 files / 39 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
 - `44bd93b Add DB lifecycle updates for asset lock records`
   - Adds DB-mode `updateAssetLockRecord` support for existing record lifecycle updates.
   - DB mode now supports `writer_confirm`, `production_confirm`, `needs_info`, `dispute`, and `final_lock`.
