@@ -8,6 +8,7 @@ import {
   mapDeliveryPackageRows,
   mapDeliveryPackageToDbInsertRow,
   readDbDeliveryPackageSnapshot,
+  updateDbDeliveryPackageEpisodeConfirmations,
   updateDbDeliveryPackage,
   type DeliveryPackageDbRow,
   type DeliveryPackageEpisodeDbRow
@@ -317,6 +318,40 @@ describe("delivery package DB repository writes", () => {
     expect(mockDb.returning).toHaveBeenCalledTimes(1);
   });
 
+  it("updates episode confirmation flags inside one transaction and returns the refreshed snapshot", async () => {
+    const deliveryPackage = buildDeliveryPackage({ id: "delivery-confirmation-update" });
+    const refreshedEpisodes = [
+      buildDeliveryPackageEpisode({
+        id: "delivery-confirmation-update-episode-1",
+        deliveryPackageId: deliveryPackage.id,
+        episodeNo: 1,
+        isConfirmedChange: false
+      }),
+      buildDeliveryPackageEpisode({
+        id: "delivery-confirmation-update-episode-2",
+        deliveryPackageId: deliveryPackage.id,
+        episodeNo: 2,
+        isConfirmedChange: true
+      })
+    ];
+    const mockDb = createMockDb([[toDeliveryPackageDbRow(deliveryPackage)], refreshedEpisodes.map(toDeliveryPackageEpisodeDbRow)]);
+    const mockTx = createMockEpisodeConfirmationUpdateTx([[{ id: refreshedEpisodes[0].id }], [{ id: refreshedEpisodes[1].id }]]);
+    const transaction = vi.fn(async (callback: (tx: typeof mockTx.tx) => Promise<void>) => callback(mockTx.tx));
+    mockRuntime({ ...mockDb.db, transaction });
+
+    const snapshot = await updateDbDeliveryPackageEpisodeConfirmations(deliveryPackage.id, refreshedEpisodes);
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(mockTx.update).toHaveBeenCalledTimes(2);
+    expect(mockTx.update).toHaveBeenCalledWith(deliveryPackageEpisodes);
+    expect(mockTx.set).toHaveBeenNthCalledWith(1, { isConfirmedChange: false });
+    expect(mockTx.set).toHaveBeenNthCalledWith(2, { isConfirmedChange: true });
+    expect(mockTx.where).toHaveBeenCalledTimes(2);
+    expect(mockTx.returning).toHaveBeenCalledTimes(2);
+    expect(snapshot.deliveryPackages).toEqual([deliveryPackage]);
+    expect(snapshot.deliveryPackageEpisodes).toEqual(refreshedEpisodes);
+  });
+
   it("throws a stable error when update touches no rows", async () => {
     const mockDb = createMockUpdateDb([]);
     mockRuntime(mockDb.db);
@@ -324,6 +359,20 @@ describe("delivery package DB repository writes", () => {
     await expect(updateDbDeliveryPackage(buildDeliveryPackage({ id: "delivery-missing" }))).rejects.toThrow(
       "delivery_package_not_found"
     );
+  });
+
+  it("throws a stable error when an episode confirmation update touches no rows", async () => {
+    const select = vi.fn();
+    const mockTx = createMockEpisodeConfirmationUpdateTx([[]]);
+    const transaction = vi.fn(async (callback: (tx: typeof mockTx.tx) => Promise<void>) => callback(mockTx.tx));
+    mockRuntime({ select, transaction });
+
+    await expect(
+      updateDbDeliveryPackageEpisodeConfirmations("delivery-missing", [
+        { id: "delivery-missing-episode-1", isConfirmedChange: true }
+      ])
+    ).rejects.toThrow("delivery_package_episode_not_found");
+    expect(select).not.toHaveBeenCalled();
   });
 
   it("does not swallow unique conflicts during insert", async () => {
@@ -388,6 +437,23 @@ function createMockUpdateDb(updatedRows: DeliveryPackageDbRow[]) {
 
   return {
     db,
+    update,
+    set,
+    where,
+    returning
+  };
+}
+
+function createMockEpisodeConfirmationUpdateTx(updatedRowsByCall: unknown[][]) {
+  const remainingRows = [...updatedRowsByCall];
+  const returning = vi.fn(async () => remainingRows.shift() ?? []);
+  const where = vi.fn(() => ({ returning }));
+  const set = vi.fn(() => ({ where }));
+  const update = vi.fn(() => ({ set }));
+  const tx = { update };
+
+  return {
+    tx,
     update,
     set,
     where,

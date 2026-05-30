@@ -1,5 +1,5 @@
 import type { DeliveryPackage, DeliveryPackageEpisode } from "@aigc/domain";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { deliveryPackageEpisodes, deliveryPackages } from "../../../db/schema";
 
@@ -70,6 +70,34 @@ export async function updateDbDeliveryPackage(deliveryPackage: DeliveryPackage):
   }
 
   return updatedPackage;
+}
+
+export async function updateDbDeliveryPackageEpisodeConfirmations(
+  deliveryPackageId: string,
+  episodes: Pick<DeliveryPackageEpisode, "id" | "isConfirmedChange">[]
+): Promise<DeliveryPackageDbSnapshot> {
+  const { db } = getAssetLockDbRuntime();
+
+  await db.transaction(async (tx) => {
+    for (const episode of episodes) {
+      const updatedRows = await tx
+        .update(deliveryPackageEpisodes)
+        .set({ isConfirmedChange: episode.isConfirmedChange })
+        .where(
+          and(
+            eq(deliveryPackageEpisodes.id, episode.id),
+            eq(deliveryPackageEpisodes.deliveryPackageId, deliveryPackageId)
+          )
+        )
+        .returning({ id: deliveryPackageEpisodes.id });
+
+      if (updatedRows.length === 0) {
+        throw new Error("delivery_package_episode_not_found");
+      }
+    }
+  });
+
+  return readDbDeliveryPackageSnapshot();
 }
 
 export function mapDeliveryPackageRows(
