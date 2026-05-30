@@ -54,6 +54,7 @@ describe("real Postgres asset lock smoke", () => {
 
     await applyMigrations();
     await cleanupSmokeRows();
+    await seedSmokeAuthScope();
     await seedSmokeDeliveryPackages();
     await writeSmokeWorkspaceStore();
   });
@@ -268,11 +269,17 @@ describe("real Postgres asset lock smoke", () => {
     await cleanupSmokeRows();
     await expect(countSmokeRows()).resolves.toEqual({
       attachments: 0,
+      assignments: 0,
       deliveryPackageEpisodes: 0,
       deliveryPackages: 0,
+      episodes: 0,
+      memberPermissions: 0,
+      members: 0,
+      projects: 0,
       records: 0,
       recordEpisodes: 0,
-      sourceBindings: 0
+      sourceBindings: 0,
+      users: 0
     });
   });
 });
@@ -321,6 +328,26 @@ async function cleanupSmokeRows() {
       "delete from delivery_packages where id like $1",
       [`${deliveryPackagePrefix}%`]
     );
+    await runtime.pool.query(
+      "delete from episode_assignments where id like 'smoke-assignment-%'"
+    );
+    await runtime.pool.query(
+      "delete from episodes where id like 'smoke-episode-%'"
+    );
+    await runtime.pool.query(
+      "delete from project_member_permissions where id like 'smoke-permission-%'"
+    );
+    await runtime.pool.query(
+      "delete from project_members where id like 'smoke-member-%'"
+    );
+    await runtime.pool.query(
+      "delete from projects where id = $1",
+      [projectId]
+    );
+    await runtime.pool.query(
+      "delete from users where id in ($1, $2, $3)",
+      ["user-head-writer", "user-owner", "user-creator-a"]
+    );
     await runtime.pool.query("commit");
   } catch (error) {
     await runtime.pool.query("rollback").catch(() => undefined);
@@ -337,7 +364,20 @@ async function countSmokeRows() {
   const runtime = createAssetLockDbRuntime(testDatabaseUrl);
 
   try {
-    const [attachments, sourceBindings, recordEpisodes, records, deliveryPackageEpisodes, deliveryPackages] = await Promise.all([
+    const [
+      attachments,
+      sourceBindings,
+      recordEpisodes,
+      records,
+      deliveryPackageEpisodes,
+      deliveryPackages,
+      assignments,
+      episodes,
+      memberPermissions,
+      members,
+      projects,
+      users
+    ] = await Promise.all([
       countRows(runtime, "select count(*)::int as count from asset_attachments where delivery_package_id like $1"),
       countRows(runtime, "select count(*)::int as count from script_source_bindings where delivery_package_id like $1"),
       countRows(
@@ -349,26 +389,112 @@ async function countSmokeRows() {
       ),
       countRows(runtime, "select count(*)::int as count from asset_lock_records where delivery_package_id like $1"),
       countRows(runtime, "select count(*)::int as count from delivery_package_episodes where delivery_package_id like $1"),
-      countRows(runtime, "select count(*)::int as count from delivery_packages where id like $1")
+      countRows(runtime, "select count(*)::int as count from delivery_packages where id like $1"),
+      countRows(runtime, "select count(*)::int as count from episode_assignments where id like 'smoke-assignment-%'", []),
+      countRows(runtime, "select count(*)::int as count from episodes where id like 'smoke-episode-%'", []),
+      countRows(runtime, "select count(*)::int as count from project_member_permissions where id like 'smoke-permission-%'", []),
+      countRows(runtime, "select count(*)::int as count from project_members where id like 'smoke-member-%'", []),
+      countRows(runtime, "select count(*)::int as count from projects where id = $1", [projectId]),
+      countRows(runtime, "select count(*)::int as count from users where id in ($1, $2, $3)", [
+        "user-head-writer",
+        "user-owner",
+        "user-creator-a"
+      ])
     ]);
 
     return {
       attachments,
+      assignments,
       deliveryPackageEpisodes,
       deliveryPackages,
+      episodes,
+      memberPermissions,
+      members,
+      projects,
       records,
       recordEpisodes,
-      sourceBindings
+      sourceBindings,
+      users
     };
   } finally {
     await runtime.pool.end();
   }
 }
 
-async function countRows(runtime: ReturnType<typeof createAssetLockDbRuntime>, sql: string) {
-  const result = await runtime.pool.query<{ count: number }>(sql, [`${deliveryPackagePrefix}%`]);
+async function countRows(
+  runtime: ReturnType<typeof createAssetLockDbRuntime>,
+  sql: string,
+  params: unknown[] = [`${deliveryPackagePrefix}%`]
+) {
+  const result = await runtime.pool.query<{ count: number }>(sql, params);
 
   return result.rows[0]?.count ?? 0;
+}
+
+async function seedSmokeAuthScope() {
+  const runtime = createAssetLockDbRuntime(testDatabaseUrl);
+
+  try {
+    await runtime.pool.query("begin");
+    await runtime.pool.query(
+      `insert into users (id, name, default_role, avatar_tone)
+       values
+         ('user-head-writer', 'Smoke Head Writer', 'head_writer', 'violet'),
+         ('user-owner', 'Smoke Owner', 'owner', 'amber'),
+         ('user-creator-a', 'Smoke Creator A', 'creator', 'cyan')`
+    );
+    await runtime.pool.query(
+      `insert into projects (id, name, code, episode_count, status, created_at)
+       values ($1, 'Smoke Jincheng', 'SMK-JC', 2, 'active', $2)`,
+      [projectId, now]
+    );
+    await runtime.pool.query(
+      `insert into project_members (id, project_id, user_id, role, created_at)
+       values
+         ('smoke-member-head-writer', $1, 'user-head-writer', 'head_writer', $2),
+         ('smoke-member-owner', $1, 'user-owner', 'owner', $2),
+         ('smoke-member-creator-a', $1, 'user-creator-a', 'creator', $2)`,
+      [projectId, now]
+    );
+    await runtime.pool.query(
+      `insert into project_member_permissions (id, project_id, user_id, permission, granted_at)
+       values
+         ('smoke-permission-head-review-assets', $1, 'user-head-writer', 'canReviewAssets', $2),
+         ('smoke-permission-owner-overview', $1, 'user-owner', 'canViewProjectOverview', $2),
+         ('smoke-permission-creator-assigned', $1, 'user-creator-a', 'canViewAssignedEpisodes', $2)`,
+      [projectId, now]
+    );
+    await runtime.pool.query(
+      `insert into episodes (
+         id,
+         project_id,
+         episode_no,
+         title,
+         production_status,
+         has_unread_key_change,
+         open_issue_count,
+         asset_todo_count
+       )
+       values
+         ('smoke-episode-jc-1', $1, 1, 'Smoke episode 1', 'key_update', true, 0, 0),
+         ('smoke-episode-jc-2', $1, 2, 'Smoke episode 2', 'in_progress', false, 0, 0)`,
+      [projectId]
+    );
+    await runtime.pool.query(
+      `insert into episode_assignments (id, episode_id, user_id, responsibility, created_at)
+       values
+         ('smoke-assignment-head-writer-1', 'smoke-episode-jc-1', 'user-head-writer', 'writer', $1),
+         ('smoke-assignment-head-writer-2', 'smoke-episode-jc-2', 'user-head-writer', 'writer', $1),
+         ('smoke-assignment-creator-a-1', 'smoke-episode-jc-1', 'user-creator-a', 'creator', $1)`,
+      [now]
+    );
+    await runtime.pool.query("commit");
+  } catch (error) {
+    await runtime.pool.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    await runtime.pool.end();
+  }
 }
 
 async function seedSmokeDeliveryPackages() {
@@ -452,6 +578,12 @@ function buildSmokeWorkspace(): WorkspaceState {
   return {
     ...seedWorkspace,
     currentUserId: "user-owner",
+    users: [],
+    projects: [],
+    members: [],
+    memberPermissions: [],
+    episodes: [],
+    assignments: [],
     assetLockRecords: [],
     assetAttachments: [],
     scriptSourceBindings: [],

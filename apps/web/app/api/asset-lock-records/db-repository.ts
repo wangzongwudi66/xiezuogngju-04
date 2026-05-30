@@ -2,6 +2,7 @@ import type { AssetLockRecord, ScriptSourceBinding, WorkspaceState } from "@aigc
 import { asc, eq } from "drizzle-orm";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { assetLockRecordEpisodes, assetLockRecords, scriptSourceBindings } from "../../../db/schema";
+import { readDbAuthScopeSnapshot, type AuthScopeDbSnapshot } from "../auth-scope/db-repository";
 import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { readDbDeliveryPackageSnapshot } from "../delivery-packages/db-repository";
 import { composeDbWorkspaceSnapshotOverlay } from "../workspace-snapshot";
@@ -104,9 +105,9 @@ async function createAssetLockRecordsInDb(records: AssetLockRecord[]) {
 }
 
 export async function readDbAssetLockRecordRepositorySnapshot() {
-  const workspace = await readDeliveryImportWorkspace();
   const { db } = getAssetLockDbRuntime();
-  const [recordRows, episodeRows, sourceBindingRows, deliveryPackageSnapshot] = await Promise.all([
+  const [workspace, recordRows, episodeRows, sourceBindingRows, authScopeSnapshot, deliveryPackageSnapshot] = await Promise.all([
+    readDeliveryImportWorkspace(),
     db.select().from(assetLockRecords).orderBy(asc(assetLockRecords.createdAt), asc(assetLockRecords.id)),
     db
       .select()
@@ -124,6 +125,7 @@ export async function readDbAssetLockRecordRepositorySnapshot() {
         asc(scriptSourceBindings.endLine),
         asc(scriptSourceBindings.id)
       ),
+    readDbAuthScopeSnapshot(),
     readDbDeliveryPackageSnapshot()
   ]);
 
@@ -131,6 +133,7 @@ export async function readDbAssetLockRecordRepositorySnapshot() {
     workspace.state,
     mapAssetLockRecordRows(recordRows, episodeRows),
     mapScriptSourceBindingRows(sourceBindingRows),
+    authScopeSnapshot,
     deliveryPackageSnapshot
   );
 }
@@ -268,12 +271,19 @@ function toDbRepositorySnapshot(
   state: WorkspaceState,
   records: AssetLockRecord[],
   sourceBindings: ScriptSourceBinding[],
+  authScopeSnapshot: AuthScopeDbSnapshot,
   deliveryPackageSnapshot: {
     deliveryPackages: WorkspaceState["deliveryPackages"];
     deliveryPackageEpisodes: WorkspaceState["deliveryPackageEpisodes"];
   }
 ) {
   const nextState = composeDbWorkspaceSnapshotOverlay(state, {
+    users: authScopeSnapshot.users,
+    projects: authScopeSnapshot.projects,
+    members: authScopeSnapshot.members,
+    memberPermissions: authScopeSnapshot.memberPermissions,
+    episodes: authScopeSnapshot.episodes,
+    assignments: authScopeSnapshot.assignments,
     assetLockRecords: records,
     scriptSourceBindings: sourceBindings,
     deliveryPackages: deliveryPackageSnapshot.deliveryPackages,

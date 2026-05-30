@@ -23,7 +23,7 @@ export async function requireWorkspaceRequestActor(errorMessage: string) {
 export function resolveWorkspaceRequestActorFromState(state: WorkspaceState): WorkspaceRequestActor | null {
   const userId = state.currentUserId?.trim();
 
-  if (!userId || !state.users.some((user) => user.id === userId)) {
+  if (!userId) {
     return null;
   }
 

@@ -3,10 +3,12 @@ import {
   type AssetLockRecord,
   type DeliveryPackage,
   type DeliveryPackageEpisode,
-  type ScriptSourceBinding
+  type ScriptSourceBinding,
+  type WorkspaceState
 } from "@aigc/domain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
+import { readDbAuthScopeSnapshot } from "../auth-scope/db-repository";
 import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { readDbDeliveryPackageSnapshot } from "../delivery-packages/db-repository";
 import {
@@ -29,11 +31,23 @@ vi.mock("../delivery-import-jobs/persistence", () => ({
   readDeliveryImportWorkspace: vi.fn()
 }));
 
+vi.mock("../auth-scope/db-repository", () => ({
+  readDbAuthScopeSnapshot: vi.fn()
+}));
+
 vi.mock("../delivery-packages/db-repository", () => ({
   readDbDeliveryPackageSnapshot: vi.fn()
 }));
 
 beforeEach(() => {
+  vi.mocked(readDbAuthScopeSnapshot).mockResolvedValue({
+    users: seedWorkspace.users,
+    projects: seedWorkspace.projects,
+    members: seedWorkspace.members,
+    memberPermissions: seedWorkspace.memberPermissions,
+    episodes: seedWorkspace.episodes,
+    assignments: seedWorkspace.assignments
+  });
   vi.mocked(readDbDeliveryPackageSnapshot).mockResolvedValue({
     deliveryPackages: seedWorkspace.deliveryPackages,
     deliveryPackageEpisodes: seedWorkspace.deliveryPackageEpisodes
@@ -252,10 +266,100 @@ describe("asset lock record DB repository snapshot overlay", () => {
     vi.clearAllMocks();
   });
 
-  it("overlays DB-owned arrays while preserving local workspace-only data", async () => {
+  it("overlays DB-owned arrays while preserving local workspace-only data and currentUserId", async () => {
     const staleLocalRecord = buildRecord({ id: "asset-lock-local-stale", assetName: "Local Stale Lift" });
     const dbRecord = buildRecord({ id: "asset-lock-db", assetName: "DB Mine Lift", episodeNos: [2] });
     const dbRecordRows = mapAssetLockRecordToDbRows(dbRecord);
+    const staleLocalUser: WorkspaceState["users"][number] = {
+      id: "user-local-stale",
+      name: "Local Stale User",
+      defaultRole: "writer",
+      avatarTone: "gray"
+    };
+    const dbUser: WorkspaceState["users"][number] = {
+      id: "user-db-session",
+      name: "DB Session User",
+      defaultRole: "head_writer",
+      avatarTone: "violet"
+    };
+    const staleLocalProject: WorkspaceState["projects"][number] = {
+      id: "project-local-stale",
+      name: "Local Stale",
+      code: "LS",
+      episodeCount: 1,
+      status: "active",
+      createdAt: "2026-05-28T00:00:00.000Z"
+    };
+    const dbProject: WorkspaceState["projects"][number] = {
+      id: "project-db",
+      name: "DB Project",
+      code: "DB",
+      episodeCount: 2,
+      status: "active",
+      createdAt: "2026-05-29T00:00:00.000Z"
+    };
+    const staleLocalMember: WorkspaceState["members"][number] = {
+      id: "member-local-stale",
+      projectId: staleLocalProject.id,
+      userId: staleLocalUser.id,
+      role: "writer",
+      createdAt: "2026-05-28T00:01:00.000Z"
+    };
+    const dbMember: WorkspaceState["members"][number] = {
+      id: "member-db-session",
+      projectId: dbProject.id,
+      userId: dbUser.id,
+      role: "head_writer",
+      createdAt: "2026-05-29T00:01:00.000Z"
+    };
+    const staleLocalPermission: WorkspaceState["memberPermissions"][number] = {
+      id: "permission-local-stale",
+      projectId: staleLocalProject.id,
+      userId: staleLocalUser.id,
+      permission: "canViewAssignedEpisodes",
+      grantedAt: "2026-05-28T00:02:00.000Z"
+    };
+    const dbPermission: WorkspaceState["memberPermissions"][number] = {
+      id: "permission-db-session",
+      projectId: dbProject.id,
+      userId: dbUser.id,
+      permission: "canReviewAssets",
+      grantedAt: "2026-05-29T00:02:00.000Z"
+    };
+    const staleLocalEpisode: WorkspaceState["episodes"][number] = {
+      id: "episode-local-stale-1",
+      projectId: staleLocalProject.id,
+      episodeNo: 1,
+      title: "Local stale episode",
+      productionStatus: "not_started",
+      hasUnreadKeyChange: false,
+      openIssueCount: 0,
+      assetTodoCount: 0
+    };
+    const dbEpisode: WorkspaceState["episodes"][number] = {
+      id: "episode-db-2",
+      projectId: dbProject.id,
+      episodeNo: 2,
+      title: "DB episode",
+      productionStatus: "key_update",
+      hasUnreadKeyChange: true,
+      openIssueCount: 1,
+      assetTodoCount: 2
+    };
+    const staleLocalAssignment: WorkspaceState["assignments"][number] = {
+      id: "assignment-local-stale",
+      episodeId: staleLocalEpisode.id,
+      userId: staleLocalUser.id,
+      responsibility: "writer",
+      createdAt: "2026-05-28T00:03:00.000Z"
+    };
+    const dbAssignment: WorkspaceState["assignments"][number] = {
+      id: "assignment-db-session",
+      episodeId: dbEpisode.id,
+      userId: dbUser.id,
+      responsibility: "writer",
+      createdAt: "2026-05-29T00:03:00.000Z"
+    };
     const staleLocalBinding: ScriptSourceBinding = {
       id: "source-binding-local-stale",
       projectId: "project-jincheng",
@@ -295,7 +399,13 @@ describe("asset lock record DB repository snapshot overlay", () => {
     });
     const localState = {
       ...seedWorkspace,
-      currentUserId: "user-head-writer",
+      currentUserId: "user-db-session",
+      users: [staleLocalUser],
+      projects: [staleLocalProject],
+      members: [staleLocalMember],
+      memberPermissions: [staleLocalPermission],
+      episodes: [staleLocalEpisode],
+      assignments: [staleLocalAssignment],
       assetLockRecords: [staleLocalRecord],
       scriptSourceBindings: [staleLocalBinding],
       deliveryPackages: [staleLocalPackage],
@@ -312,6 +422,14 @@ describe("asset lock record DB repository snapshot overlay", () => {
       deliveryPackages: [dbPackage],
       deliveryPackageEpisodes: [dbPackageEpisode]
     });
+    vi.mocked(readDbAuthScopeSnapshot).mockResolvedValue({
+      users: [dbUser],
+      projects: [dbProject],
+      members: [dbMember],
+      memberPermissions: [dbPermission],
+      episodes: [dbEpisode],
+      assignments: [dbAssignment]
+    });
     mockRuntime(mockDb.db);
 
     const snapshot = await createDbAssetLockRecordRepository().read();
@@ -322,16 +440,23 @@ describe("asset lock record DB repository snapshot overlay", () => {
     expect(snapshot.state.scriptSourceBindings).toEqual([dbBinding]);
     expect(snapshot.state.deliveryPackages).toEqual([dbPackage]);
     expect(snapshot.state.deliveryPackageEpisodes).toEqual([dbPackageEpisode]);
+    expect(snapshot.state.users).toEqual([dbUser]);
+    expect(snapshot.state.projects).toEqual([dbProject]);
+    expect(snapshot.state.members).toEqual([dbMember]);
+    expect(snapshot.state.memberPermissions).toEqual([dbPermission]);
+    expect(snapshot.state.episodes).toEqual([dbEpisode]);
+    expect(snapshot.state.assignments).toEqual([dbAssignment]);
     expect(snapshot.state.assetLockRecords).not.toContainEqual(staleLocalRecord);
     expect(snapshot.state.scriptSourceBindings).not.toContainEqual(staleLocalBinding);
     expect(snapshot.state.deliveryPackages).not.toContainEqual(staleLocalPackage);
     expect(snapshot.state.deliveryPackageEpisodes).not.toContainEqual(staleLocalPackageEpisode);
-    expect(snapshot.state.users).toBe(localState.users);
-    expect(snapshot.state.projects).toBe(localState.projects);
-    expect(snapshot.state.members).toBe(localState.members);
-    expect(snapshot.state.assignments).toBe(localState.assignments);
-    expect(snapshot.state.episodes).toBe(localState.episodes);
-    expect(snapshot.state.currentUserId).toBe("user-head-writer");
+    expect(snapshot.state.users).not.toContainEqual(staleLocalUser);
+    expect(snapshot.state.projects).not.toContainEqual(staleLocalProject);
+    expect(snapshot.state.members).not.toContainEqual(staleLocalMember);
+    expect(snapshot.state.memberPermissions).not.toContainEqual(staleLocalPermission);
+    expect(snapshot.state.episodes).not.toContainEqual(staleLocalEpisode);
+    expect(snapshot.state.assignments).not.toContainEqual(staleLocalAssignment);
+    expect(snapshot.state.currentUserId).toBe("user-db-session");
   });
 });
 

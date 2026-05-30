@@ -80,6 +80,67 @@ describe("asset lock record service", () => {
     await expect(getDeliveryImportWorkspace()).resolves.toEqual(workspaceBefore);
   });
 
+  it("validates the local session user against DB-overlaid auth scope", async () => {
+    const dbUser: WorkspaceState["users"][number] = {
+      id: "user-db-session",
+      name: "DB Session User",
+      defaultRole: "head_writer",
+      avatarTone: "violet"
+    };
+    const dbMember: WorkspaceState["members"][number] = {
+      id: "member-db-session",
+      projectId: "project-jincheng",
+      userId: dbUser.id,
+      role: "head_writer",
+      createdAt: "2026-05-29T00:00:00.000Z"
+    };
+    const dbRecord: AssetLockRecord = {
+      id: "asset-lock-db-session",
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-db-session",
+      episodeNos: [1],
+      assetName: "DB Session Lift",
+      assetType: "scene",
+      changeType: "new",
+      writerConfirmation: "pending",
+      productionConfirmation: "pending",
+      risk: "attention",
+      status: "draft",
+      createdByUserId: dbUser.id,
+      createdAt: "2026-05-29T00:00:00.000Z",
+      updatedAt: "2026-05-29T00:00:00.000Z"
+    };
+    const repository = createMockDbAssetLockRecordRepository(
+      snapshotFromState({
+        ...seedWorkspace,
+        currentUserId: dbUser.id,
+        users: [dbUser],
+        members: [dbMember],
+        assetLockRecords: [dbRecord]
+      })
+    );
+    vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
+    currentActorUserId = dbUser.id;
+
+    await expect(listAssetLockRecords("project-jincheng")).resolves.toMatchObject({
+      records: [dbRecord],
+      summary: { total: 1 }
+    });
+
+    const missingDbUserRepository = createMockDbAssetLockRecordRepository(
+      snapshotFromState({
+        ...seedWorkspace,
+        currentUserId: "user-local-only",
+        users: seedWorkspace.users.filter((user) => user.id !== "user-local-only"),
+        assetLockRecords: [dbRecord]
+      })
+    );
+    vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(missingDbUserRepository);
+    currentActorUserId = "user-local-only";
+
+    await expect(listAssetLockRecords("project-jincheng")).rejects.toThrow("asset_lock_unauthenticated");
+  });
+
   it("generates asset records from a package through the DB repository without mutating local workspace state", async () => {
     const deliveryPackageId = await createCandidateDraft();
     const workspace = await getDeliveryImportWorkspace();
