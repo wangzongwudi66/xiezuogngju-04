@@ -1,6 +1,6 @@
-import { loginAsUser, logout } from "@aigc/domain";
+import { logout } from "@aigc/domain";
 import { NextResponse } from "next/server";
-import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import { mutateDeliveryImportWorkspace, readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -22,7 +22,15 @@ export async function POST(request: Request) {
   }
 
   try {
-    const snapshot = await mutateDeliveryImportWorkspace((state) => (userId ? loginAsUser(state, userId) : logout(state)));
+    if (userId) {
+      const snapshot = await readDeliveryImportWorkspace();
+
+      if (!snapshot.state.users.some((user) => user.id === userId)) {
+        return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
+      }
+    }
+
+    const snapshot = await mutateDeliveryImportWorkspace((state) => (userId ? { ...state, currentUserId: userId } : logout(state)));
     return NextResponse.json({ ok: true, currentUserId: snapshot.state.currentUserId });
   } catch {
     return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });

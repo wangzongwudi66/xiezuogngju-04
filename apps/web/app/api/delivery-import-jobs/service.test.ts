@@ -211,7 +211,7 @@ describe("delivery import job service", () => {
       job: failedJob
     });
 
-    const retried = await retryDeliveryImportJob(failedJob.id);
+    const retried = await retryDeliveryImportJob(failedJob.id, { userId: "user-owner" });
 
     expect(retried.ok).toBe(true);
     if (!retried.ok || !("job" in retried)) {
@@ -225,7 +225,7 @@ describe("delivery import job service", () => {
       fileName: failedJob.fileName,
       fileId: failedJob.fileId,
       retryOfJobId: failedJob.id,
-      uploadedByUserId: "user-head-writer"
+      uploadedByUserId: "user-owner"
     });
     expect(retried.job.id).not.toBe(failedJob.id);
     expect(retried.job.deliveryPackageId).toBeTruthy();
@@ -243,7 +243,7 @@ describe("delivery import job service", () => {
       fileName: "still-broken.docx",
       fileBuffer: new TextEncoder().encode("not a zip")
     });
-    const retried = await retryDeliveryImportJob(failed.job.id);
+    const retried = await retryDeliveryImportJob(failed.job.id, { userId: "user-owner" });
 
     expect(retried.ok).toBe(false);
     expect(retried).toMatchObject({
@@ -257,7 +257,7 @@ describe("delivery import job service", () => {
   });
 
   it("returns clear retry errors for missing source job, file id, or original file", async () => {
-    await expect(retryDeliveryImportJob("missing-job")).resolves.toEqual({
+    await expect(retryDeliveryImportJob("missing-job", { userId: "user-head-writer" })).resolves.toEqual({
       ok: false,
       error: "delivery_import_job_not_found"
     });
@@ -276,7 +276,7 @@ describe("delivery import job service", () => {
         createdAt: new Date().toISOString()
       }
     });
-    await expect(retryDeliveryImportJob("import-docx-without-file-id")).resolves.toEqual({
+    await expect(retryDeliveryImportJob("import-docx-without-file-id", { userId: "user-head-writer" })).resolves.toEqual({
       ok: false,
       error: "delivery_import_job_file_id_missing"
     });
@@ -296,7 +296,7 @@ describe("delivery import job service", () => {
         createdAt: new Date().toISOString()
       }
     });
-    await expect(retryDeliveryImportJob("import-docx-lost-file")).resolves.toEqual({
+    await expect(retryDeliveryImportJob("import-docx-lost-file", { userId: "user-head-writer" })).resolves.toEqual({
       ok: false,
       error: "delivery_import_job_file_missing"
     });

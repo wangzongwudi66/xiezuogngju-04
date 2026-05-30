@@ -71,7 +71,10 @@ export async function getDeliveryImportJobResult(jobId: string) {
   return readDeliveryImportJobResult(jobId);
 }
 
-export async function retryDeliveryImportJob(jobId: string): Promise<DeliveryImportJobRetryResponse> {
+export async function retryDeliveryImportJob(
+  jobId: string,
+  actor: { userId: string }
+): Promise<DeliveryImportJobRetryResponse> {
   const sourceResult = await readDeliveryImportJobResult(jobId);
 
   if (!sourceResult) {
@@ -94,7 +97,7 @@ export async function retryDeliveryImportJob(jobId: string): Promise<DeliveryImp
     {
       source: "docx",
       projectId: sourceJob.projectId,
-      uploadedByUserId: sourceJob.uploadedByUserId ?? "",
+      uploadedByUserId: actor.userId,
       declaredRangeText: sourceJob.declaredRangeText,
       fileName: sourceJob.fileName,
       fileBuffer

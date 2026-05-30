@@ -2,11 +2,13 @@ import { mkdir, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { seedWorkspace } from "@aigc/domain";
+import { loginAsUser, seedWorkspace } from "@aigc/domain";
 import { GET, POST } from "./route";
 import * as assetLockRecordDbParts from "../asset-lock-records/db-parts";
 import * as authScopeDbRepository from "../auth-scope/db-repository";
 import * as deliveryPackageDbRepository from "../delivery-packages/db-repository";
+import * as publishReadModelDbRepository from "../publish-read-model/db-repository";
+import { mutateDeliveryImportWorkspace } from "./persistence";
 
 describe("delivery import job route", () => {
   let storeDir: string;
@@ -28,6 +30,12 @@ describe("delivery import job route", () => {
       assetLockRecords: [],
       scriptSourceBindings: []
     });
+    vi.spyOn(publishReadModelDbRepository, "readDbPublishReadModelSnapshot").mockResolvedValue({
+      episodeRevisions: [],
+      episodeCurrents: [],
+      notifications: []
+    });
+    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-head-writer"));
   });
 
   afterEach(async () => {
@@ -56,6 +64,26 @@ describe("delivery import job route", () => {
 
     const readResponse = await GET(new Request(`http://localhost/api/delivery-import-jobs?id=${created.job.id}`));
     await expect(readResponse.json()).resolves.toEqual(created);
+  });
+
+  it("ignores client uploadedByUserId and uses the server workspace actor", async () => {
+    const form = buildTextForm();
+    form.set("uploadedByUserId", "user-attacker");
+    const createResponse = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: form }));
+    const created = await createResponse.json();
+
+    expect(createResponse.status).toBe(200);
+    expect(created.job.uploadedByUserId).toBe("user-head-writer");
+    expect(created.draft.uploadedByUserId).toBe("user-head-writer");
+
+    const workspaceResponse = await GET(new Request("http://localhost/api/delivery-import-jobs?scope=workspace"));
+    const workspace = await workspaceResponse.json();
+    expect(workspace.state.deliveryPackages).toContainEqual(
+      expect.objectContaining({
+        id: created.job.deliveryPackageId,
+        uploadedByUserId: "user-head-writer"
+      })
+    );
   });
 
   it("lists jobs by project and returns the server workspace snapshot", async () => {
@@ -139,9 +167,11 @@ describe("delivery import job route", () => {
 
   it("retries a docx import job from its saved file", async () => {
     const form = buildDocxForm();
+    form.set("uploadedByUserId", "user-attacker");
     form.set("file", new File(["not a zip"], "broken.docx"));
     const createResponse = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: form }));
     const failed = await createResponse.json();
+    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-owner"));
     const retryResponse = await POST(
       new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildRetryForm(failed.job.id) })
     );
@@ -154,11 +184,27 @@ describe("delivery import job route", () => {
         source: "docx",
         status: "failed",
         fileId: failed.job.fileId,
-        retryOfJobId: failed.job.id
+        retryOfJobId: failed.job.id,
+        uploadedByUserId: "user-owner"
       }
     });
+    expect(failed.job.uploadedByUserId).toBe("user-head-writer");
     expect(retried.job.id).not.toBe(failed.job.id);
     expect(retried.job).not.toHaveProperty("filePath");
+  });
+
+  it("returns unauthenticated when import mutations have no server workspace actor", async () => {
+    await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: null }));
+
+    const createResponse = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildTextForm() }));
+    const retryResponse = await POST(
+      new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildRetryForm("missing-job") })
+    );
+
+    expect(createResponse.status).toBe(401);
+    await expect(createResponse.json()).resolves.toEqual({ error: "unauthenticated" });
+    expect(retryResponse.status).toBe(401);
+    await expect(retryResponse.json()).resolves.toEqual({ error: "unauthenticated" });
   });
 
   it("returns clear retry errors for missing source jobs", async () => {
@@ -213,6 +259,70 @@ describe("delivery import job route", () => {
       "DB route overlay source"
     ]);
     expect(workspace.state.deliveryPackages).not.toContainEqual(expect.objectContaining({ id: localCreated.job.deliveryPackageId }));
+  });
+
+  it("uses DB overlay users for import actor validation instead of stale local users", async () => {
+    await mutateDeliveryImportWorkspace((state) => ({
+      ...state,
+      currentUserId: "user-head-writer",
+      users: [],
+      projects: [],
+      members: [],
+      memberPermissions: [],
+      episodes: [],
+      assignments: []
+    }));
+    process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
+    process.env.DATABASE_URL = "postgres://example.invalid/aigc";
+    let dbSnapshot: deliveryPackageDbRepository.DeliveryPackageDbSnapshot = {
+      deliveryPackages: [],
+      deliveryPackageEpisodes: []
+    };
+    vi.spyOn(deliveryPackageDbRepository, "readDbDeliveryPackageSnapshot").mockImplementation(async () => dbSnapshot);
+    vi.spyOn(deliveryPackageDbRepository, "createDbDeliveryPackageWithEpisodes").mockImplementation(
+      async (deliveryPackage, deliveryPackageEpisodes) => {
+        dbSnapshot = {
+          deliveryPackages: [...dbSnapshot.deliveryPackages, deliveryPackage],
+          deliveryPackageEpisodes: [...dbSnapshot.deliveryPackageEpisodes, ...deliveryPackageEpisodes]
+        };
+        return dbSnapshot;
+      }
+    );
+
+    const response = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildTextForm() }));
+    const created = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(created.job.uploadedByUserId).toBe("user-head-writer");
+    expect(dbSnapshot.deliveryPackages).toContainEqual(
+      expect.objectContaining({
+        id: created.job.deliveryPackageId,
+        uploadedByUserId: "user-head-writer"
+      })
+    );
+  });
+
+  it("rejects import mutations when currentUserId is missing from DB overlay users", async () => {
+    await mutateDeliveryImportWorkspace((state) => ({
+      ...state,
+      currentUserId: "user-head-writer",
+      users: seedWorkspace.users
+    }));
+    process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
+    process.env.DATABASE_URL = "postgres://example.invalid/aigc";
+    vi.mocked(authScopeDbRepository.readDbAuthScopeSnapshot).mockResolvedValue({
+      users: [],
+      projects: seedWorkspace.projects,
+      members: seedWorkspace.members,
+      memberPermissions: seedWorkspace.memberPermissions,
+      episodes: seedWorkspace.episodes,
+      assignments: seedWorkspace.assignments
+    });
+
+    const response = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildTextForm() }));
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "unauthenticated" });
   });
 });
 

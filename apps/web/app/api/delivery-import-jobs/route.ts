@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireWorkspaceRequestActor } from "../workspace-actor";
 import {
   createDeliveryImportJob,
   getDeliveryImportJobResult,
@@ -30,8 +31,16 @@ export async function POST(request: Request) {
   const form = await request.formData();
   const action = readString(form, "action");
 
+  let actor: { userId: string };
+
+  try {
+    actor = await requireWorkspaceRequestActor("unauthenticated");
+  } catch {
+    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  }
+
   if (action === "retry") {
-    const result = await retryDeliveryImportJob(readString(form, "jobId"));
+    const result = await retryDeliveryImportJob(readString(form, "jobId"), actor);
     if (!result.ok && "error" in result) {
       return NextResponse.json(result, { status: result.error === "delivery_import_job_not_found" ? 404 : 400 });
     }
@@ -41,10 +50,9 @@ export async function POST(request: Request) {
 
   const source = readString(form, "source") as DeliveryImportSource;
   const projectId = readString(form, "projectId");
-  const uploadedByUserId = readString(form, "uploadedByUserId");
   const declaredRangeText = readString(form, "declaredRangeText");
 
-  if ((source !== "docx" && source !== "text") || !projectId || !uploadedByUserId) {
+  if ((source !== "docx" && source !== "text") || !projectId) {
     return NextResponse.json({ error: "invalid_delivery_import_request" }, { status: 400 });
   }
 
@@ -63,7 +71,7 @@ export async function POST(request: Request) {
       await createDeliveryImportJob({
         source,
         projectId,
-        uploadedByUserId,
+        uploadedByUserId: actor.userId,
         declaredRangeText,
         fileName: file.name,
         fileBuffer: await file.arrayBuffer()
@@ -75,7 +83,7 @@ export async function POST(request: Request) {
     await createDeliveryImportJob({
       source,
       projectId,
-      uploadedByUserId,
+      uploadedByUserId: actor.userId,
       declaredRangeText,
       fileName: readString(form, "fileName") || "pasted-word-text.txt",
       rawText: readString(form, "rawText")

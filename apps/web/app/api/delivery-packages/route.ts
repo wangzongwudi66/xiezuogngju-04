@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
+import { requireWorkspaceRequestActor } from "../workspace-actor";
 import { mutateDeliveryPackage } from "./service";
 import type { DeliveryPackageMutationRequest } from "./service";
+
+type DeliveryPackageRouteMutationRequest =
+  | Extract<DeliveryPackageMutationRequest, { action: "update_confirmation" }>
+  | Omit<Extract<DeliveryPackageMutationRequest, { action: "submit" }>, "actorUserId">
+  | Omit<Extract<DeliveryPackageMutationRequest, { action: "publish" }>, "actorUserId">
+  | Omit<Extract<DeliveryPackageMutationRequest, { action: "reject" }>, "actorUserId">;
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -18,8 +25,13 @@ export async function POST(request: Request) {
   }
 
   try {
-    return NextResponse.json(await mutateDeliveryPackage(input));
+    const actor = await requireWorkspaceRequestActor("unauthenticated");
+    return NextResponse.json(await mutateDeliveryPackage(withServerActor(input, actor.userId)));
   } catch (error) {
+    if (error instanceof Error && error.message === "unauthenticated") {
+      return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    }
+
     return NextResponse.json(
       {
         error: "delivery_package_mutation_failed",
@@ -30,7 +42,7 @@ export async function POST(request: Request) {
   }
 }
 
-function parseMutationRequest(body: unknown): DeliveryPackageMutationRequest | null {
+function parseMutationRequest(body: unknown): DeliveryPackageRouteMutationRequest | null {
   if (!isRecord(body)) {
     return null;
   }
@@ -55,35 +67,38 @@ function parseMutationRequest(body: unknown): DeliveryPackageMutationRequest | n
     }
     case "submit":
     case "publish": {
-      const actorUserId = readString(body.actorUserId);
-
-      if (!actorUserId) {
-        return null;
-      }
-
       return {
         action: body.action,
-        deliveryPackageId,
-        actorUserId
+        deliveryPackageId
       };
     }
     case "reject": {
-      const actorUserId = readString(body.actorUserId);
       const rejectionReason = readString(body.rejectionReason);
 
-      if (!actorUserId || !rejectionReason) {
+      if (!rejectionReason) {
         return null;
       }
 
       return {
         action: body.action,
         deliveryPackageId,
-        actorUserId,
         rejectionReason
       };
     }
     default:
       return null;
+  }
+}
+
+function withServerActor(input: DeliveryPackageRouteMutationRequest, actorUserId: string): DeliveryPackageMutationRequest {
+  switch (input.action) {
+    case "update_confirmation":
+      return input;
+    case "submit":
+    case "publish":
+      return { ...input, actorUserId };
+    case "reject":
+      return { ...input, actorUserId };
   }
 }
 

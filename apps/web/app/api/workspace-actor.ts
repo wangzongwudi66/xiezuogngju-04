@@ -27,5 +27,9 @@ export function resolveWorkspaceRequestActorFromState(state: WorkspaceState): Wo
     return null;
   }
 
+  if (!state.users.some((user) => user.id === userId)) {
+    return null;
+  }
+
   return { userId };
 }
