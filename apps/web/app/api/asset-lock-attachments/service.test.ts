@@ -28,6 +28,13 @@ type UploadOverrides = {
   actorUserId: string;
 };
 
+// @ts-expect-error AssetAttachmentStorage requires delete so upload failures always attempt compensation.
+const storageWithoutDeleteContractCheck: AssetAttachmentStorage = {
+  makeKey: () => "asset-att-123e4567-e89b-12d3-a456-426614174000.png",
+  put: async () => {},
+  get: async () => pngBytes()
+};
+
 let currentActorUserId = "user-head-writer";
 
 describe("asset lock attachment service", () => {
@@ -503,6 +510,30 @@ describe("asset lock attachment service", () => {
 
     const workspace = await getDeliveryImportWorkspace();
     expect(workspace.state.assetAttachments ?? []).toHaveLength(0);
+  });
+
+  it("keeps the metadata persistence error if compensation delete fails", async () => {
+    const record = (await createAssetRecord()).record;
+    const storage = createMockAssetAttachmentStorage({
+      delete: vi.fn(async () => {
+        throw new Error("forced_storage_delete_failure");
+      })
+    });
+
+    await expect(
+      uploadAssetAttachment(
+        buildUploadInput(record.id),
+        { userId: currentActorUserId },
+        {
+          persistMetadata: async () => {
+            throw new Error("forced_metadata_failure");
+          },
+          storage
+        }
+      )
+    ).rejects.toThrow("forced_metadata_failure");
+
+    expect(storage.delete).toHaveBeenCalledTimes(1);
   });
 
   it("writes assetAttachments for legacy workspaces without the array", async () => {

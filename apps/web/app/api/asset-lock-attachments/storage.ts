@@ -23,7 +23,7 @@ export interface AssetAttachmentStorage {
   makeKey(input: { fileId: string; extension: string }): string;
   put(input: { key: string; bytes: Uint8Array; mime: string }): Promise<void>;
   get(input: { key: string }): Promise<Uint8Array>;
-  delete?(input: { key: string }): Promise<void>;
+  delete(input: { key: string }): Promise<void>;
 }
 
 export function createLocalAssetAttachmentStorage(): AssetAttachmentStorage {

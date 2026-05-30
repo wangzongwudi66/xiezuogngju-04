@@ -92,7 +92,7 @@ export async function uploadAssetAttachment(
     return await repository.createAssetAttachmentMetadata({ attachment, metadataInput });
   } catch (error) {
     try {
-      await storage.delete?.({ key: storageKey });
+      await storage.delete({ key: storageKey });
     } catch {
       // Keep the metadata failure as the upload result; cleanup is compensating work.
     }
