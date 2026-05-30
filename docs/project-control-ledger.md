@@ -5,19 +5,29 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 16:09:57 +08:00`.
+Timestamp: `2026-05-30 16:25:21 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `c4cecf5 Record DB generation and attachment version merges`.
-- Latest product/test code commit on `main`: `db7fb6a test: expand Postgres smoke asset coverage`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-postgres-smoke-expanded-coverage`; ledger update pending commit.
-- Remote sync pending for this ledger update; `main@c4cecf5` was the last pushed checkpoint before the expanded smoke harness merge.
+- Latest recorded `main` commit before this ledger update: `010531a Record expanded Postgres smoke coverage`.
+- Latest product/test code commit on `main`: `1d0efaa test: assert DB package generation validation avoids writes`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-generate-db-validation-no-write-tests`; ledger update pending commit.
+- Remote sync pending for this ledger update; `main@010531a` was the last pushed checkpoint before the validation no-write test merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
-- Pending branch `codex/m3-generate-db-validation-no-write-tests` remains unmerged after child review 9 found a blocking test-semantics issue around the `all existing` path.
+- Pending branch `codex/m3-delivery-package-schema-read` remains unmerged; the pasted child review 13 content duplicated review 12, so delivery package schema/read mapper still needs a valid read-only review.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `1d0efaa test: assert DB package generation validation avoids writes`
+  - Adds DB-mode `generate_from_package` service tests proving validation failures do not call `createAssetLockRecords`.
+  - Covers draft/unpublished package rejection and empty candidate rejection as `rejects + no-write`.
+  - Clarifies the all-existing path as idempotent success: the second `generate_from_package` returns the existing record ids and does not call `createAssetLockRecords` again.
+  - Keeps the slice scoped to `asset-lock-records/service.test.ts`; no implementation, UI, migration, attachment, timeline, or storage changes.
+  - Child review 12 found no P0/P1/P2/P3 and approved merge after the earlier test-semantics issue was fixed.
+  - Validation after merge:
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/service.test.ts app/api/asset-lock-records/db-repository.test.ts`: passed, 2 files / 48 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `db7fb6a test: expand Postgres smoke asset coverage`
   - Expands `apps/web/db/postgres-smoke.ts` to cover the latest DB-backed capabilities without changing business repository/service code.
   - Adds smoke harness coverage for `generate_from_package` DB happy path and verifies generated records are visible through the DB snapshot.
