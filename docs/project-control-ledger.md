@@ -5,13 +5,13 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 22:59:58 +08:00`.
+Timestamp: `2026-05-30 23:11:12 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `e1e66dc Record smoke gate planning results`.
+- Latest merged checkpoint covered by this ledger update: `8c6a0ad ci: add postgres smoke workflow`.
 - Latest product/test code commit on `main`: `0588d61 Require asset attachment storage delete`.
-- Worktree at last check: clean after recording child 35-40 smoke gate and post-smoke planning results.
-- Remote sync complete for this checkpoint: local `main` and `xiezuogongju-04/main` both point at `e1e66dc`.
+- Worktree at last check: clean after fast-forward merging the DB smoke GitHub Actions workflow.
+- Remote sync target for this checkpoint: push local `main` to `xiezuogongju-04/main` after recording this ledger update.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 - Current gate: real `db:smoke` remains blocked because `TEST_DATABASE_URL` is not set. A local disposable database cannot be provisioned in this shell because neither `docker` nor `psql` is available. Do not merge further DB schema/runtime expansion until a disposable Postgres `TEST_DATABASE_URL` is provided and `npm.cmd run db:smoke -w apps/web` passes.
@@ -21,9 +21,22 @@ Timestamp: `2026-05-30 22:59:58 +08:00`.
 - Child 38 recommends a GitHub Actions `db-smoke` job on `ubuntu-latest` using `services.postgres`, step-scoped `TEST_DATABASE_URL`, `npm run db:check -w apps/web`, then `npm run db:smoke -w apps/web`; do not set `DATABASE_URL` or use shared databases.
 - Child 39 specifies the post-smoke session/cookie actor design: HttpOnly signed cookie, `AIGC_WORKSPACE_SESSION_SECRET`, request-scoped actor resolution from cookie, overlay user validation, and no password/OAuth/JWT/admin auth expansion in the first slice.
 - Child 40 specifies the post-smoke object storage provider design: keep `AssetAttachmentStorage`, add explicit provider/env resolver later, default local provider unchanged, deterministic keys from `fileId + extension`, and defer `storageKey`/checksum schema fields unless required by deployment needs.
+- Child 41 reviewed `codex/m3-db-smoke-github-action` and found no P0/P1/P2/P3; the branch is suitable for fast-forward merge into `main`.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `8c6a0ad ci: add postgres smoke workflow`
+  - Adds `.github/workflows/db-smoke.yml` as the CI smoke gate infrastructure.
+  - Runs on `ubuntu-latest` with a GitHub Actions `postgres:16` service using disposable database credentials scoped to the job.
+  - Runs `npm run db:check -w apps/web` before `npm run db:smoke -w apps/web`.
+  - Injects `TEST_DATABASE_URL` only on the `Run Postgres smoke tests` step and does not set `DATABASE_URL`.
+  - Uses Linux `npm run ...` commands rather than Windows `npm.cmd`.
+  - Keeps the slice scoped to CI infrastructure: no DB schema/runtime expansion, business code, UI, test logic, object storage, or `codex/timeline-mobile-crop-hardening` changes.
+  - Child review 41 found no P0/P1/P2/P3 and approved fast-forward merge. Real local `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check HEAD~1..HEAD`: passed.
+    - `actions/checkout@v5` and `actions/setup-node@v4` tags exist.
 - `76b3db9 Document M3 DB-backed readiness status`
   - Adds `docs/m3-db-backed-readiness-status.md` as the current status document for the M3 DB-backed prototype.
   - Summarizes implemented DB-backed capabilities across delivery import/package mutations, publish read-model overlay, asset-lock records/source bindings, auth/scope overlay, delivery route server actors, attachment metadata DB plus storage abstraction, and the Postgres smoke harness.
