@@ -238,6 +238,51 @@ describe("asset lock record DB repository source binding writes", () => {
     });
   });
 
+  it("batch inserts generated asset lock records and episodes in one transaction", async () => {
+    const firstRecord = buildRecord({
+      id: "asset-lock-1",
+      assetName: "Mine Lift",
+      episodeNos: [1]
+    });
+    const secondRecord = buildRecord({
+      id: "asset-lock-2",
+      assetName: "Safety Lamp",
+      assetType: "prop",
+      episodeNos: [2]
+    });
+    const firstRows = mapAssetLockRecordToDbRows(firstRecord);
+    const secondRows = mapAssetLockRecordToDbRows(secondRecord);
+    const mockDb = createMockDb({
+      selectResults: [
+        [firstRows.record, secondRows.record],
+        [...firstRows.episodes, ...secondRows.episodes],
+        []
+      ]
+    });
+    mockRuntime(mockDb.db);
+
+    const snapshot = await createDbAssetLockRecordRepository().createAssetLockRecords([firstRecord, secondRecord]);
+
+    expect(mockDb.transaction).toHaveBeenCalledTimes(1);
+    expect(mockDb.insertValues).toHaveBeenNthCalledWith(1, [firstRows.record, secondRows.record]);
+    expect(mockDb.insertValues).toHaveBeenNthCalledWith(2, [...firstRows.episodes, ...secondRows.episodes]);
+    expect(snapshot.assetLockRecords).toEqual([firstRecord, secondRecord]);
+  });
+
+  it("does not refresh the snapshot when a batch asset record insert transaction fails", async () => {
+    const mockDb = createMockDb({
+      insertFailureAt: 2
+    });
+    mockRuntime(mockDb.db);
+
+    await expect(createDbAssetLockRecordRepository().createAssetLockRecords([buildRecord()])).rejects.toThrow(
+      "asset_lock_record_episode_insert_failed"
+    );
+    expect(mockDb.transaction).toHaveBeenCalledTimes(1);
+    expect(mockDb.insertValues).toHaveBeenCalledTimes(2);
+    expect(readDeliveryImportWorkspace).not.toHaveBeenCalled();
+  });
+
   it("inserts source bindings in a transaction and returns the refreshed snapshot", async () => {
     const binding: ScriptSourceBinding = {
       id: "source-binding-1",
@@ -366,12 +411,21 @@ function mockRuntime(db: unknown) {
   } as ReturnType<typeof getAssetLockDbRuntime>);
 }
 
-function createMockDb(input: { deletedRows?: unknown[]; selectResults?: unknown[][]; updatedRows?: unknown[] } = {}) {
+function createMockDb(
+  input: { deletedRows?: unknown[]; insertFailureAt?: number; selectResults?: unknown[][]; updatedRows?: unknown[] } = {}
+) {
   const selectResults = [...(input.selectResults ?? [])];
   const orderBy = vi.fn(async () => selectResults.shift() ?? []);
   const from = vi.fn(() => ({ orderBy }));
   const select = vi.fn(() => ({ from }));
-  const insertValues = vi.fn(async (_row: unknown) => undefined);
+  let insertCallCount = 0;
+  const insertValues = vi.fn(async (_row: unknown) => {
+    insertCallCount += 1;
+
+    if (input.insertFailureAt === insertCallCount) {
+      throw new Error("asset_lock_record_episode_insert_failed");
+    }
+  });
   const insert = vi.fn(() => ({ values: insertValues }));
   const updateReturning = vi.fn(async () => input.updatedRows ?? []);
   const updateWhere = vi.fn(() => ({ returning: updateReturning }));

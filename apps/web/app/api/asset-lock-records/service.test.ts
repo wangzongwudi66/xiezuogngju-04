@@ -80,6 +80,73 @@ describe("asset lock record service", () => {
     await expect(getDeliveryImportWorkspace()).resolves.toEqual(workspaceBefore);
   });
 
+  it("generates asset records from a package through the DB repository without mutating local workspace state", async () => {
+    const deliveryPackageId = await createCandidateDraft();
+    const workspace = await getDeliveryImportWorkspace();
+    const repository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
+
+    const result = await mutateAssetLockRecord({
+      action: "generate_from_package",
+      projectId: "project-jincheng",
+      deliveryPackageId,
+      actorUserId: "user-head-writer"
+    });
+    const persisted = await getDeliveryImportWorkspace();
+
+    expect(repository.read).toHaveBeenCalledTimes(1);
+    expect(repository.createAssetLockRecords).toHaveBeenCalledTimes(1);
+    expect(repository.createAssetLockRecord).not.toHaveBeenCalled();
+    expect(repository.updateAssetLockRecord).not.toHaveBeenCalled();
+    expect(repository.createSourceBinding).not.toHaveBeenCalled();
+    expect(repository.removeSourceBinding).not.toHaveBeenCalled();
+    expect(repository.createAssetLockRecords).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          projectId: "project-jincheng",
+          deliveryPackageId,
+          assetType: "scene",
+          episodeNos: [1],
+          createdByUserId: "user-head-writer"
+        }),
+        expect.objectContaining({
+          projectId: "project-jincheng",
+          deliveryPackageId,
+          assetType: "prop",
+          createdByUserId: "user-head-writer"
+        })
+      ])
+    );
+    expect(result.records.length).toBeGreaterThan(1);
+    expect(result.records.every((record) => record.deliveryPackageId === deliveryPackageId)).toBe(true);
+    expect(persisted.state.assetLockRecords ?? []).toEqual(workspace.state.assetLockRecords ?? []);
+  });
+
+  it("does not call DB record writes when package generation finds only existing records", async () => {
+    const deliveryPackageId = await createCandidateDraft();
+    const workspace = await getDeliveryImportWorkspace();
+    const repository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
+
+    const first = await mutateAssetLockRecord({
+      action: "generate_from_package",
+      projectId: "project-jincheng",
+      deliveryPackageId,
+      actorUserId: "user-head-writer"
+    });
+    const second = await mutateAssetLockRecord({
+      action: "generate_from_package",
+      projectId: "project-jincheng",
+      deliveryPackageId,
+      actorUserId: "user-head-writer"
+    });
+
+    expect(repository.read).toHaveBeenCalledTimes(2);
+    expect(repository.createAssetLockRecords).toHaveBeenCalledTimes(1);
+    expect(second.records).toHaveLength(first.records.length);
+    expect(new Set(second.records.map((record) => record.assetName)).size).toBe(second.records.length);
+  });
+
   it("binds source lines through the DB repository without mutating local workspace state", async () => {
     const deliveryPackageId = await createDraft();
     const record = (await createAssetRecord(deliveryPackageId)).record;
@@ -1119,6 +1186,14 @@ function createMockDbAssetLockRecordRepository(initialSnapshot: AssetLockRecordR
       currentSnapshot = snapshotFromState({
         ...currentSnapshot.state,
         assetLockRecords: [...currentSnapshot.assetLockRecords, record]
+      });
+
+      return currentSnapshot;
+    }),
+    createAssetLockRecords: vi.fn(async (records: AssetLockRecord[]) => {
+      currentSnapshot = snapshotFromState({
+        ...currentSnapshot.state,
+        assetLockRecords: [...currentSnapshot.assetLockRecords, ...records]
       });
 
       return currentSnapshot;

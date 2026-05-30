@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loginAsUser } from "@aigc/domain";
-import { createDeliveryImportJob } from "../delivery-import-jobs/service";
+import { createDeliveryImportJob, getDeliveryImportWorkspace } from "../delivery-import-jobs/service";
 import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { mutateDeliveryPackage } from "../delivery-packages/service";
 import { GET, POST } from "./route";
@@ -382,6 +382,27 @@ describe("asset lock record route", () => {
     expect(response.status).toBe(200);
     expect(payload.records.length).toBeGreaterThan(0);
     expect(payload.summary.total).toBeGreaterThan(0);
+  });
+
+  it("keeps unsupported DB-mode prepare_demo responses stable without writing local state", async () => {
+    process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
+    process.env.DATABASE_URL = "postgres://example.invalid/aigc";
+    await login("user-owner");
+    const workspaceBefore = await getDeliveryImportWorkspace();
+    const response = await POST(
+      jsonRequest({
+        action: "prepare_demo",
+        projectId: "project-jincheng",
+        actorUserId: "user-owner"
+      })
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "asset_lock_record_mutation_failed",
+      message: "asset_lock_record_db_mutation_unsupported:prepare_demo"
+    });
+    await expect(getDeliveryImportWorkspace()).resolves.toEqual(workspaceBefore);
   });
 
   it("generates asset lock records from a published package", async () => {

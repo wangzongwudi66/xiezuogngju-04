@@ -208,6 +208,12 @@ async function mutateAssetLockRecordInDb(
     const createdRecord = findCreatedAssetLockRecord(previousSnapshot, nextState);
     snapshot = await repository.createAssetLockRecord(createdRecord);
     record = snapshot.assetLockRecords.find((item) => item.id === createdRecord.id) ?? createdRecord;
+  } else if (input.action === "generate_from_package") {
+    const createdRecords = findCreatedAssetLockRecords(previousSnapshot, nextState);
+
+    snapshot =
+      createdRecords.length > 0 ? await repository.createAssetLockRecords(createdRecords) : previousSnapshot;
+    record = findMutatedRecord(snapshot, input);
   } else if (input.action === "bind_source") {
     const createdSourceBinding = findCreatedSourceBinding(nextState, input);
 
@@ -250,6 +256,7 @@ async function mutateAssetLockRecordInDb(
 function isAssetLockRecordDbMutationSupported(action: AssetLockRecordMutationRequest["action"]) {
   return (
     action === "create" ||
+    action === "generate_from_package" ||
     action === "bind_source" ||
     action === "remove_source_binding" ||
     isAssetLockRecordLifecycleUpdateAction(action)
@@ -425,14 +432,19 @@ function findMutatedRecord(
 }
 
 function findCreatedAssetLockRecord(previousSnapshot: AssetLockRecordRepositorySnapshot, nextState: WorkspaceState) {
-  const previousRecordIds = new Set(previousSnapshot.assetLockRecords.map((record) => record.id));
-  const record = (nextState.assetLockRecords ?? []).find((item) => !previousRecordIds.has(item.id));
+  const record = findCreatedAssetLockRecords(previousSnapshot, nextState)[0];
 
   if (!record) {
     throw new Error("asset_lock_record_not_created");
   }
 
   return record;
+}
+
+function findCreatedAssetLockRecords(previousSnapshot: AssetLockRecordRepositorySnapshot, nextState: WorkspaceState) {
+  const previousRecordIds = new Set(previousSnapshot.assetLockRecords.map((record) => record.id));
+
+  return (nextState.assetLockRecords ?? []).filter((item) => !previousRecordIds.has(item.id));
 }
 
 function prepareAssetLockDemoRecords(state: WorkspaceState, projectId: string, actorUserId: string) {

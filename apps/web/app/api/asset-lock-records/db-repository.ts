@@ -36,15 +36,10 @@ export function createDbAssetLockRecordRepository(): DbAssetLockRecordRepository
     mode: "db",
     read: readDbAssetLockRecordRepositorySnapshot,
     async createAssetLockRecord(record) {
-      const { db } = getAssetLockDbRuntime();
-      const rows = mapAssetLockRecordToDbRows(record);
-
-      await db.transaction(async (tx) => {
-        await tx.insert(assetLockRecords).values(rows.record);
-        await tx.insert(assetLockRecordEpisodes).values(rows.episodes);
-      });
-
-      return readDbAssetLockRecordRepositorySnapshot();
+      return createAssetLockRecordsInDb([record]);
+    },
+    async createAssetLockRecords(records) {
+      return createAssetLockRecordsInDb(records);
     },
     async updateAssetLockRecord(record) {
       const { db } = getAssetLockDbRuntime();
@@ -87,6 +82,23 @@ export function createDbAssetLockRecordRepository(): DbAssetLockRecordRepository
       return readDbAssetLockRecordRepositorySnapshot();
     }
   };
+}
+
+async function createAssetLockRecordsInDb(records: AssetLockRecord[]) {
+  const { db } = getAssetLockDbRuntime();
+
+  if (records.length === 0) {
+    return readDbAssetLockRecordRepositorySnapshot();
+  }
+
+  const rows = records.map(mapAssetLockRecordToDbRows);
+
+  await db.transaction(async (tx) => {
+    await tx.insert(assetLockRecords).values(rows.map((row) => row.record));
+    await tx.insert(assetLockRecordEpisodes).values(rows.flatMap((row) => row.episodes));
+  });
+
+  return readDbAssetLockRecordRepositorySnapshot();
 }
 
 export async function readDbAssetLockRecordRepositorySnapshot() {
