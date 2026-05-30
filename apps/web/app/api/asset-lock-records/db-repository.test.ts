@@ -1,7 +1,14 @@
-import { seedWorkspace, type AssetLockRecord, type ScriptSourceBinding } from "@aigc/domain";
+import {
+  seedWorkspace,
+  type AssetLockRecord,
+  type DeliveryPackage,
+  type DeliveryPackageEpisode,
+  type ScriptSourceBinding
+} from "@aigc/domain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import { readDbDeliveryPackageSnapshot } from "../delivery-packages/db-repository";
 import {
   createDbAssetLockRecordRepository,
   mapAssetLockRecordRows,
@@ -21,6 +28,17 @@ vi.mock("../../../db/runtime", () => ({
 vi.mock("../delivery-import-jobs/persistence", () => ({
   readDeliveryImportWorkspace: vi.fn()
 }));
+
+vi.mock("../delivery-packages/db-repository", () => ({
+  readDbDeliveryPackageSnapshot: vi.fn()
+}));
+
+beforeEach(() => {
+  vi.mocked(readDbDeliveryPackageSnapshot).mockResolvedValue({
+    deliveryPackages: seedWorkspace.deliveryPackages,
+    deliveryPackageEpisodes: seedWorkspace.deliveryPackageEpisodes
+  });
+});
 
 describe("asset lock record DB repository mappers", () => {
   it("maps DB record and episode rows into domain records", () => {
@@ -229,6 +247,94 @@ describe("asset lock record DB repository mappers", () => {
   });
 });
 
+describe("asset lock record DB repository snapshot overlay", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("overlays DB-owned arrays while preserving local workspace-only data", async () => {
+    const staleLocalRecord = buildRecord({ id: "asset-lock-local-stale", assetName: "Local Stale Lift" });
+    const dbRecord = buildRecord({ id: "asset-lock-db", assetName: "DB Mine Lift", episodeNos: [2] });
+    const dbRecordRows = mapAssetLockRecordToDbRows(dbRecord);
+    const staleLocalBinding: ScriptSourceBinding = {
+      id: "source-binding-local-stale",
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-local-stale",
+      assetLockRecordId: staleLocalRecord.id,
+      episodeNo: 1,
+      startLine: 1,
+      endLine: 1,
+      excerptSnapshot: "local stale source",
+      createdByUserId: "user-head-writer",
+      createdAt: "2026-05-29T00:00:00.000Z"
+    };
+    const dbBinding: ScriptSourceBinding = {
+      id: "source-binding-db",
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-db",
+      assetLockRecordId: dbRecord.id,
+      episodeNo: 2,
+      startLine: 2,
+      endLine: 2,
+      excerptSnapshot: "db source",
+      createdByUserId: "user-head-writer",
+      createdAt: "2026-05-29T01:00:00.000Z"
+    };
+    const staleLocalPackage = buildDeliveryPackage({ id: "delivery-local-stale", title: "Local stale package" });
+    const dbPackage = buildDeliveryPackage({ id: "delivery-db", title: "DB package" });
+    const staleLocalPackageEpisode = buildDeliveryPackageEpisode({
+      id: "delivery-local-stale-episode-1",
+      deliveryPackageId: staleLocalPackage.id,
+      content: "local stale package episode"
+    });
+    const dbPackageEpisode = buildDeliveryPackageEpisode({
+      id: "delivery-db-episode-2",
+      deliveryPackageId: dbPackage.id,
+      episodeNo: 2,
+      content: "db package episode"
+    });
+    const localState = {
+      ...seedWorkspace,
+      currentUserId: "user-head-writer",
+      assetLockRecords: [staleLocalRecord],
+      scriptSourceBindings: [staleLocalBinding],
+      deliveryPackages: [staleLocalPackage],
+      deliveryPackageEpisodes: [staleLocalPackageEpisode]
+    };
+    const mockDb = createMockDb({
+      selectResults: [[dbRecordRows.record], dbRecordRows.episodes, [mapScriptSourceBindingToDbRow(dbBinding)]]
+    });
+    vi.mocked(readDeliveryImportWorkspace).mockResolvedValue({
+      state: localState,
+      deliveryParseIssuesByPackageId: {}
+    });
+    vi.mocked(readDbDeliveryPackageSnapshot).mockResolvedValue({
+      deliveryPackages: [dbPackage],
+      deliveryPackageEpisodes: [dbPackageEpisode]
+    });
+    mockRuntime(mockDb.db);
+
+    const snapshot = await createDbAssetLockRecordRepository().read();
+
+    expect(snapshot.assetLockRecords).toEqual([dbRecord]);
+    expect(snapshot.scriptSourceBindings).toEqual([dbBinding]);
+    expect(snapshot.state.assetLockRecords).toEqual([dbRecord]);
+    expect(snapshot.state.scriptSourceBindings).toEqual([dbBinding]);
+    expect(snapshot.state.deliveryPackages).toEqual([dbPackage]);
+    expect(snapshot.state.deliveryPackageEpisodes).toEqual([dbPackageEpisode]);
+    expect(snapshot.state.assetLockRecords).not.toContainEqual(staleLocalRecord);
+    expect(snapshot.state.scriptSourceBindings).not.toContainEqual(staleLocalBinding);
+    expect(snapshot.state.deliveryPackages).not.toContainEqual(staleLocalPackage);
+    expect(snapshot.state.deliveryPackageEpisodes).not.toContainEqual(staleLocalPackageEpisode);
+    expect(snapshot.state.users).toBe(localState.users);
+    expect(snapshot.state.projects).toBe(localState.projects);
+    expect(snapshot.state.members).toBe(localState.members);
+    expect(snapshot.state.assignments).toBe(localState.assignments);
+    expect(snapshot.state.episodes).toBe(localState.episodes);
+    expect(snapshot.state.currentUserId).toBe("user-head-writer");
+  });
+});
+
 describe("asset lock record DB repository source binding writes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -400,6 +506,37 @@ function buildRecord(overrides: Partial<AssetLockRecord> = {}): AssetLockRecord 
     createdByUserId: "user-head-writer",
     createdAt: "2026-05-29T00:00:00.000Z",
     updatedAt: "2026-05-29T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+function buildDeliveryPackage(overrides: Partial<DeliveryPackage> = {}): DeliveryPackage {
+  return {
+    id: "delivery-1",
+    projectId: "project-jincheng",
+    type: "range",
+    title: "Delivery package",
+    declaredEpisodeFrom: 1,
+    declaredEpisodeTo: 2,
+    status: "published",
+    uploadedByUserId: "user-head-writer",
+    submittedByUserId: "user-head-writer",
+    reviewedByUserId: "user-owner",
+    createdAt: "2026-05-29T00:00:00.000Z",
+    submittedAt: "2026-05-29T00:00:00.000Z",
+    publishedAt: "2026-05-29T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+function buildDeliveryPackageEpisode(overrides: Partial<DeliveryPackageEpisode> = {}): DeliveryPackageEpisode {
+  return {
+    id: "delivery-1-episode-1",
+    deliveryPackageId: "delivery-1",
+    episodeNo: 1,
+    title: "Episode 1",
+    content: "Package episode content",
+    isConfirmedChange: true,
     ...overrides
   };
 }

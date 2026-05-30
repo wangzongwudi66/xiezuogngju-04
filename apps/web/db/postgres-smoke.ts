@@ -54,6 +54,7 @@ describe("real Postgres asset lock smoke", () => {
 
     await applyMigrations();
     await cleanupSmokeRows();
+    await seedSmokeDeliveryPackages();
     await writeSmokeWorkspaceStore();
   });
 
@@ -267,6 +268,8 @@ describe("real Postgres asset lock smoke", () => {
     await cleanupSmokeRows();
     await expect(countSmokeRows()).resolves.toEqual({
       attachments: 0,
+      deliveryPackageEpisodes: 0,
+      deliveryPackages: 0,
       records: 0,
       recordEpisodes: 0,
       sourceBindings: 0
@@ -310,6 +313,14 @@ async function cleanupSmokeRows() {
       "delete from asset_lock_records where delivery_package_id like $1",
       [`${deliveryPackagePrefix}%`]
     );
+    await runtime.pool.query(
+      "delete from delivery_package_episodes where delivery_package_id like $1",
+      [`${deliveryPackagePrefix}%`]
+    );
+    await runtime.pool.query(
+      "delete from delivery_packages where id like $1",
+      [`${deliveryPackagePrefix}%`]
+    );
     await runtime.pool.query("commit");
   } catch (error) {
     await runtime.pool.query("rollback").catch(() => undefined);
@@ -326,7 +337,7 @@ async function countSmokeRows() {
   const runtime = createAssetLockDbRuntime(testDatabaseUrl);
 
   try {
-    const [attachments, sourceBindings, recordEpisodes, records] = await Promise.all([
+    const [attachments, sourceBindings, recordEpisodes, records, deliveryPackageEpisodes, deliveryPackages] = await Promise.all([
       countRows(runtime, "select count(*)::int as count from asset_attachments where delivery_package_id like $1"),
       countRows(runtime, "select count(*)::int as count from script_source_bindings where delivery_package_id like $1"),
       countRows(
@@ -336,11 +347,15 @@ async function countSmokeRows() {
            select id from asset_lock_records where delivery_package_id like $1
          )`
       ),
-      countRows(runtime, "select count(*)::int as count from asset_lock_records where delivery_package_id like $1")
+      countRows(runtime, "select count(*)::int as count from asset_lock_records where delivery_package_id like $1"),
+      countRows(runtime, "select count(*)::int as count from delivery_package_episodes where delivery_package_id like $1"),
+      countRows(runtime, "select count(*)::int as count from delivery_packages where id like $1")
     ]);
 
     return {
       attachments,
+      deliveryPackageEpisodes,
+      deliveryPackages,
       records,
       recordEpisodes,
       sourceBindings
@@ -354,6 +369,71 @@ async function countRows(runtime: ReturnType<typeof createAssetLockDbRuntime>, s
   const result = await runtime.pool.query<{ count: number }>(sql, [`${deliveryPackagePrefix}%`]);
 
   return result.rows[0]?.count ?? 0;
+}
+
+async function seedSmokeDeliveryPackages() {
+  const runtime = createAssetLockDbRuntime(testDatabaseUrl);
+
+  try {
+    await runtime.pool.query("begin");
+    await runtime.pool.query(
+      `insert into delivery_packages (
+         id,
+         project_id,
+         type,
+         title,
+         source_file_name,
+         declared_episode_from,
+         declared_episode_to,
+         status,
+         uploaded_by_user_id,
+         submitted_by_user_id,
+         reviewed_by_user_id,
+         rejection_reason,
+         created_at,
+         submitted_at,
+         published_at,
+         rejected_at
+       )
+       values
+         ($1, $2, 'range', 'M3 real Postgres smoke delivery', null, 1, 2, 'published', $3, $3, $4, null, $5, $5, $5, null),
+         ($6, $2, 'range', 'M3 real Postgres generated smoke delivery', null, 1, 2, 'published', $3, $3, $4, null, $5, $5, $5, null)`,
+      [deliveryPackageId, projectId, "user-head-writer", "user-owner", now, generatedDeliveryPackageId]
+    );
+    await runtime.pool.query(
+      `insert into delivery_package_episodes (
+         id,
+         delivery_package_id,
+         episode_no,
+         title,
+         content,
+         is_confirmed_change
+       )
+       values
+         ($1, $2, 1, 'Smoke episode 1', $3, true),
+         ($4, $2, 2, 'Smoke episode 2', $5, true),
+         ($6, $7, 1, 'Generated smoke episode 1', $8, true),
+         ($9, $7, 2, 'Generated smoke episode 2', $10, true)`,
+      [
+        `${deliveryPackageId}-episode-1`,
+        deliveryPackageId,
+        "Smoke Mine Lift appears.\nSmoke Mine Lift source binding line.\nSmoke Mine Lift exits.",
+        `${deliveryPackageId}-episode-2`,
+        "Smoke background continuity line.",
+        `${generatedDeliveryPackageId}-episode-1`,
+        generatedDeliveryPackageId,
+        "\u9435\u7926\u4e95\u5165\u53e3\u65b0\u589e\u5347\u964d\u7b3c\uff0c\u4f17\u4eba\u7b2c\u4e00\u6b21\u8fdb\u5165\u5317\u4e95\u3002",
+        `${generatedDeliveryPackageId}-episode-2`,
+        "\u7ea2\u8272\u5b89\u5168\u706f\u6cbf\u7528\uff0c\u5730\u56fe\u5c55\u5f00\uff0c\u7c89\u5c18\u7206\u95ea\u4f5c\u4e3a\u584c\u65b9\u524d\u5146\u3002"
+      ]
+    );
+    await runtime.pool.query("commit");
+  } catch (error) {
+    await runtime.pool.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    await runtime.pool.end();
+  }
 }
 
 async function writeSmokeWorkspaceStore() {
@@ -375,76 +455,8 @@ function buildSmokeWorkspace(): WorkspaceState {
     assetLockRecords: [],
     assetAttachments: [],
     scriptSourceBindings: [],
-    deliveryPackages: [
-      ...seedWorkspace.deliveryPackages,
-      {
-        id: deliveryPackageId,
-        projectId,
-        type: "range",
-        title: "M3 real Postgres smoke delivery",
-        declaredEpisodeFrom: 1,
-        declaredEpisodeTo: 2,
-        status: "published",
-        uploadedByUserId: "user-head-writer",
-        submittedByUserId: "user-head-writer",
-        reviewedByUserId: "user-owner",
-        createdAt: now,
-        submittedAt: now,
-        publishedAt: now
-      },
-      {
-        id: generatedDeliveryPackageId,
-        projectId,
-        type: "range",
-        title: "M3 real Postgres generated smoke delivery",
-        declaredEpisodeFrom: 1,
-        declaredEpisodeTo: 2,
-        status: "published",
-        uploadedByUserId: "user-head-writer",
-        submittedByUserId: "user-head-writer",
-        reviewedByUserId: "user-owner",
-        createdAt: now,
-        submittedAt: now,
-        publishedAt: now
-      }
-    ],
-    deliveryPackageEpisodes: [
-      ...seedWorkspace.deliveryPackageEpisodes,
-      {
-        id: `${deliveryPackageId}-episode-1`,
-        deliveryPackageId,
-        episodeNo: 1,
-        title: "Smoke episode 1",
-        content: "Smoke Mine Lift appears.\nSmoke Mine Lift source binding line.\nSmoke Mine Lift exits.",
-        isConfirmedChange: true
-      },
-      {
-        id: `${deliveryPackageId}-episode-2`,
-        deliveryPackageId,
-        episodeNo: 2,
-        title: "Smoke episode 2",
-        content: "Smoke background continuity line.",
-        isConfirmedChange: true
-      },
-      {
-        id: `${generatedDeliveryPackageId}-episode-1`,
-        deliveryPackageId: generatedDeliveryPackageId,
-        episodeNo: 1,
-        title: "Generated smoke episode 1",
-        content:
-          "\u9435\u7926\u4e95\u5165\u53e3\u65b0\u589e\u5347\u964d\u7b3c\uff0c\u4f17\u4eba\u7b2c\u4e00\u6b21\u8fdb\u5165\u5317\u4e95\u3002",
-        isConfirmedChange: true
-      },
-      {
-        id: `${generatedDeliveryPackageId}-episode-2`,
-        deliveryPackageId: generatedDeliveryPackageId,
-        episodeNo: 2,
-        title: "Generated smoke episode 2",
-        content:
-          "\u7ea2\u8272\u5b89\u5168\u706f\u6cbf\u7528\uff0c\u5730\u56fe\u5c55\u5f00\uff0c\u7c89\u5c18\u7206\u95ea\u4f5c\u4e3a\u584c\u65b9\u524d\u5146\u3002",
-        isConfirmedChange: true
-      }
-    ]
+    deliveryPackages: [],
+    deliveryPackageEpisodes: []
   };
 }
 

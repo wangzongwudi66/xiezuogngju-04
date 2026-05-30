@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { mapAssetLockRecordToDbRows } from "../asset-lock-records/db-repository";
 import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import { readDbDeliveryPackageSnapshot } from "../delivery-packages/db-repository";
 import {
   createDbAssetAttachmentRepository,
   mapAssetAttachmentRows,
@@ -16,6 +17,10 @@ vi.mock("../../../db/runtime", () => ({
 
 vi.mock("../delivery-import-jobs/persistence", () => ({
   readDeliveryImportWorkspace: vi.fn()
+}));
+
+vi.mock("../delivery-packages/db-repository", () => ({
+  readDbDeliveryPackageSnapshot: vi.fn()
 }));
 
 describe("asset lock attachment DB repository mappers", () => {
@@ -134,6 +139,10 @@ describe("asset lock attachment DB repository mappers", () => {
 describe("asset lock attachment DB repository writes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(readDbDeliveryPackageSnapshot).mockResolvedValue({
+      deliveryPackages: seedWorkspace.deliveryPackages,
+      deliveryPackageEpisodes: seedWorkspace.deliveryPackageEpisodes
+    });
     vi.mocked(readDeliveryImportWorkspace).mockResolvedValue({
       state: seedWorkspace,
       deliveryParseIssuesByPackageId: {}

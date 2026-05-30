@@ -136,6 +136,48 @@ describe("asset decision timeline service", () => {
     }
   });
 
+  it("uses repository delivery package episodes for timeline source excerpts", async () => {
+    const record = buildRecord({
+      id: "asset-map",
+      assetName: "Mine Map",
+      assetType: "prop",
+      episodeNos: [2]
+    });
+    const state = buildWorkspace({
+      currentUserId: "user-coordinator",
+      members: [buildMember("user-coordinator", "coordinator")],
+      deliveryPackages: [buildPackage("delivery-current", "project-jincheng", "published")],
+      deliveryPackageEpisodes: [buildPackageEpisode(2, "Mine Map DB package timeline source line.")],
+      assetLockRecords: [record],
+      scriptSourceBindings: []
+    });
+    const repository = createReadOnlyAssetLockRecordRepository({
+      state,
+      assetLockRecords: [record],
+      scriptSourceBindings: []
+    });
+    vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
+
+    const result = await getAssetDecisionTimelineProjection({
+      projectId: "project-jincheng",
+      deliveryPackageId: "delivery-current",
+      actor: { userId: "user-coordinator" }
+    });
+
+    expect(repository.read).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      ok: true,
+      projection: {
+        sourceExcerpts: [
+          expect.objectContaining({
+            excerpt: "Mine Map DB package timeline source line.",
+            sourceKind: "asset_name_match"
+          })
+        ]
+      }
+    });
+  });
+
   it("builds a read-only projection from workspace state for the current member", () => {
     const state = buildWorkspace({
       currentUserId: "user-coordinator",

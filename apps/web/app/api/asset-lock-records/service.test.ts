@@ -83,7 +83,22 @@ describe("asset lock record service", () => {
   it("generates asset records from a package through the DB repository without mutating local workspace state", async () => {
     const deliveryPackageId = await createCandidateDraft();
     const workspace = await getDeliveryImportWorkspace();
-    const repository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    const dbDeliveryPackages = workspace.state.deliveryPackages.filter((item) => item.id === deliveryPackageId);
+    const dbDeliveryPackageEpisodes = workspace.state.deliveryPackageEpisodes.filter(
+      (item) => item.deliveryPackageId === deliveryPackageId
+    );
+    await mutateDeliveryImportWorkspace((state) => ({
+      ...state,
+      deliveryPackages: [],
+      deliveryPackageEpisodes: []
+    }));
+    const repository = createMockDbAssetLockRecordRepository(
+      snapshotFromState({
+        ...workspace.state,
+        deliveryPackages: dbDeliveryPackages,
+        deliveryPackageEpisodes: dbDeliveryPackageEpisodes
+      })
+    );
     vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
 
     const result = await mutateAssetLockRecord({
@@ -120,6 +135,8 @@ describe("asset lock record service", () => {
     expect(result.records.length).toBeGreaterThan(1);
     expect(result.records.every((record) => record.deliveryPackageId === deliveryPackageId)).toBe(true);
     expect(persisted.state.assetLockRecords ?? []).toEqual(workspace.state.assetLockRecords ?? []);
+    expect(persisted.state.deliveryPackages).toEqual([]);
+    expect(persisted.state.deliveryPackageEpisodes).toEqual([]);
   });
 
   it("does not call DB record writes when package generation rejects draft packages", async () => {
@@ -200,7 +217,24 @@ describe("asset lock record service", () => {
     const deliveryPackageId = await createDraft();
     const record = (await createAssetRecord(deliveryPackageId)).record;
     const workspace = await getDeliveryImportWorkspace();
-    const repository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    await mutateDeliveryImportWorkspace((state) => ({
+      ...state,
+      deliveryPackageEpisodes: state.deliveryPackageEpisodes.map((episode) =>
+        episode.deliveryPackageId === deliveryPackageId && episode.episodeNo === 1
+          ? { ...episode, content: "LOCAL STALE SOURCE" }
+          : episode
+      )
+    }));
+    const repository = createMockDbAssetLockRecordRepository(
+      snapshotFromState({
+        ...workspace.state,
+        deliveryPackageEpisodes: workspace.state.deliveryPackageEpisodes.map((episode) =>
+          episode.deliveryPackageId === deliveryPackageId && episode.episodeNo === 1
+            ? { ...episode, content: "DB delivery package source line" }
+            : episode
+        )
+      })
+    );
     vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
 
     const result = await mutateAssetLockRecord({
@@ -224,9 +258,11 @@ describe("asset lock record service", () => {
         episodeNo: 1,
         startLine: 1,
         endLine: 1,
+        excerptSnapshot: "DB delivery package source line",
         createdByUserId: "user-head-writer"
       })
     );
+    expect(result.sourceBinding?.excerptSnapshot).not.toBe("LOCAL STALE SOURCE");
     expect(result.sourceBindings).toEqual([result.sourceBinding]);
     expect(persisted.state.scriptSourceBindings ?? []).toEqual([]);
   });

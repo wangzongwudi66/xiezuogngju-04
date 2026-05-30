@@ -3,6 +3,8 @@ import { asc, eq } from "drizzle-orm";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { assetLockRecordEpisodes, assetLockRecords, scriptSourceBindings } from "../../../db/schema";
 import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import { readDbDeliveryPackageSnapshot } from "../delivery-packages/db-repository";
+import { composeDbWorkspaceSnapshotOverlay } from "../workspace-snapshot";
 import type { DbAssetLockRecordRepository } from "./repository";
 
 export type AssetLockRecordDbRecordRow = typeof assetLockRecords.$inferSelect;
@@ -104,7 +106,7 @@ async function createAssetLockRecordsInDb(records: AssetLockRecord[]) {
 export async function readDbAssetLockRecordRepositorySnapshot() {
   const workspace = await readDeliveryImportWorkspace();
   const { db } = getAssetLockDbRuntime();
-  const [recordRows, episodeRows, sourceBindingRows] = await Promise.all([
+  const [recordRows, episodeRows, sourceBindingRows, deliveryPackageSnapshot] = await Promise.all([
     db.select().from(assetLockRecords).orderBy(asc(assetLockRecords.createdAt), asc(assetLockRecords.id)),
     db
       .select()
@@ -121,13 +123,15 @@ export async function readDbAssetLockRecordRepositorySnapshot() {
         asc(scriptSourceBindings.startLine),
         asc(scriptSourceBindings.endLine),
         asc(scriptSourceBindings.id)
-      )
+      ),
+    readDbDeliveryPackageSnapshot()
   ]);
 
   return toDbRepositorySnapshot(
     workspace.state,
     mapAssetLockRecordRows(recordRows, episodeRows),
-    mapScriptSourceBindingRows(sourceBindingRows)
+    mapScriptSourceBindingRows(sourceBindingRows),
+    deliveryPackageSnapshot
   );
 }
 
@@ -263,13 +267,18 @@ export function mapScriptSourceBindingToDbRow(binding: ScriptSourceBinding): Scr
 function toDbRepositorySnapshot(
   state: WorkspaceState,
   records: AssetLockRecord[],
-  sourceBindings: ScriptSourceBinding[]
+  sourceBindings: ScriptSourceBinding[],
+  deliveryPackageSnapshot: {
+    deliveryPackages: WorkspaceState["deliveryPackages"];
+    deliveryPackageEpisodes: WorkspaceState["deliveryPackageEpisodes"];
+  }
 ) {
-  const nextState: WorkspaceState = {
-    ...state,
+  const nextState = composeDbWorkspaceSnapshotOverlay(state, {
     assetLockRecords: records,
-    scriptSourceBindings: sourceBindings
-  };
+    scriptSourceBindings: sourceBindings,
+    deliveryPackages: deliveryPackageSnapshot.deliveryPackages,
+    deliveryPackageEpisodes: deliveryPackageSnapshot.deliveryPackageEpisodes
+  });
 
   return {
     state: nextState,
