@@ -1,13 +1,15 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   NoSuchKey,
   PutObjectCommand,
   S3Client
 } from "@aws-sdk/client-s3";
-import type { GetObjectCommandOutput, S3ClientConfig } from "@aws-sdk/client-s3";
+import type { GetObjectCommandOutput, HeadObjectCommandOutput, S3ClientConfig } from "@aws-sdk/client-s3";
 
 const attachmentFileDirEnvKey = "AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR";
 const attachmentStorageProviderEnvKey = "ASSET_LOCK_ATTACHMENT_STORAGE_PROVIDER";
@@ -34,6 +36,13 @@ export class AssetAttachmentStorageFileNotFoundError extends Error {
   }
 }
 
+export class AssetAttachmentStorageVerificationError extends Error {
+  constructor() {
+    super("asset_attachment_storage_verification_failed");
+    this.name = "AssetAttachmentStorageVerificationError";
+  }
+}
+
 export interface AssetAttachmentStorage {
   makeKey(input: { fileId: string; extension: string }): string;
   put(input: { key: string; bytes: Uint8Array; mime: string }): Promise<void>;
@@ -43,7 +52,7 @@ export interface AssetAttachmentStorage {
 
 export type AssetAttachmentStorageProvider = "local" | "s3";
 export type AssetAttachmentStorageEnv = Record<string, string | undefined>;
-type S3AssetAttachmentCommand = PutObjectCommand | GetObjectCommand | DeleteObjectCommand;
+type S3AssetAttachmentCommand = PutObjectCommand | HeadObjectCommand | GetObjectCommand | DeleteObjectCommand;
 export interface S3AssetAttachmentClient {
   send(command: S3AssetAttachmentCommand): Promise<unknown>;
 }
@@ -66,14 +75,32 @@ export function createS3AssetAttachmentStorage(input: {
       return joinS3KeyPrefix(prefix, makeLocalAssetAttachmentKey({ fileId, extension }));
     },
     async put({ key, bytes, mime }) {
+      const objectKey = assertSafeS3ObjectKey(key, prefix);
+      const checksumSha256 = sha256Hex(bytes);
+
       await client.send(
         new PutObjectCommand({
           Bucket: bucket,
-          Key: assertSafeS3ObjectKey(key, prefix),
+          Key: objectKey,
           Body: bytes,
-          ContentType: mime
+          ContentType: mime,
+          Metadata: { "checksum-sha256": checksumSha256 }
         })
       );
+
+      try {
+        const head = (await client.send(
+          new HeadObjectCommand({
+            Bucket: bucket,
+            Key: objectKey
+          })
+        )) as HeadObjectCommandOutput;
+
+        assertVerifiedS3Put(head, { checksumSha256, contentLength: bytes.byteLength });
+      } catch {
+        await bestEffortDeleteS3Object(client, { bucket, key: objectKey });
+        throw new AssetAttachmentStorageVerificationError();
+      }
     },
     async get({ key }) {
       try {
@@ -148,6 +175,7 @@ const localAssetAttachmentStorage: AssetAttachmentStorage = {
 
     await mkdir(/* turbopackIgnore: true */ path.dirname(filePath), { recursive: true });
     await writeFile(/* turbopackIgnore: true */ filePath, input.bytes);
+    await assertVerifiedLocalPut(filePath, input.bytes.byteLength);
   },
   async get(input) {
     const filePath = resolveAssetAttachmentStoragePath(input.key);
@@ -307,6 +335,62 @@ function assertSafeS3ObjectKey(key: string, prefix: string) {
   }
 
   return normalized;
+}
+
+async function assertVerifiedLocalPut(filePath: string, contentLength: number) {
+  let stats: Awaited<ReturnType<typeof stat>>;
+
+  try {
+    stats = await stat(/* turbopackIgnore: true */ filePath);
+  } catch {
+    throw new AssetAttachmentStorageVerificationError();
+  }
+
+  if (stats.size !== contentLength) {
+    throw new AssetAttachmentStorageVerificationError();
+  }
+}
+
+function assertVerifiedS3Put(
+  head: HeadObjectCommandOutput,
+  expected: { checksumSha256: string; contentLength: number }
+) {
+  const headChecksumSha256 = readCaseInsensitiveMetadata(head.Metadata, "checksum-sha256");
+
+  if (head.ContentLength !== expected.contentLength || headChecksumSha256 !== expected.checksumSha256) {
+    throw new AssetAttachmentStorageVerificationError();
+  }
+}
+
+function readCaseInsensitiveMetadata(metadata: Record<string, string> | undefined, key: string) {
+  if (!metadata) {
+    return undefined;
+  }
+
+  const normalizedKey = key.toLowerCase();
+  const entry = Object.entries(metadata).find(([name]) => name.toLowerCase() === normalizedKey);
+
+  return entry?.[1];
+}
+
+async function bestEffortDeleteS3Object(
+  client: S3AssetAttachmentClient,
+  input: { bucket: string; key: string }
+) {
+  try {
+    await client.send(
+      new DeleteObjectCommand({
+        Bucket: input.bucket,
+        Key: input.key
+      })
+    );
+  } catch {
+    // Verification failure is the stable upload result; cleanup is best effort.
+  }
+}
+
+function sha256Hex(bytes: Uint8Array) {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 async function toUint8Array(body: GetObjectCommandOutput["Body"]) {

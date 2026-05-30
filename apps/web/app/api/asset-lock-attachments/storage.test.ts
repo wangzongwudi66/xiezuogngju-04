@@ -1,12 +1,23 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { createHash } from "node:crypto";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { describe, expect, it, vi } from "vitest";
 import {
   AssetAttachmentStorageFileNotFoundError,
+  createLocalAssetAttachmentStorage,
   createS3AssetAttachmentStorage,
   resolveAssetAttachmentStorage,
   resolveAssetAttachmentStorageProvider
 } from "./storage";
 import type { S3AssetAttachmentClient } from "./storage";
+
+type MockHeadObjectOutput = {
+  ContentLength?: number;
+  ETag?: string;
+  Metadata?: Record<string, string>;
+};
 
 describe("asset attachment storage resolver", () => {
   it("defaults to local storage unless s3 is explicitly requested", () => {
@@ -32,17 +43,26 @@ describe("asset attachment storage resolver", () => {
     const client = createMockS3Client();
     const storage = createS3AssetAttachmentStorage({ bucket: "asset-bucket", prefix: "tenant-a/assets", client });
     const key = storage.makeKey({ fileId: "asset-att-123e4567-e89b-12d3-a456-426614174000", extension: ".PNG" });
+    const bytes = new Uint8Array([1, 2, 3]);
+    const checksumSha256 = sha256Hex(bytes);
 
-    await storage.put({ key, bytes: new Uint8Array([1, 2, 3]), mime: "image/png" });
+    await storage.put({ key, bytes, mime: "image/png" });
     const putCommand = client.send.mock.calls[0][0] as PutObjectCommand;
+    const headCommand = client.send.mock.calls[1][0] as HeadObjectCommand;
 
     expect(key).toBe("tenant-a/assets/asset-att-123e4567-e89b-12d3-a456-426614174000.png");
     expect(putCommand).toBeInstanceOf(PutObjectCommand);
     expect(putCommand.input).toEqual({
       Bucket: "asset-bucket",
       Key: "tenant-a/assets/asset-att-123e4567-e89b-12d3-a456-426614174000.png",
-      Body: new Uint8Array([1, 2, 3]),
-      ContentType: "image/png"
+      Body: bytes,
+      ContentType: "image/png",
+      Metadata: { "checksum-sha256": checksumSha256 }
+    });
+    expect(headCommand).toBeInstanceOf(HeadObjectCommand);
+    expect(headCommand.input).toEqual({
+      Bucket: "asset-bucket",
+      Key: "tenant-a/assets/asset-att-123e4567-e89b-12d3-a456-426614174000.png"
     });
   });
 
@@ -89,6 +109,59 @@ describe("asset attachment storage resolver", () => {
     expect(client.send).not.toHaveBeenCalled();
   });
 
+  it("rejects s3 puts when the verified content length differs", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const client = createMockS3Client({
+      headOutput: {
+        ContentLength: bytes.byteLength + 1,
+        Metadata: { "checksum-sha256": sha256Hex(bytes) }
+      }
+    });
+    const storage = createS3AssetAttachmentStorage({ bucket: "asset-bucket", client });
+    const key = storage.makeKey({ fileId: "asset-att-123e4567-e89b-12d3-a456-426614174000", extension: ".png" });
+
+    await expect(storage.put({ key, bytes, mime: "image/png" })).rejects.toThrow(
+      "asset_attachment_storage_verification_failed"
+    );
+
+    expect(client.send.mock.calls[1][0]).toBeInstanceOf(HeadObjectCommand);
+    expect(client.send.mock.calls[2][0]).toBeInstanceOf(DeleteObjectCommand);
+  });
+
+  it("rejects s3 puts when the verified checksum metadata is missing or mismatched", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const invalidHeadOutputs: MockHeadObjectOutput[] = [
+      { ContentLength: bytes.byteLength, Metadata: undefined },
+      { ContentLength: bytes.byteLength, Metadata: { "checksum-sha256": sha256Hex(new Uint8Array([9])) } }
+    ];
+
+    for (const headOutput of invalidHeadOutputs) {
+      const client = createMockS3Client({ headOutput });
+      const storage = createS3AssetAttachmentStorage({ bucket: "asset-bucket", client });
+      const key = storage.makeKey({ fileId: "asset-att-123e4567-e89b-12d3-a456-426614174000", extension: ".png" });
+
+      await expect(storage.put({ key, bytes, mime: "image/png" })).rejects.toThrow(
+        "asset_attachment_storage_verification_failed"
+      );
+    }
+  });
+
+  it("rejects s3 puts when only ETag looks like a checksum", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const client = createMockS3Client({
+      headOutput: {
+        ContentLength: bytes.byteLength,
+        ETag: `"${sha256Hex(bytes)}"`
+      }
+    });
+    const storage = createS3AssetAttachmentStorage({ bucket: "asset-bucket", client });
+    const key = storage.makeKey({ fileId: "asset-att-123e4567-e89b-12d3-a456-426614174000", extension: ".png" });
+
+    await expect(storage.put({ key, bytes, mime: "image/png" })).rejects.toThrow(
+      "asset_attachment_storage_verification_failed"
+    );
+  });
+
   it("rejects unsafe persisted s3 read keys", async () => {
     const storage = createS3AssetAttachmentStorage({ bucket: "asset-bucket", client: createMockS3Client() });
     const unsafeKeys = [
@@ -116,11 +189,49 @@ describe("asset attachment storage resolver", () => {
 
     await expect(storage.get({ key })).rejects.toBeInstanceOf(AssetAttachmentStorageFileNotFoundError);
   });
+
+  it("verifies local puts by checking the written file length", async () => {
+    const previousFileDir = process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR;
+    const fileDir = join(tmpdir(), `aigc-asset-lock-attachment-storage-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const storage = createLocalAssetAttachmentStorage();
+    const key = storage.makeKey({ fileId: "asset-att-123e4567-e89b-12d3-a456-426614174000", extension: ".png" });
+    const bytes = new Uint8Array([1, 2, 3]);
+
+    process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR = fileDir;
+
+    try {
+      await expect(storage.put({ key, bytes, mime: "image/png" })).resolves.toBeUndefined();
+      await expect(readFile(join(fileDir, key))).resolves.toEqual(Buffer.from(bytes));
+    } finally {
+      if (previousFileDir === undefined) {
+        delete process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR;
+      } else {
+        process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR = previousFileDir;
+      }
+      await rm(fileDir, { recursive: true, force: true });
+    }
+  });
 });
 
-function createMockS3Client(input: { getBody?: Uint8Array; getError?: Error } = {}) {
+function createMockS3Client(input: { getBody?: Uint8Array; getError?: Error; headOutput?: MockHeadObjectOutput } = {}) {
+  let putBody = new Uint8Array();
+
   const client: S3AssetAttachmentClient = {
     send: vi.fn(async (command) => {
+      if (command instanceof PutObjectCommand) {
+        putBody = command.input.Body instanceof Uint8Array ? new Uint8Array(command.input.Body) : new Uint8Array();
+        return {};
+      }
+
+      if (command instanceof HeadObjectCommand) {
+        return (
+          input.headOutput ?? {
+            ContentLength: putBody.byteLength,
+            Metadata: { "Checksum-Sha256": sha256Hex(putBody) }
+          }
+        );
+      }
+
       if (command instanceof GetObjectCommand) {
         if (input.getError) {
           throw input.getError;
@@ -134,4 +245,8 @@ function createMockS3Client(input: { getBody?: Uint8Array; getError?: Error } = 
   };
 
   return client as S3AssetAttachmentClient & { send: ReturnType<typeof vi.fn> };
+}
+
+function sha256Hex(bytes: Uint8Array) {
+  return createHash("sha256").update(bytes).digest("hex");
 }

@@ -203,6 +203,29 @@ describe("asset lock attachment route", () => {
     expect(serialized).not.toContain("objects.example");
   });
 
+  it("maps storage verification upload failures to a stable gateway error", async () => {
+    const recordId = (await createAssetRecord()).record.id;
+    vi.spyOn(assetAttachmentService, "uploadAssetAttachment").mockRejectedValue(
+      new Error(
+        "asset_attachment_storage_verification_failed bucket asset-bucket key asset-lock-attachments/asset-att-123e4567-e89b-12d3-a456-426614174000.png endpoint https://objects.example checksum abc"
+      )
+    );
+
+    const response = await POST(formRequest(buildUploadForm(recordId)));
+    const payload = await response.json();
+    const serialized = JSON.stringify(payload);
+
+    expect(response.status).toBe(502);
+    expect(payload).toEqual({
+      error: "asset_attachment_storage_verification_failed",
+      message: "asset_attachment_storage_verification_failed"
+    });
+    expect(serialized).not.toContain("asset-bucket");
+    expect(serialized).not.toContain("asset-lock-attachments");
+    expect(serialized).not.toContain("objects.example");
+    expect(serialized).not.toContain("checksum");
+  });
+
   it("does not expose storage bucket configuration errors on upload", async () => {
     const recordId = (await createAssetRecord()).record.id;
     vi.spyOn(assetAttachmentService, "uploadAssetAttachment").mockRejectedValue(
