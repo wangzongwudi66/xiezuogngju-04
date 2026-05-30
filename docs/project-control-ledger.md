@@ -5,18 +5,31 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 18:20:17 +08:00`.
+Timestamp: `2026-05-30 19:04:49 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `5dae751 Record current DB backend checkpoint`.
-- Latest product/test code commit on `main`: `65bec60 Add delivery package DB write repository skeleton`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-postgres-smoke-runbook` and rebased `codex/m3-delivery-package-db-write-repository`; ledger update pending commit.
-- Remote sync pending for this ledger update; `main@5dae751` was the last pushed checkpoint before the runbook and delivery package DB repository skeleton merges.
+- Latest recorded `main` checkpoint: `6856fb0 Record delivery package repository skeleton merge`.
+- Latest product/test code commit on `main`: `9892733 Wire delivery import drafts to DB mode`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-delivery-import-db-draft`; ledger update pending commit.
+- Remote sync pending for this ledger update; `main@6856fb0` was the last pushed checkpoint before the delivery import DB draft wiring merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `9892733 Wire delivery import drafts to DB mode`
+  - DB mode delivery imports now write successful draft delivery packages and package episodes to the DB repository, while local JSON only keeps job/result metadata and parse issues.
+  - DB mode delivery import workspace reads now return the full DB workspace overlay instead of only overlaying delivery packages, preventing stale local DB-owned arrays from leaking through `GET /api/delivery-import-jobs?scope=workspace`.
+  - Draft generation now uses the DB-overlaid workspace for domain validation/generation, then writes only the package/episodes to DB.
+  - Delivery package mutations remain fail-closed in DB mode for `update_confirmation`, `submit`, `reject`, and `publish`; `prepare_demo` remains unsupported in DB mode.
+  - Adds low-level asset-lock DB parts readers to avoid `persistence -> asset-lock db repository -> persistence` circular dependency while sharing the central workspace overlay.
+  - Child review 42 found no P0/P1/P2; P3 notes `postgres-smoke` still does not cover `createDeliveryImportJob` import-to-DB draft wiring. Real `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run test -w apps/web -- app/api/delivery-import-jobs/service.test.ts app/api/delivery-import-jobs/route.test.ts app/api/delivery-packages/service.test.ts app/api/delivery-packages/db-repository.test.ts`: passed, 4 files / 41 tests.
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/db-repository.test.ts app/api/asset-lock-records/service.test.ts`: passed, 2 files / 51 tests.
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `65bec60 Add delivery package DB write repository skeleton`
   - Rebases `codex/m3-delivery-package-db-write-repository` onto `main@71b4efb` and fast-forward merges it into `main`; original implementation review commit was `f346573`.
   - Adds explicit delivery package DB repository write methods for package + episodes creation and status updates without exposing a generic `mutate(callback)`.
