@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import { requireSameOriginMutatingRequest } from "../request-origin";
 import {
   clearedWorkspaceSessionCookieOptions,
   createWorkspaceSessionCookieValue,
@@ -10,6 +11,12 @@ import {
 
 export async function POST(request: Request) {
   let body: unknown;
+
+  try {
+    requireSameOriginMutatingRequest(request);
+  } catch {
+    return NextResponse.json({ ok: false, error: "request_origin_forbidden" }, { status: 403 });
+  }
 
   try {
     body = await request.json();

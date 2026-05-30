@@ -45,6 +45,46 @@ describe("auth scope admin route", () => {
     expect(repository.createProjectWithEpisodes).not.toHaveBeenCalled();
   });
 
+  it("rejects cross-origin admin mutations before resolving the session actor", async () => {
+    const response = await POST(
+      jsonRequest(
+        {
+          action: "create_project",
+          name: "Cross Origin",
+          episodeCount: 1
+        },
+        "user-owner",
+        {
+          origin: "http://evil.local"
+        }
+      )
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ ok: false, error: "request_origin_forbidden" });
+    expect(repository.createProjectWithEpisodes).not.toHaveBeenCalled();
+  });
+
+  it("rejects cross-site admin mutations without relying on Origin", async () => {
+    const response = await POST(
+      jsonRequest(
+        {
+          action: "create_project",
+          name: "Cross Site",
+          episodeCount: 1
+        },
+        "user-owner",
+        {
+          "sec-fetch-site": "cross-site"
+        }
+      )
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ ok: false, error: "request_origin_forbidden" });
+    expect(repository.createProjectWithEpisodes).not.toHaveBeenCalled();
+  });
+
   it("creates projects with the cookie actor and ignores client actor fields", async () => {
     const response = await POST(
       jsonRequest(
@@ -197,9 +237,10 @@ describe("auth scope admin route", () => {
   });
 });
 
-function jsonRequest(body: unknown, userId?: string) {
+function jsonRequest(body: unknown, userId?: string, extraHeaders: Record<string, string> = {}) {
   const headers = new Headers({
-    "Content-Type": "application/json"
+    "Content-Type": "application/json",
+    ...extraHeaders
   });
 
   if (userId) {

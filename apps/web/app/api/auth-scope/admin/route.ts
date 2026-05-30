@@ -1,5 +1,6 @@
 import type { EpisodeAssignment, PermissionKey, ProjectRole } from "@aigc/domain";
 import { NextResponse } from "next/server";
+import { requireSameOriginMutatingRequest } from "../../request-origin";
 import { requireWorkspaceRequestActor } from "../../workspace-actor";
 import { readDbAuthScopeSnapshot } from "../db-repository";
 import { createDbAuthScopeWriteRepository } from "../db-write-repository";
@@ -40,6 +41,12 @@ type AuthScopeAdminRequest =
 
 export async function POST(request: Request) {
   let body: unknown;
+
+  try {
+    requireSameOriginMutatingRequest(request);
+  } catch {
+    return NextResponse.json({ ok: false, error: "request_origin_forbidden" }, { status: 403 });
+  }
 
   try {
     body = await request.json();

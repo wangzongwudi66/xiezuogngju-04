@@ -46,6 +46,36 @@ describe("workspace session route", () => {
     });
   });
 
+  it("rejects cross-origin session selection requests", async () => {
+    const response = await POST(
+      jsonRequest(
+        { userId: "user-owner" },
+        {
+          origin: "http://evil.local"
+        }
+      )
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ ok: false, error: "request_origin_forbidden" });
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("rejects cross-site session selection requests without relying on Origin", async () => {
+    const response = await POST(
+      jsonRequest(
+        { userId: "user-owner" },
+        {
+          "sec-fetch-site": "cross-site"
+        }
+      )
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ ok: false, error: "request_origin_forbidden" });
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
   it("fails closed when the session secret is missing", async () => {
     delete process.env.AIGC_WORKSPACE_SESSION_SECRET;
 
@@ -119,11 +149,12 @@ describe("workspace session route", () => {
   });
 });
 
-function jsonRequest(body: unknown) {
+function jsonRequest(body: unknown, extraHeaders: Record<string, string> = {}) {
   return new Request("http://localhost/api/workspace-session", {
     body: JSON.stringify(body),
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      ...extraHeaders
     },
     method: "POST"
   });
