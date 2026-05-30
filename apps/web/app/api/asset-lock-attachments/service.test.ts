@@ -457,6 +457,29 @@ describe("asset lock attachment service", () => {
     await expect(readSavedFileNames()).resolves.toEqual([`${attachment.fileId}.png`]);
   });
 
+  it("returns DB-committed attachment metadata when DB upload reallocates version", async () => {
+    const record = (await createAssetRecord()).record;
+    const workspace = await getDeliveryImportWorkspace();
+    const repository = createMockDbAssetAttachmentRepository(snapshotFromState(workspace.state), {
+      createCommittedAttachment: (command) => ({ ...command.attachment, version: command.attachment.version + 1 })
+    });
+
+    const attachment = await uploadAssetAttachment(buildUploadInput(record.id), { userId: currentActorUserId }, { repository });
+
+    expect(repository.createAssetAttachmentMetadata).toHaveBeenCalledTimes(1);
+    expect(repository.createAssetAttachmentMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachment: expect.objectContaining({ version: 1 })
+      })
+    );
+    expect(attachment).toMatchObject({
+      assetLockRecordId: record.id,
+      version: 2,
+      status: "active"
+    });
+    await expect(readSavedFileNames()).resolves.toEqual([`${attachment.fileId}.png`]);
+  });
+
   it("uses DB-only asset lock records for DB attachment upload, list, download, and delete validation", async () => {
     const deliveryPackageId = await createPublishedDeliveryPackage([1, 2]);
     const workspace = await getDeliveryImportWorkspace();
@@ -760,7 +783,14 @@ describe("asset lock attachment service", () => {
 
   function createMockDbAssetAttachmentRepository(
     initialSnapshot: AssetAttachmentRepositorySnapshot,
-    options: { createError?: Error; softDeleteError?: Error } = {}
+    options: {
+      createError?: Error;
+      softDeleteError?: Error;
+      createCommittedAttachment?: (
+        command: Parameters<DbAssetAttachmentRepository["createAssetAttachmentMetadata"]>[0],
+        snapshot: AssetAttachmentRepositorySnapshot
+      ) => AssetAttachment;
+    } = {}
   ): DbAssetAttachmentRepository {
     let currentSnapshot = initialSnapshot;
 
@@ -772,12 +802,14 @@ describe("asset lock attachment service", () => {
           throw options.createError;
         }
 
+        const committedAttachment = options.createCommittedAttachment?.(command, currentSnapshot) ?? command.attachment;
+
         currentSnapshot = snapshotFromState({
           ...currentSnapshot.state,
-          assetAttachments: [...currentSnapshot.assetAttachments, command.attachment]
+          assetAttachments: [...currentSnapshot.assetAttachments, committedAttachment]
         });
 
-        return command.attachment;
+        return committedAttachment;
       }),
       softDeleteAssetAttachmentMetadata: vi.fn(async (input) => {
         if (options.softDeleteError) {

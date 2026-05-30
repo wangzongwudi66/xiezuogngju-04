@@ -1,5 +1,5 @@
 import type { AssetAttachment, WorkspaceState } from "@aigc/domain";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { assetAttachments } from "../../../db/schema";
 import { readDbAssetLockRecordRepositorySnapshot } from "../asset-lock-records/db-repository";
@@ -7,6 +7,7 @@ import type { DbAssetAttachmentRepository } from "./repository";
 
 export type AssetAttachmentDbRow = typeof assetAttachments.$inferSelect;
 type AssetAttachmentDbInsert = typeof assetAttachments.$inferInsert;
+const createMetadataMaxAttempts = 3;
 
 export function createDbAssetAttachmentRepository(): DbAssetAttachmentRepository {
   async function read() {
@@ -31,14 +32,41 @@ export function createDbAssetAttachmentRepository(): DbAssetAttachmentRepository
     read,
     async createAssetAttachmentMetadata(command) {
       const { db } = getAssetLockDbRuntime();
-      const insertedRows = await db.insert(assetAttachments).values(mapAssetAttachmentToDbRow(command.attachment)).returning();
-      const inserted = mapAssetAttachmentRows(insertedRows)[0];
 
-      if (!inserted) {
-        throw new Error("asset_attachment_metadata_not_created");
+      for (let attempt = 1; attempt <= createMetadataMaxAttempts; attempt += 1) {
+        try {
+          const inserted = await db.transaction(async (tx) => {
+            const nextVersion = await readNextAssetAttachmentVersion(tx, command.attachment.assetLockRecordId);
+            const insertedRows = await tx
+              .insert(assetAttachments)
+              .values(mapAssetAttachmentToDbRow({ ...command.attachment, version: nextVersion }))
+              .returning();
+            return mapAssetAttachmentRows(insertedRows)[0];
+          });
+
+          if (!inserted) {
+            throw new Error("asset_attachment_metadata_not_created");
+          }
+
+          return inserted;
+        } catch (error) {
+          if (isRecordVersionUniqueViolation(error)) {
+            if (attempt < createMetadataMaxAttempts) {
+              continue;
+            }
+
+            throw new Error("asset_attachment_version_conflict");
+          }
+
+          if (isUniqueViolation(error)) {
+            throw new Error("asset_attachment_metadata_conflict");
+          }
+
+          throw error;
+        }
       }
 
-      return inserted;
+      throw new Error("asset_attachment_version_conflict");
     },
     async softDeleteAssetAttachmentMetadata(input) {
       const { db } = getAssetLockDbRuntime();
@@ -60,6 +88,20 @@ export function createDbAssetAttachmentRepository(): DbAssetAttachmentRepository
       return deleted;
     }
   };
+}
+
+async function readNextAssetAttachmentVersion(
+  db: Pick<ReturnType<typeof getAssetLockDbRuntime>["db"], "select">,
+  assetLockRecordId: string
+) {
+  const rows = await db
+    .select({ version: assetAttachments.version })
+    .from(assetAttachments)
+    .where(eq(assetAttachments.assetLockRecordId, assetLockRecordId))
+    .orderBy(desc(assetAttachments.version))
+    .limit(1);
+
+  return (rows[0]?.version ?? 0) + 1;
 }
 
 export function mapAssetAttachmentRows(rows: AssetAttachmentDbRow[]): AssetAttachment[] {
@@ -130,4 +172,39 @@ function toAssetAttachmentDbMime(mime: string): AssetAttachmentDbInsert["mime"] 
     default:
       throw new Error("asset_attachment_file_type_invalid");
   }
+}
+
+function isRecordVersionUniqueViolation(error: unknown) {
+  return findErrorCause(error, (candidate) => {
+    const code = getErrorProperty(candidate, "code");
+    const constraint = getErrorProperty(candidate, "constraint");
+
+    return code === "23505" && constraint === "asset_attachments_record_version_unique";
+  });
+}
+
+function isUniqueViolation(error: unknown) {
+  return findErrorCause(error, (candidate) => getErrorProperty(candidate, "code") === "23505");
+}
+
+function findErrorCause(error: unknown, predicate: (candidate: unknown) => boolean): boolean {
+  let candidate = error;
+
+  while (candidate) {
+    if (predicate(candidate)) {
+      return true;
+    }
+
+    candidate = getErrorProperty(candidate, "cause");
+  }
+
+  return false;
+}
+
+function getErrorProperty(error: unknown, key: string) {
+  if (!error || typeof error !== "object" || !(key in error)) {
+    return undefined;
+  }
+
+  return (error as Record<string, unknown>)[key];
 }

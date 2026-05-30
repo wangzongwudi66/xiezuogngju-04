@@ -194,9 +194,82 @@ describe("asset lock attachment DB repository writes", () => {
       metadataInput: metadataInputFromAttachment(attachment)
     });
 
+    expect(mockDb.transaction).toHaveBeenCalledTimes(1);
     expect(mockDb.insertValues).toHaveBeenCalledWith(mapAssetAttachmentToDbRow(attachment));
     expect(mockDb.insertReturning).toHaveBeenCalledTimes(1);
     expect(committed).toEqual(attachment);
+  });
+
+  it("allocates attachment version inside the DB transaction from current rows", async () => {
+    const staleAttachment = buildAttachment({ version: 1 });
+    const committedAttachment = buildAttachment({ version: 8 });
+    const mockDb = createMockDb({
+      insertedRows: [mapAssetAttachmentToDbRow(committedAttachment) as AssetAttachmentDbRow],
+      versionRows: [[{ version: 7 }]]
+    });
+    mockRuntime(mockDb.db);
+
+    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata({
+      attachment: staleAttachment,
+      metadataInput: metadataInputFromAttachment(staleAttachment)
+    });
+
+    expect(mockDb.transaction).toHaveBeenCalledTimes(1);
+    expect(mockDb.selectVersionWhere).toHaveBeenCalledTimes(1);
+    expect(mockDb.insertValues).toHaveBeenCalledWith(mapAssetAttachmentToDbRow(committedAttachment));
+    expect(committed).toEqual(committedAttachment);
+  });
+
+  it("retries a record-version unique conflict with a fresh DB version allocation", async () => {
+    const staleAttachment = buildAttachment({ version: 1 });
+    const committedAttachment = buildAttachment({ version: 3 });
+    const mockDb = createMockDb({
+      insertedRows: [mapAssetAttachmentToDbRow(committedAttachment) as AssetAttachmentDbRow],
+      transactionErrors: [recordVersionUniqueViolation()],
+      versionRows: [[{ version: 2 }]]
+    });
+    mockRuntime(mockDb.db);
+
+    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata({
+      attachment: staleAttachment,
+      metadataInput: metadataInputFromAttachment(staleAttachment)
+    });
+
+    expect(mockDb.transaction).toHaveBeenCalledTimes(2);
+    expect(mockDb.insertValues).toHaveBeenCalledWith(mapAssetAttachmentToDbRow(committedAttachment));
+    expect(committed).toEqual(committedAttachment);
+  });
+
+  it("throws a stable error when record-version unique conflicts exhaust retries", async () => {
+    const attachment = buildAttachment();
+    const mockDb = createMockDb({
+      transactionErrors: [recordVersionUniqueViolation(), recordVersionUniqueViolation(), recordVersionUniqueViolation()]
+    });
+    mockRuntime(mockDb.db);
+
+    await expect(
+      createDbAssetAttachmentRepository().createAssetAttachmentMetadata({
+        attachment,
+        metadataInput: metadataInputFromAttachment(attachment)
+      })
+    ).rejects.toThrow("asset_attachment_version_conflict");
+    expect(mockDb.transaction).toHaveBeenCalledTimes(3);
+  });
+
+  it("throws a stable metadata conflict for non-version unique violations", async () => {
+    const attachment = buildAttachment();
+    const mockDb = createMockDb({
+      transactionErrors: [uniqueViolation("asset_attachments_file_id_unique")]
+    });
+    mockRuntime(mockDb.db);
+
+    await expect(
+      createDbAssetAttachmentRepository().createAssetAttachmentMetadata({
+        attachment,
+        metadataInput: metadataInputFromAttachment(attachment)
+      })
+    ).rejects.toThrow("asset_attachment_metadata_conflict");
+    expect(mockDb.transaction).toHaveBeenCalledTimes(1);
   });
 
   it("throws a stable error when no metadata row is inserted", async () => {
@@ -309,11 +382,25 @@ function mockRuntime(db: unknown) {
   } as ReturnType<typeof getAssetLockDbRuntime>);
 }
 
-function createMockDb(input: { insertedRows?: unknown[]; updatedRows?: unknown[]; selectResults?: unknown[][] } = {}) {
+function createMockDb(
+  input: {
+    insertedRows?: unknown[];
+    updatedRows?: unknown[];
+    selectResults?: unknown[][];
+    transactionErrors?: unknown[];
+    versionRows?: unknown[][];
+  } = {}
+) {
   const selectResults = [...(input.selectResults ?? [])];
+  const transactionErrors = [...(input.transactionErrors ?? [])];
+  const versionRows = [...(input.versionRows ?? [])];
   const orderBy = vi.fn(async () => selectResults.shift() ?? []);
   const from = vi.fn(() => ({ orderBy }));
-  const select = vi.fn(() => ({ from }));
+  const selectVersionLimit = vi.fn(async () => versionRows.shift() ?? []);
+  const selectVersionOrderBy = vi.fn(() => ({ limit: selectVersionLimit }));
+  const selectVersionWhere = vi.fn(() => ({ orderBy: selectVersionOrderBy }));
+  const selectVersionFrom = vi.fn(() => ({ where: selectVersionWhere }));
+  const select = vi.fn((projection?: unknown) => (projection ? { from: selectVersionFrom } : { from }));
   const insertReturning = vi.fn(async () => input.insertedRows ?? []);
   const insertValues = vi.fn(() => ({ returning: insertReturning }));
   const insert = vi.fn(() => ({ values: insertValues }));
@@ -321,18 +408,46 @@ function createMockDb(input: { insertedRows?: unknown[]; updatedRows?: unknown[]
   const updateWhere = vi.fn(() => ({ returning: updateReturning }));
   const updateSet = vi.fn(() => ({ where: updateWhere }));
   const update = vi.fn(() => ({ set: updateSet }));
-  const db = {
+  const tx = {
     select,
     insert,
     update
   };
+  const transaction = vi.fn(async (callback: (transactionClient: typeof tx) => Promise<unknown> | unknown) => {
+    const error = transactionErrors.shift();
+
+    if (error) {
+      throw error;
+    }
+
+    return callback(tx);
+  });
+  const db = {
+    select,
+    insert,
+    update,
+    transaction
+  };
 
   return {
     db,
+    transaction,
     insertValues,
     insertReturning,
+    selectVersionWhere,
     updateSet,
     updateWhere,
     updateReturning
   };
+}
+
+function recordVersionUniqueViolation() {
+  return uniqueViolation("asset_attachments_record_version_unique");
+}
+
+function uniqueViolation(constraint: string) {
+  return Object.assign(new Error("duplicate key value violates unique constraint"), {
+    code: "23505",
+    constraint
+  });
 }
