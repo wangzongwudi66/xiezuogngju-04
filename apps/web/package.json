@@ -8,6 +8,7 @@
     "build": "next build",
     "db:check": "drizzle-kit check",
     "db:generate": "drizzle-kit generate",
+    "db:smoke": "vitest run --config db/postgres-smoke.vitest.config.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
