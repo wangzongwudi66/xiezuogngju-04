@@ -5,18 +5,30 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 21:41:19 +08:00`.
+Timestamp: `2026-05-30 22:01:30 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `6e0dc6c Use server workspace actor for delivery routes`.
-- Latest product/test code commit on `main`: `6e0dc6c Use server workspace actor for delivery routes`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-delivery-routes-server-actor` and running post-merge validation.
-- Remote sync note: `main@c59a37f` was the last pushed checkpoint before this delivery routes server actor merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
+- Latest recorded `main` checkpoint: `0588d61 Require asset attachment storage delete`.
+- Latest product/test code commit on `main`: `0588d61 Require asset attachment storage delete`.
+- Worktree at last check: clean after fast-forward merging `codex/asset-attachment-storage-contract` and running post-merge validation.
+- Remote sync note: `main@315aaaa` was the last pushed checkpoint before this attachment storage contract merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `0588d61 Require asset attachment storage delete`
+  - Fast-forward merges `codex/asset-attachment-storage-contract`, including the original storage abstraction commit `c12dfb9` and the P2 fix commit `0588d61`.
+  - Adds `apps/web/app/api/asset-lock-attachments/storage.ts` and routes attachment bytes through a storage abstraction while preserving current local filesystem behavior and schema.
+  - Keeps storage keys derived from `fileId + extension`; no `storageKey`, `checksum`, or `contentLength` schema fields were added.
+  - Upload still writes bytes before metadata and now requires storage implementations to provide `delete`; metadata persistence failure unconditionally attempts delete compensation while preserving the original metadata error.
+  - Download reads through `storage.get`; delete remains metadata soft-delete only and does not physically delete bytes.
+  - Keeps the slice scoped: no DB schema/migration, object storage provider, Postgres byte storage, UI/browser QA, or `db:smoke` changes.
+  - Child review 22 initially found a P2 because storage delete was optional; child review 24 confirmed the P2 was fixed and found no P0/P1/P2/P3. Real `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-attachments/service.test.ts app/api/asset-lock-attachments/route.test.ts app/api/asset-lock-attachments/db-repository.test.ts`: passed, 3 files / 61 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `6e0dc6c Use server workspace actor for delivery routes`
   - Delivery import create/retry now derives the actor from the server workspace `currentUserId` and ignores client-supplied `uploadedByUserId`; retry no longer reuses a historical job actor.
   - Delivery package `submit`, `publish`, and `reject` routes now derive `actorUserId` from the server workspace actor while preserving old request body field compatibility.
