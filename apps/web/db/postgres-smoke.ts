@@ -6,6 +6,7 @@ import { seedWorkspace, type WorkspaceState } from "@aigc/domain";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createAssetLockDbRuntime, getAssetLockDbRuntime } from "./runtime";
+import { readDbAssetLockRecordRepositorySnapshot } from "../app/api/asset-lock-records/db-repository";
 import { mutateAssetLockRecord } from "../app/api/asset-lock-records/service";
 import {
   deleteAssetAttachment,
@@ -34,6 +35,7 @@ const projectId = "project-jincheng";
 const deliveryPackagePrefix = "smoke-delivery-";
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const deliveryPackageId = `${deliveryPackagePrefix}${runId}`;
+const generatedDeliveryPackageId = `${deliveryPackagePrefix}generated-${runId}`;
 const now = "2026-05-30T00:00:00.000Z";
 
 let tempDir = "";
@@ -65,7 +67,43 @@ describe("real Postgres asset lock smoke", () => {
     }
   });
 
-  it("creates, binds, uploads, deletes, projects, and locks asset data through Postgres", async () => {
+  it("generates, creates, binds, uploads, deletes, projects, locks, and cleans asset data through Postgres", async () => {
+    const generated = await mutateAssetLockRecord(
+      {
+        action: "generate_from_package",
+        projectId,
+        deliveryPackageId: generatedDeliveryPackageId
+      },
+      { userId: "user-head-writer" }
+    );
+    const generatedRecords = generated.records.filter((record) => record.deliveryPackageId === generatedDeliveryPackageId);
+    const generatedSnapshot = await readDbAssetLockRecordRepositorySnapshot();
+    const generatedSnapshotRecords = generatedSnapshot.assetLockRecords.filter(
+      (record) => record.deliveryPackageId === generatedDeliveryPackageId
+    );
+
+    expect(generatedRecords.length).toBeGreaterThan(1);
+    expect(generatedRecords).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          projectId,
+          deliveryPackageId: generatedDeliveryPackageId,
+          assetType: "scene",
+          episodeNos: [1],
+          createdByUserId: "user-head-writer"
+        }),
+        expect.objectContaining({
+          projectId,
+          deliveryPackageId: generatedDeliveryPackageId,
+          assetType: "prop",
+          createdByUserId: "user-head-writer"
+        })
+      ])
+    );
+    expect(generatedSnapshotRecords.map((record) => record.id).sort()).toEqual(
+      generatedRecords.map((record) => record.id).sort()
+    );
+
     const created = await mutateAssetLockRecord(
       {
         action: "create",
@@ -128,7 +166,7 @@ describe("real Postgres asset lock smoke", () => {
       }
     });
 
-    const attachment = await uploadAssetAttachment(
+    const firstAttachment = await uploadAssetAttachment(
       {
         assetLockRecordId: created.record.id,
         attachmentType: "reference",
@@ -139,11 +177,34 @@ describe("real Postgres asset lock smoke", () => {
       },
       { userId: "user-head-writer" }
     );
-    expect(await listAssetAttachments(created.record.id, { userId: "user-head-writer" })).toEqual([attachment]);
+    const secondAttachment = await uploadAssetAttachment(
+      {
+        assetLockRecordId: created.record.id,
+        attachmentType: "final",
+        fileName: "smoke-final.png",
+        mime: "image/png",
+        fileBuffer: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1]),
+        note: "smoke second upload"
+      },
+      { userId: "user-head-writer" }
+    );
+    const activeAttachments = await listAssetAttachments(created.record.id, { userId: "user-head-writer" });
 
-    const deletedAttachment = await deleteAssetAttachment(attachment.id, { userId: "user-head-writer" });
-    expect(deletedAttachment).toMatchObject({
-      id: attachment.id,
+    expect(firstAttachment).toMatchObject({ version: 1 });
+    expect(secondAttachment).toMatchObject({ version: 2 });
+    expect(activeAttachments).toEqual([firstAttachment, secondAttachment]);
+
+    const deletedFirstAttachment = await deleteAssetAttachment(firstAttachment.id, { userId: "user-head-writer" });
+    expect(deletedFirstAttachment).toMatchObject({
+      id: firstAttachment.id,
+      status: "deleted",
+      deletedByUserId: "user-head-writer"
+    });
+    expect(await listAssetAttachments(created.record.id, { userId: "user-head-writer" })).toEqual([secondAttachment]);
+
+    const deletedSecondAttachment = await deleteAssetAttachment(secondAttachment.id, { userId: "user-head-writer" });
+    expect(deletedSecondAttachment).toMatchObject({
+      id: secondAttachment.id,
       status: "deleted",
       deletedByUserId: "user-head-writer"
     });
@@ -201,6 +262,15 @@ describe("real Postgres asset lock smoke", () => {
       status: "locked",
       finalLockedByUserId: "user-owner"
     });
+
+    await cleanupSmokeRows();
+    await cleanupSmokeRows();
+    await expect(countSmokeRows()).resolves.toEqual({
+      attachments: 0,
+      records: 0,
+      recordEpisodes: 0,
+      sourceBindings: 0
+    });
   });
 });
 
@@ -252,6 +322,40 @@ async function cleanupSmokeRows() {
   }
 }
 
+async function countSmokeRows() {
+  const runtime = createAssetLockDbRuntime(testDatabaseUrl);
+
+  try {
+    const [attachments, sourceBindings, recordEpisodes, records] = await Promise.all([
+      countRows(runtime, "select count(*)::int as count from asset_attachments where delivery_package_id like $1"),
+      countRows(runtime, "select count(*)::int as count from script_source_bindings where delivery_package_id like $1"),
+      countRows(
+        runtime,
+        `select count(*)::int as count from asset_lock_record_episodes
+         where asset_lock_record_id in (
+           select id from asset_lock_records where delivery_package_id like $1
+         )`
+      ),
+      countRows(runtime, "select count(*)::int as count from asset_lock_records where delivery_package_id like $1")
+    ]);
+
+    return {
+      attachments,
+      records,
+      recordEpisodes,
+      sourceBindings
+    };
+  } finally {
+    await runtime.pool.end();
+  }
+}
+
+async function countRows(runtime: ReturnType<typeof createAssetLockDbRuntime>, sql: string) {
+  const result = await runtime.pool.query<{ count: number }>(sql, [`${deliveryPackagePrefix}%`]);
+
+  return result.rows[0]?.count ?? 0;
+}
+
 async function writeSmokeWorkspaceStore() {
   const workspace = buildSmokeWorkspace();
   const store = {
@@ -287,6 +391,21 @@ function buildSmokeWorkspace(): WorkspaceState {
         createdAt: now,
         submittedAt: now,
         publishedAt: now
+      },
+      {
+        id: generatedDeliveryPackageId,
+        projectId,
+        type: "range",
+        title: "M3 real Postgres generated smoke delivery",
+        declaredEpisodeFrom: 1,
+        declaredEpisodeTo: 2,
+        status: "published",
+        uploadedByUserId: "user-head-writer",
+        submittedByUserId: "user-head-writer",
+        reviewedByUserId: "user-owner",
+        createdAt: now,
+        submittedAt: now,
+        publishedAt: now
       }
     ],
     deliveryPackageEpisodes: [
@@ -305,6 +424,24 @@ function buildSmokeWorkspace(): WorkspaceState {
         episodeNo: 2,
         title: "Smoke episode 2",
         content: "Smoke background continuity line.",
+        isConfirmedChange: true
+      },
+      {
+        id: `${generatedDeliveryPackageId}-episode-1`,
+        deliveryPackageId: generatedDeliveryPackageId,
+        episodeNo: 1,
+        title: "Generated smoke episode 1",
+        content:
+          "\u9435\u7926\u4e95\u5165\u53e3\u65b0\u589e\u5347\u964d\u7b3c\uff0c\u4f17\u4eba\u7b2c\u4e00\u6b21\u8fdb\u5165\u5317\u4e95\u3002",
+        isConfirmedChange: true
+      },
+      {
+        id: `${generatedDeliveryPackageId}-episode-2`,
+        deliveryPackageId: generatedDeliveryPackageId,
+        episodeNo: 2,
+        title: "Generated smoke episode 2",
+        content:
+          "\u7ea2\u8272\u5b89\u5168\u706f\u6cbf\u7528\uff0c\u5730\u56fe\u5c55\u5f00\uff0c\u7c89\u5c18\u7206\u95ea\u4f5c\u4e3a\u584c\u65b9\u524d\u5146\u3002",
         isConfirmedChange: true
       }
     ]
