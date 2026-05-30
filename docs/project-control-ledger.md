@@ -5,18 +5,27 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 17:07:14 +08:00`.
+Timestamp: `2026-05-30 17:25:00 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `70531b2 Record delivery package schema read merge`.
-- Latest product/test code commit on `main`: `eb6f93c Overlay DB delivery package snapshot`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-db-workspace-snapshot-overlay`; ledger update pending commit.
-- Remote sync pending for this ledger update; `main@70531b2` was the last pushed checkpoint before the DB workspace snapshot overlay merge.
+- Latest recorded `main` commit before this ledger update: `441b9e7 Record DB workspace snapshot overlay merge`.
+- Latest product/test code commit on `main`: `c29d878 Add delivery package DB read tests`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-delivery-package-read-tests`; ledger update pending commit.
+- Remote sync pending for this ledger update; `main@441b9e7` was the last pushed checkpoint before the delivery package read-test merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `c29d878 Add delivery package DB read tests`
+  - Adds focused tests for the delivery package DB read helper that were identified as a P3 coverage gap in review 13.
+  - Covers `readDbDeliveryPackageSnapshot()` query behavior directly, empty DB rows returning empty arrays, draft package nullable fields mapping to `undefined`, and delivery package episode `content` / `isConfirmedChange` / `episodeNo` mapping.
+  - Keeps the slice scoped to `apps/web/app/api/delivery-packages/db-repository.test.ts`; no implementation, schema/migration, asset-lock repository, or UI changes.
+  - Child review 21 found no P0/P1/P2/P3 and approved merge.
+  - Validation after merge:
+    - `npm.cmd run test -w apps/web -- app/api/delivery-packages/db-repository.test.ts`: passed, 1 file / 4 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `eb6f93c Overlay DB delivery package snapshot`
   - Adds `apps/web/app/api/workspace-snapshot.ts` as a small composer for DB-backed workspace snapshots.
   - Updates the asset-lock DB repository read path so DB mode overlays four DB-owned arrays from DB reads: `assetLockRecords`, `scriptSourceBindings`, `deliveryPackages`, and `deliveryPackageEpisodes`.
