@@ -81,6 +81,87 @@ describe("auth scope write service contract", () => {
     expect(repository.createProjectWithEpisodes).not.toHaveBeenCalled();
   });
 
+  it("updates project name and code behind the manage-projects gate", async () => {
+    const repository = createMockRepository();
+    const service = createService(buildSnapshot(), repository);
+
+    const result = await service.updateProject(
+      { userId: "user-owner" },
+      {
+        projectId: "project-jincheng",
+        name: "  Renamed  Project  ",
+        code: " renamed "
+      }
+    );
+
+    expect(result.project).toEqual({
+      id: "project-jincheng",
+      name: "Renamed Project",
+      code: "RENAMED",
+      episodeCount: 2,
+      status: "active",
+      createdAt: "2026-05-01T00:00:00.000Z"
+    });
+    expect(repository.updateProject).toHaveBeenCalledWith(result.project);
+  });
+
+  it("rejects project updates with duplicate normalized codes", async () => {
+    const repository = createMockRepository();
+    const service = createService(buildMultiProjectSnapshot(), repository);
+
+    await expect(
+      service.updateProject(
+        { userId: "user-owner" },
+        {
+          projectId: "project-jincheng",
+          code: " alt "
+        }
+      )
+    ).rejects.toMatchObject({
+      code: "auth_scope_project_code_conflict"
+    });
+    expect(repository.updateProject).not.toHaveBeenCalled();
+  });
+
+  it("archives projects behind the manage-projects gate", async () => {
+    const repository = createMockRepository();
+    const service = createService(buildSnapshot(), repository);
+
+    const result = await service.archiveProject({ userId: "user-owner" }, "project-jincheng");
+
+    expect(result.project).toEqual({
+      id: "project-jincheng",
+      name: "Jincheng",
+      code: "JC",
+      episodeCount: 2,
+      status: "archived",
+      createdAt: "2026-05-01T00:00:00.000Z"
+    });
+    expect(repository.updateProject).toHaveBeenCalledWith(result.project);
+  });
+
+  it("denies project update and archive writes when project management permission is missing", async () => {
+    const repository = createMockRepository();
+    const service = createService(buildSnapshot(), repository);
+
+    await expect(
+      service.updateProject(
+        { userId: "user-writer" },
+        {
+          projectId: "project-jincheng",
+          name: "Denied"
+        }
+      )
+    ).rejects.toMatchObject({
+      code: "auth_scope_permission_denied"
+    });
+
+    await expect(service.archiveProject({ userId: "user-writer" }, "project-jincheng")).rejects.toMatchObject({
+      code: "auth_scope_permission_denied"
+    });
+    expect(repository.updateProject).not.toHaveBeenCalled();
+  });
+
   it("replaces member roles transaction input while preserving existing role ids and the last owner", async () => {
     const repository = createMockRepository();
     const service = createService(buildSnapshot(), repository);
@@ -484,6 +565,25 @@ function buildSnapshot(): AuthScopeDbSnapshot {
         userId: "user-writer",
         responsibility: "creator",
         createdAt: "2026-05-03T00:00:00.000Z"
+      }
+    ]
+  };
+}
+
+function buildMultiProjectSnapshot(): AuthScopeDbSnapshot {
+  const snapshot = buildSnapshot();
+
+  return {
+    ...snapshot,
+    projects: [
+      ...snapshot.projects,
+      {
+        id: "project-alt",
+        name: "Alt Project",
+        code: "ALT",
+        episodeCount: 1,
+        status: "active",
+        createdAt: "2026-05-04T00:00:00.000Z"
       }
     ]
   };
