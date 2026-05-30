@@ -195,9 +195,32 @@ describe("asset lock attachment route", () => {
 
     expect(response.status).toBe(400);
     expect(payload).toEqual({
-      error: "asset_attachment_upload_failed",
-      message: "asset_attachment_upload_failed"
+      error: "asset_attachment_request_failed",
+      message: "asset_attachment_request_failed"
     });
+    expect(serialized).not.toContain("asset-bucket");
+    expect(serialized).not.toContain("asset-lock-attachments");
+    expect(serialized).not.toContain("objects.example");
+  });
+
+  it("does not echo unknown asset attachment prefixed errors", async () => {
+    const recordId = (await createAssetRecord()).record.id;
+    vi.spyOn(assetAttachmentService, "uploadAssetAttachment").mockRejectedValue(
+      new Error(
+        "asset_attachment_future_internal: bucket asset-bucket key asset-lock-attachments/asset-att-123e4567-e89b-12d3-a456-426614174000.png endpoint https://objects.example"
+      )
+    );
+
+    const response = await POST(formRequest(buildUploadForm(recordId)));
+    const payload = await response.json();
+    const serialized = JSON.stringify(payload);
+
+    expect(response.status).toBe(400);
+    expect(payload).toEqual({
+      error: "asset_attachment_request_failed",
+      message: "asset_attachment_request_failed"
+    });
+    expect(serialized).not.toContain("asset_attachment_future_internal");
     expect(serialized).not.toContain("asset-bucket");
     expect(serialized).not.toContain("asset-lock-attachments");
     expect(serialized).not.toContain("objects.example");
@@ -255,6 +278,24 @@ describe("asset lock attachment route", () => {
     expect(serialized).not.toContain("legacy-prefix");
     expect(serialized).not.toContain("asset-att-123e4567-e89b-12d3-a456-426614174000");
     expect(serialized).not.toContain("checksum");
+  });
+
+  it("does not expose raw provider download errors", async () => {
+    vi.spyOn(assetAttachmentService, "downloadAssetAttachment").mockRejectedValue(
+      new Error(
+        "S3 GetObject failed for bucket asset-bucket key asset-lock-attachments/asset-att-123e4567-e89b-12d3-a456-426614174000.png endpoint https://objects.example"
+      )
+    );
+
+    const response = await GET_ATTACHMENT(attachmentRequest("asset-attachment-1"), attachmentContext("asset-attachment-1"));
+    const payload = await response.json();
+    const serialized = JSON.stringify(payload);
+
+    expect(response.status).toBe(400);
+    expect(payload).toEqual({ error: "asset_attachment_request_failed" });
+    expect(serialized).not.toContain("asset-bucket");
+    expect(serialized).not.toContain("asset-lock-attachments");
+    expect(serialized).not.toContain("objects.example");
   });
 
   it("soft deletes an attachment and leaves the stored file in place", async () => {

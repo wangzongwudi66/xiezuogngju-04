@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { AssetAttachment } from "@aigc/domain";
 import { requireWorkspaceRequestActor } from "../../workspace-actor";
+import { assetAttachmentErrorCodeFromUnknown, attachmentErrorResponse } from "../errors";
 import { deleteAssetAttachment, downloadAssetAttachment } from "../service";
 
 type AttachmentRouteContext = {
@@ -27,7 +28,7 @@ export async function GET(request: Request, context: AttachmentRouteContext) {
       }
     });
   } catch (error) {
-    return attachmentErrorResponse(errorCodeFromUnknown(error, "asset_attachment_download_failed"));
+    return attachmentErrorResponse(assetAttachmentErrorCodeFromUnknown(error));
   }
 }
 
@@ -43,49 +44,13 @@ export async function DELETE(request: Request, context: AttachmentRouteContext) 
     const attachment = await deleteAssetAttachment(attachmentId, actor);
     return NextResponse.json({ attachment });
   } catch (error) {
-    return attachmentErrorResponse(errorCodeFromUnknown(error, "asset_attachment_delete_failed"));
+    return attachmentErrorResponse(assetAttachmentErrorCodeFromUnknown(error));
   }
 }
 
 async function readAttachmentId(context: AttachmentRouteContext) {
   const params = await context.params;
   return params.attachmentId?.trim() || "";
-}
-
-function attachmentErrorResponse(error: string) {
-  return NextResponse.json({ error }, { status: statusForAttachmentError(error) });
-}
-
-function errorCodeFromUnknown(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : "";
-  if (message.startsWith("asset_attachment_file_integrity_failed")) {
-    return "asset_attachment_file_integrity_failed";
-  }
-
-  return message.startsWith("asset_attachment_") ? message : fallback;
-}
-
-function statusForAttachmentError(error: string) {
-  switch (error) {
-    case "asset_attachment_id_required":
-      return 400;
-    case "asset_attachment_unauthenticated":
-      return 401;
-    case "asset_attachment_project_member_required":
-    case "asset_attachment_forbidden":
-    case "asset_attachment_delete_forbidden":
-      return 403;
-    case "asset_attachment_not_found":
-    case "asset_attachment_record_not_found":
-    case "asset_attachment_file_not_found":
-      return 404;
-    case "asset_attachment_locked_record_delete_forbidden":
-    case "asset_attachment_file_integrity_failed":
-    case "asset_attachment_record_mismatch":
-      return 409;
-    default:
-      return 400;
-  }
 }
 
 function contentDisposition(fileName: string) {

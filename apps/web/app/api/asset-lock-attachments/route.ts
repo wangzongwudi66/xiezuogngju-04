@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { AssetAttachmentType } from "@aigc/domain";
 import { requireWorkspaceRequestActor } from "../workspace-actor";
+import { assetAttachmentErrorCodeFromUnknown, attachmentErrorResponse } from "./errors";
 import { listAssetAttachments, uploadAssetAttachment } from "./service";
 import type { AssetAttachmentUploadInput } from "./service";
 
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
     const actor = await requireWorkspaceRequestActor(request, "asset_attachment_unauthenticated");
     return NextResponse.json({ attachments: await listAssetAttachments(recordId, actor) });
   } catch (error) {
-    return attachmentErrorResponse(errorCodeFromUnknown(error, "asset_attachment_list_failed"));
+    return attachmentErrorResponse(assetAttachmentErrorCodeFromUnknown(error));
   }
 }
 
@@ -42,15 +43,7 @@ export async function POST(request: Request) {
     const attachment = await uploadAssetAttachment(parsed.input, actor);
     return NextResponse.json({ attachment });
   } catch (error) {
-    const errorCode = errorCodeFromUnknown(error, "asset_attachment_upload_failed");
-
-    return NextResponse.json(
-      {
-        error: errorCode,
-        message: errorCode
-      },
-      { status: statusForAttachmentError(errorCode) }
-    );
+    return attachmentErrorResponse(assetAttachmentErrorCodeFromUnknown(error), true);
   }
 }
 
@@ -98,33 +91,4 @@ function readOptionalString(value: FormDataEntryValue | null) {
 function readAttachmentType(value: FormDataEntryValue | null) {
   const text = readString(value);
   return attachmentTypes.includes(text as AssetAttachmentType) ? (text as AssetAttachmentType) : null;
-}
-
-function attachmentErrorResponse(error: string) {
-  return NextResponse.json({ error }, { status: statusForAttachmentError(error) });
-}
-
-function errorCodeFromUnknown(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : "";
-  return message.startsWith("asset_attachment_") ? message : fallback;
-}
-
-function statusForAttachmentError(error: string) {
-  switch (error) {
-    case "asset_attachment_record_id_required":
-      return 400;
-    case "asset_attachment_unauthenticated":
-      return 401;
-    case "asset_attachment_project_member_required":
-    case "asset_attachment_forbidden":
-      return 403;
-    case "asset_attachment_record_not_found":
-      return 404;
-    case "asset_attachment_locked_record_upload_forbidden":
-      return 409;
-    case "asset_attachment_metadata_not_created":
-      return 500;
-    default:
-      return 400;
-  }
 }
