@@ -8,8 +8,11 @@ import * as authScopeDbRepository from "../auth-scope/db-repository";
 import { createDeliveryImportJob, getDeliveryImportWorkspace } from "../delivery-import-jobs/service";
 import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import * as publishReadModelDbRepository from "../publish-read-model/db-repository";
+import { createWorkspaceSessionCookieValue, WORKSPACE_SESSION_COOKIE_NAME } from "../workspace-session/session-cookie";
 import { POST } from "./route";
 import * as deliveryPackageDbRepository from "./db-repository";
+
+let sessionCookie = "";
 
 describe("delivery package route", () => {
   let storeDir: string;
@@ -18,6 +21,7 @@ describe("delivery package route", () => {
     storeDir = join(tmpdir(), `aigc-delivery-packages-route-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
+    process.env.AIGC_WORKSPACE_SESSION_SECRET = "delivery-package-route-test-secret";
     vi.spyOn(authScopeDbRepository, "readDbAuthScopeSnapshot").mockResolvedValue({
       users: seedWorkspace.users,
       projects: seedWorkspace.projects,
@@ -39,8 +43,10 @@ describe("delivery package route", () => {
   });
 
   afterEach(async () => {
+    sessionCookie = "";
     vi.restoreAllMocks();
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
+    delete process.env.AIGC_WORKSPACE_SESSION_SECRET;
     delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
     delete process.env.DATABASE_URL;
     await rm(storeDir, { recursive: true, force: true });
@@ -120,7 +126,7 @@ describe("delivery package route", () => {
 
   it("returns unauthenticated when package mutations have no server workspace actor", async () => {
     const deliveryPackageId = await createDraft();
-    await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: null }));
+    sessionCookie = "";
 
     const response = await POST(jsonRequest({ action: "submit", deliveryPackageId, actorUserId: "user-head-writer" }));
 
@@ -219,12 +225,14 @@ async function createDraft() {
 
 async function setCurrentUser(userId: string) {
   await mutateDeliveryImportWorkspace((state) => loginAsUser(state, userId));
+  sessionCookie = `${WORKSPACE_SESSION_COOKIE_NAME}=${createWorkspaceSessionCookieValue(userId)}`;
 }
 
 function jsonRequest(body: unknown) {
   return new Request("http://localhost/api/delivery-packages", {
     body: JSON.stringify(body),
     headers: {
+      cookie: sessionCookie,
       "Content-Type": "application/json"
     },
     method: "POST"

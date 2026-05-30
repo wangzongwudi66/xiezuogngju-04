@@ -34,7 +34,7 @@ export async function POST(request: Request) {
   let actor: { userId: string };
 
   try {
-    actor = await requireWorkspaceRequestActor("unauthenticated");
+    actor = await requireWorkspaceRequestActor(request, "unauthenticated");
   } catch {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }

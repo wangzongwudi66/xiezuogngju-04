@@ -9,6 +9,9 @@ import * as authScopeDbRepository from "../auth-scope/db-repository";
 import * as deliveryPackageDbRepository from "../delivery-packages/db-repository";
 import * as publishReadModelDbRepository from "../publish-read-model/db-repository";
 import { mutateDeliveryImportWorkspace } from "./persistence";
+import { createWorkspaceSessionCookieValue, WORKSPACE_SESSION_COOKIE_NAME } from "../workspace-session/session-cookie";
+
+let sessionCookie = "";
 
 describe("delivery import job route", () => {
   let storeDir: string;
@@ -18,6 +21,7 @@ describe("delivery import job route", () => {
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
     process.env.AIGC_DELIVERY_IMPORT_FILE_DIR = join(storeDir, "files");
+    process.env.AIGC_WORKSPACE_SESSION_SECRET = "delivery-import-route-test-secret";
     vi.spyOn(authScopeDbRepository, "readDbAuthScopeSnapshot").mockResolvedValue({
       users: seedWorkspace.users,
       projects: seedWorkspace.projects,
@@ -35,20 +39,22 @@ describe("delivery import job route", () => {
       episodeCurrents: [],
       notifications: []
     });
-    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-head-writer"));
+    await login("user-head-writer");
   });
 
   afterEach(async () => {
+    sessionCookie = "";
     vi.restoreAllMocks();
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
     delete process.env.AIGC_DELIVERY_IMPORT_FILE_DIR;
+    delete process.env.AIGC_WORKSPACE_SESSION_SECRET;
     delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
     delete process.env.DATABASE_URL;
     await rm(storeDir, { recursive: true, force: true });
   });
 
   it("creates a text import job and exposes it by id", async () => {
-    const createResponse = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildTextForm() }));
+    const createResponse = await POST(postRequest(buildTextForm()));
     const created = await createResponse.json();
 
     expect(createResponse.status).toBe(200);
@@ -69,7 +75,7 @@ describe("delivery import job route", () => {
   it("ignores client uploadedByUserId and uses the server workspace actor", async () => {
     const form = buildTextForm();
     form.set("uploadedByUserId", "user-attacker");
-    const createResponse = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: form }));
+    const createResponse = await POST(postRequest(form));
     const created = await createResponse.json();
 
     expect(createResponse.status).toBe(200);
@@ -87,7 +93,7 @@ describe("delivery import job route", () => {
   });
 
   it("lists jobs by project and returns the server workspace snapshot", async () => {
-    const createResponse = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildTextForm() }));
+    const createResponse = await POST(postRequest(buildTextForm()));
     const created = await createResponse.json();
 
     const listResponse = await GET(new Request("http://localhost/api/delivery-import-jobs?projectId=project-jincheng"));
@@ -116,7 +122,7 @@ describe("delivery import job route", () => {
 
   it("returns validation errors for invalid requests and missing jobs", async () => {
     const invalidResponse = await POST(
-      new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: new FormData() })
+      postRequest(new FormData())
     );
     const missingResponse = await GET(new Request("http://localhost/api/delivery-import-jobs?id=missing-job"));
 
@@ -128,7 +134,7 @@ describe("delivery import job route", () => {
 
   it("rejects docx imports without a file and does not save anything", async () => {
     const response = await POST(
-      new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildDocxForm() })
+      postRequest(buildDocxForm())
     );
 
     await expect(response.json()).resolves.toEqual({ error: "docx_file_required" });
@@ -139,7 +145,7 @@ describe("delivery import job route", () => {
   it("rejects non-docx uploads and does not save anything", async () => {
     const form = buildDocxForm();
     form.set("file", new File(["not a docx"], "delivery.pdf", { type: "application/pdf" }));
-    const response = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: form }));
+    const response = await POST(postRequest(form));
 
     await expect(response.json()).resolves.toEqual({ error: "docx_file_type_invalid" });
     expect(response.status).toBe(400);
@@ -149,7 +155,7 @@ describe("delivery import job route", () => {
   it("returns docx import jobs with file id but without the server file path", async () => {
     const form = buildDocxForm();
     form.set("file", new File(["not a zip"], "broken.docx"));
-    const response = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: form }));
+    const response = await POST(postRequest(form));
     const created = await response.json();
 
     expect(response.status).toBe(200);
@@ -169,12 +175,10 @@ describe("delivery import job route", () => {
     const form = buildDocxForm();
     form.set("uploadedByUserId", "user-attacker");
     form.set("file", new File(["not a zip"], "broken.docx"));
-    const createResponse = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: form }));
+    const createResponse = await POST(postRequest(form));
     const failed = await createResponse.json();
-    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-owner"));
-    const retryResponse = await POST(
-      new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildRetryForm(failed.job.id) })
-    );
+    await login("user-owner");
+    const retryResponse = await POST(postRequest(buildRetryForm(failed.job.id)));
     const retried = await retryResponse.json();
 
     expect(retryResponse.status).toBe(200);
@@ -194,12 +198,10 @@ describe("delivery import job route", () => {
   });
 
   it("returns unauthenticated when import mutations have no server workspace actor", async () => {
-    await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: null }));
+    sessionCookie = "";
 
-    const createResponse = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildTextForm() }));
-    const retryResponse = await POST(
-      new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildRetryForm("missing-job") })
-    );
+    const createResponse = await POST(postRequest(buildTextForm()));
+    const retryResponse = await POST(postRequest(buildRetryForm("missing-job")));
 
     expect(createResponse.status).toBe(401);
     await expect(createResponse.json()).resolves.toEqual({ error: "unauthenticated" });
@@ -209,7 +211,7 @@ describe("delivery import job route", () => {
 
   it("returns clear retry errors for missing source jobs", async () => {
     const response = await POST(
-      new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildRetryForm("missing-job") })
+      postRequest(buildRetryForm("missing-job"))
     );
 
     expect(response.status).toBe(404);
@@ -220,7 +222,7 @@ describe("delivery import job route", () => {
   });
 
   it("returns DB workspace overlay for workspace scope in DB mode", async () => {
-    const createResponse = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildTextForm() }));
+    const createResponse = await POST(postRequest(buildTextForm()));
     const localCreated = await createResponse.json();
 
     process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
@@ -289,7 +291,7 @@ describe("delivery import job route", () => {
       }
     );
 
-    const response = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildTextForm() }));
+    const response = await POST(postRequest(buildTextForm()));
     const created = await response.json();
 
     expect(response.status).toBe(200);
@@ -319,7 +321,7 @@ describe("delivery import job route", () => {
       assignments: seedWorkspace.assignments
     });
 
-    const response = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildTextForm() }));
+    const response = await POST(postRequest(buildTextForm()));
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: "unauthenticated" });
@@ -350,6 +352,19 @@ function buildTextForm() {
   form.set("declaredRangeText", "1-2");
   form.set("rawText", "第 1 集 开场\n正文一\n第 2 集 追踪\n正文二");
   return form;
+}
+
+async function login(userId: string) {
+  await mutateDeliveryImportWorkspace((state) => loginAsUser(state, userId));
+  sessionCookie = `${WORKSPACE_SESSION_COOKIE_NAME}=${createWorkspaceSessionCookieValue(userId)}`;
+}
+
+function postRequest(body: BodyInit) {
+  return new Request("http://localhost/api/delivery-import-jobs", {
+    body,
+    headers: sessionCookie ? { cookie: sessionCookie } : undefined,
+    method: "POST"
+  });
 }
 
 async function readSavedFileNames(storeDir: string) {

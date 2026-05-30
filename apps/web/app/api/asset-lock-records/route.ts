@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
   try {
-    const actor = await requireWorkspaceRequestActor("asset_lock_unauthenticated");
+    const actor = await requireWorkspaceRequestActor(request, "asset_lock_unauthenticated");
     return NextResponse.json(await listAssetLockRecords(searchParams.get("projectId") ?? undefined, actor));
   } catch (error) {
     return assetLockErrorResponse(error, "asset_lock_records_request_failed");
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const actor = await requireWorkspaceRequestActor("asset_lock_unauthenticated");
+    const actor = await requireWorkspaceRequestActor(request, "asset_lock_unauthenticated");
     return NextResponse.json(await mutateAssetLockRecord(input, actor));
   } catch (error) {
     return assetLockErrorResponse(error, "asset_lock_record_mutation_failed");

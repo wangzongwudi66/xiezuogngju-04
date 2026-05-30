@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "invalid_asset_decision_timeline_request" }, { status: 400 });
   }
 
-  const actor = await resolveWorkspaceRequestActor();
+  const actor = await resolveWorkspaceRequestActor(request);
   const result = await getAssetDecisionTimelineProjection({
     projectId,
     deliveryPackageId,

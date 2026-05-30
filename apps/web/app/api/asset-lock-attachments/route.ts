@@ -15,7 +15,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const actor = await requireWorkspaceRequestActor("asset_attachment_unauthenticated");
+    const actor = await requireWorkspaceRequestActor(request, "asset_attachment_unauthenticated");
     return NextResponse.json({ attachments: await listAssetAttachments(recordId, actor) });
   } catch (error) {
     return attachmentErrorResponse(errorCodeFromUnknown(error, "asset_attachment_list_failed"));
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const actor = await requireWorkspaceRequestActor("asset_attachment_unauthenticated");
+    const actor = await requireWorkspaceRequestActor(request, "asset_attachment_unauthenticated");
     const attachment = await uploadAssetAttachment(parsed.input, actor);
     return NextResponse.json({ attachment });
   } catch (error) {

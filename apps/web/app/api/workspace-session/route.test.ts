@@ -9,6 +9,7 @@ import * as deliveryPackageDbRepository from "../delivery-packages/db-repository
 import * as publishReadModelDbRepository from "../publish-read-model/db-repository";
 import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { POST } from "./route";
+import { WORKSPACE_SESSION_COOKIE_NAME } from "./session-cookie";
 
 describe("workspace session route", () => {
   let storeDir = "";
@@ -16,27 +17,43 @@ describe("workspace session route", () => {
   beforeEach(async () => {
     storeDir = await mkdtemp(join(tmpdir(), "aigc-workspace-session-"));
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
+    process.env.AIGC_WORKSPACE_SESSION_SECRET = "workspace-session-route-test-secret";
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
     delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
+    delete process.env.AIGC_WORKSPACE_SESSION_SECRET;
     delete process.env.DATABASE_URL;
     if (storeDir) {
       await rm(storeDir, { force: true, recursive: true });
     }
   });
 
-  it("persists the selected current user for server-side projection routes", async () => {
+  it("sets an HttpOnly cookie for the selected current user without mutating the workspace actor pointer", async () => {
     const response = await POST(jsonRequest({ userId: "user-owner" }));
+    const setCookie = response.headers.get("set-cookie");
 
     await expect(response.json()).resolves.toEqual({ ok: true, currentUserId: "user-owner" });
+    expect(setCookie).toContain(`${WORKSPACE_SESSION_COOKIE_NAME}=v1.`);
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("SameSite=lax");
     await expect(readDeliveryImportWorkspace()).resolves.toMatchObject({
       state: {
-        currentUserId: "user-owner"
+        currentUserId: expect.not.stringMatching(/^user-owner$/)
       }
     });
+  });
+
+  it("fails closed when the session secret is missing", async () => {
+    delete process.env.AIGC_WORKSPACE_SESSION_SECRET;
+
+    const response = await POST(jsonRequest({ userId: "user-owner" }));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ ok: false, error: "workspace_session_secret_required" });
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("allows DB-only users to log in through the overlay workspace", async () => {
@@ -51,12 +68,13 @@ describe("workspace session route", () => {
     process.env.DATABASE_URL = "postgres://example.invalid/aigc";
 
     const response = await POST(jsonRequest({ userId: dbOnlyUser.id }));
+    const setCookie = response.headers.get("set-cookie");
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, currentUserId: dbOnlyUser.id });
+    expect(setCookie).toContain(`${WORKSPACE_SESSION_COOKIE_NAME}=v1.`);
     await expect(readDeliveryImportWorkspace()).resolves.toMatchObject({
       state: {
-        currentUserId: dbOnlyUser.id,
         users: [dbOnlyUser]
       }
     });
@@ -78,36 +96,26 @@ describe("workspace session route", () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ ok: false, error: "user_not_found" });
-    await expect(readDeliveryImportWorkspace()).resolves.toMatchObject({
-      state: {
-        currentUserId: dbOnlyUser.id
-      }
-    });
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("clears the current user on logout", async () => {
+  it("clears the session cookie on logout", async () => {
     await POST(jsonRequest({ userId: "user-owner" }));
     const response = await POST(jsonRequest({ userId: null }));
+    const setCookie = response.headers.get("set-cookie");
 
     await expect(response.json()).resolves.toEqual({ ok: true, currentUserId: null });
-    await expect(readDeliveryImportWorkspace()).resolves.toMatchObject({
-      state: {
-        currentUserId: null
-      }
-    });
+    expect(setCookie).toContain(`${WORKSPACE_SESSION_COOKIE_NAME}=`);
+    expect(setCookie).toContain("Max-Age=0");
   });
 
-  it("rejects unknown users without changing the workspace session", async () => {
+  it("rejects unknown users without setting a new cookie", async () => {
     await POST(jsonRequest({ userId: "user-owner" }));
     const response = await POST(jsonRequest({ userId: "missing-user" }));
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ ok: false, error: "user_not_found" });
-    await expect(readDeliveryImportWorkspace()).resolves.toMatchObject({
-      state: {
-        currentUserId: "user-owner"
-      }
-    });
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 });
 

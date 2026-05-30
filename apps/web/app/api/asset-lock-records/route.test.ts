@@ -1,12 +1,19 @@
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loginAsUser } from "@aigc/domain";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loginAsUser, seedWorkspace } from "@aigc/domain";
 import { createDeliveryImportJob, getDeliveryImportWorkspace } from "../delivery-import-jobs/service";
 import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { mutateDeliveryPackage } from "../delivery-packages/service";
+import { createWorkspaceSessionCookieValue, WORKSPACE_SESSION_COOKIE_NAME } from "../workspace-session/session-cookie";
+import * as assetLockRecordDbParts from "./db-parts";
+import * as authScopeDbRepository from "../auth-scope/db-repository";
+import * as deliveryPackageDbRepository from "../delivery-packages/db-repository";
+import * as publishReadModelDbRepository from "../publish-read-model/db-repository";
 import { GET, POST } from "./route";
+
+let sessionCookie = "";
 
 describe("asset lock record route", () => {
   let storeDir: string;
@@ -15,13 +22,17 @@ describe("asset lock record route", () => {
     storeDir = join(tmpdir(), `aigc-asset-lock-record-route-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
+    process.env.AIGC_WORKSPACE_SESSION_SECRET = "asset-lock-record-route-test-secret";
     delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
     delete process.env.DATABASE_URL;
     await login("user-head-writer");
   });
 
   afterEach(async () => {
+    sessionCookie = "";
+    vi.restoreAllMocks();
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
+    delete process.env.AIGC_WORKSPACE_SESSION_SECRET;
     delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
     delete process.env.DATABASE_URL;
     await rm(storeDir, { recursive: true, force: true });
@@ -47,9 +58,9 @@ describe("asset lock record route", () => {
     expect(JSON.stringify(created)).not.toContain("filePath");
     expect(JSON.stringify(created)).not.toContain(storeDir);
 
-    const listResponse = await GET(new Request("http://localhost/api/asset-lock-records?projectId=project-jincheng"));
+    const listResponse = await GET(sessionRequest("http://localhost/api/asset-lock-records?projectId=project-jincheng"));
     const listed = await listResponse.json();
-    const allResponse = await GET(new Request("http://localhost/api/asset-lock-records"));
+    const allResponse = await GET(sessionRequest("http://localhost/api/asset-lock-records"));
     const allListed = await allResponse.json();
 
     expect(listed.records).toContainEqual(created.record);
@@ -94,7 +105,7 @@ describe("asset lock record route", () => {
 
     await login("user-creator-b");
     const creatorBResponse = await GET(
-      new Request("http://localhost/api/asset-lock-records?projectId=project-jincheng&viewerUserId=user-owner&assignedEpisodeNos=1")
+      sessionRequest("http://localhost/api/asset-lock-records?projectId=project-jincheng&viewerUserId=user-owner&assignedEpisodeNos=1")
     );
     await expect(creatorBResponse.json()).resolves.toMatchObject({
       records: [],
@@ -104,7 +115,7 @@ describe("asset lock record route", () => {
     });
 
     await login("user-creator-a");
-    const creatorAResponse = await GET(new Request("http://localhost/api/asset-lock-records?projectId=project-jincheng"));
+    const creatorAResponse = await GET(sessionRequest("http://localhost/api/asset-lock-records?projectId=project-jincheng"));
     const creatorARecords = await creatorAResponse.json();
 
     expect(creatorARecords.records).toContainEqual(created.record);
@@ -385,6 +396,7 @@ describe("asset lock record route", () => {
   });
 
   it("keeps unsupported DB-mode prepare_demo responses stable without writing local state", async () => {
+    mockEmptyDbWorkspaceOverlay();
     process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
     process.env.DATABASE_URL = "postgres://example.invalid/aigc";
     await login("user-owner");
@@ -444,9 +456,9 @@ describe("asset lock record route", () => {
   });
 
   it("requires a server workspace session for asset lock reads and writes", async () => {
-    await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: null }));
+    sessionCookie = "";
 
-    const listResponse = await GET(new Request("http://localhost/api/asset-lock-records?projectId=project-jincheng"));
+    const listResponse = await GET(sessionRequest("http://localhost/api/asset-lock-records?projectId=project-jincheng"));
     const mutateResponse = await POST(jsonRequest({ action: "prepare_demo", projectId: "project-jincheng" }));
 
     expect(listResponse.status).toBe(401);
@@ -462,7 +474,7 @@ describe("asset lock record route", () => {
   });
 
   it("returns an empty list for legacy workspaces without asset lock records", async () => {
-    const response = await GET(new Request("http://localhost/api/asset-lock-records?projectId=project-jincheng"));
+    const response = await GET(sessionRequest("http://localhost/api/asset-lock-records?projectId=project-jincheng"));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -476,6 +488,7 @@ describe("asset lock record route", () => {
 
 async function login(userId: string) {
   await mutateDeliveryImportWorkspace((state) => loginAsUser(state, userId));
+  sessionCookie = `${WORKSPACE_SESSION_COOKIE_NAME}=${createWorkspaceSessionCookieValue(userId)}`;
 }
 
 async function createDraft() {
@@ -592,8 +605,43 @@ function jsonRequest(body: unknown) {
   return new Request("http://localhost/api/asset-lock-records", {
     method: "POST",
     headers: {
+      cookie: sessionCookie,
       "content-type": "application/json"
     },
     body: JSON.stringify(body)
+  });
+}
+
+function sessionRequest(url: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+
+  if (sessionCookie) {
+    headers.set("cookie", sessionCookie);
+  }
+
+  return new Request(url, { ...init, headers });
+}
+
+function mockEmptyDbWorkspaceOverlay() {
+  vi.spyOn(authScopeDbRepository, "readDbAuthScopeSnapshot").mockResolvedValue({
+    users: seedWorkspace.users,
+    projects: seedWorkspace.projects,
+    members: seedWorkspace.members,
+    memberPermissions: seedWorkspace.memberPermissions,
+    episodes: seedWorkspace.episodes,
+    assignments: seedWorkspace.assignments
+  });
+  vi.spyOn(assetLockRecordDbParts, "readDbAssetLockRecordParts").mockResolvedValue({
+    assetLockRecords: [],
+    scriptSourceBindings: []
+  });
+  vi.spyOn(deliveryPackageDbRepository, "readDbDeliveryPackageSnapshot").mockResolvedValue({
+    deliveryPackages: [],
+    deliveryPackageEpisodes: []
+  });
+  vi.spyOn(publishReadModelDbRepository, "readDbPublishReadModelSnapshot").mockResolvedValue({
+    episodeRevisions: [],
+    episodeCurrents: [],
+    notifications: []
   });
 }

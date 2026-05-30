@@ -7,7 +7,7 @@ type AttachmentRouteContext = {
   params: Promise<{ attachmentId?: string }> | { attachmentId?: string };
 };
 
-export async function GET(_request: Request, context: AttachmentRouteContext) {
+export async function GET(request: Request, context: AttachmentRouteContext) {
   const attachmentId = await readAttachmentId(context);
 
   if (!attachmentId) {
@@ -15,7 +15,7 @@ export async function GET(_request: Request, context: AttachmentRouteContext) {
   }
 
   try {
-    const actor = await requireWorkspaceRequestActor("asset_attachment_unauthenticated");
+    const actor = await requireWorkspaceRequestActor(request, "asset_attachment_unauthenticated");
     const download = await downloadAssetAttachment(attachmentId, actor);
 
     return new Response(toArrayBuffer(download.bytes), {
@@ -31,7 +31,7 @@ export async function GET(_request: Request, context: AttachmentRouteContext) {
   }
 }
 
-export async function DELETE(_request: Request, context: AttachmentRouteContext) {
+export async function DELETE(request: Request, context: AttachmentRouteContext) {
   const attachmentId = await readAttachmentId(context);
 
   if (!attachmentId) {
@@ -39,7 +39,7 @@ export async function DELETE(_request: Request, context: AttachmentRouteContext)
   }
 
   try {
-    const actor = await requireWorkspaceRequestActor("asset_attachment_unauthenticated");
+    const actor = await requireWorkspaceRequestActor(request, "asset_attachment_unauthenticated");
     const attachment = await deleteAssetAttachment(attachmentId, actor);
     return NextResponse.json({ attachment });
   } catch (error) {

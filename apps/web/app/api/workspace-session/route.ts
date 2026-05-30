@@ -1,6 +1,12 @@
-import { logout } from "@aigc/domain";
 import { NextResponse } from "next/server";
-import { mutateDeliveryImportWorkspace, readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import {
+  clearedWorkspaceSessionCookieOptions,
+  createWorkspaceSessionCookieValue,
+  WORKSPACE_SESSION_COOKIE_NAME,
+  workspaceSessionCookieOptions,
+  WorkspaceSessionSecretMissingError
+} from "./session-cookie";
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -22,17 +28,26 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (userId) {
-      const snapshot = await readDeliveryImportWorkspace();
-
-      if (!snapshot.state.users.some((user) => user.id === userId)) {
-        return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
-      }
+    if (!userId) {
+      const response = NextResponse.json({ ok: true, currentUserId: null });
+      response.cookies.set(WORKSPACE_SESSION_COOKIE_NAME, "", clearedWorkspaceSessionCookieOptions());
+      return response;
     }
 
-    const snapshot = await mutateDeliveryImportWorkspace((state) => (userId ? { ...state, currentUserId: userId } : logout(state)));
-    return NextResponse.json({ ok: true, currentUserId: snapshot.state.currentUserId });
-  } catch {
+    const snapshot = await readDeliveryImportWorkspace();
+
+    if (!snapshot.state.users.some((user) => user.id === userId)) {
+      return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
+    }
+
+    const response = NextResponse.json({ ok: true, currentUserId: userId });
+    response.cookies.set(WORKSPACE_SESSION_COOKIE_NAME, createWorkspaceSessionCookieValue(userId), workspaceSessionCookieOptions());
+    return response;
+  } catch (error) {
+    if (error instanceof WorkspaceSessionSecretMissingError) {
+      return NextResponse.json({ ok: false, error: "workspace_session_secret_required" }, { status: 500 });
+    }
+
     return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
   }
 }

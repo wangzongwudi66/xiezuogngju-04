@@ -1,17 +1,24 @@
 import type { WorkspaceState } from "@aigc/domain";
 import { readDeliveryImportWorkspace } from "./delivery-import-jobs/persistence";
+import { readWorkspaceSessionCookieUserId, WorkspaceSessionSecretMissingError } from "./workspace-session/session-cookie";
 
 export interface WorkspaceRequestActor {
   userId: string;
 }
 
-export async function resolveWorkspaceRequestActor() {
+export async function resolveWorkspaceRequestActor(request: Request) {
+  const userId = resolveCookieUserId(request);
+
+  if (!userId) {
+    return null;
+  }
+
   const snapshot = await readDeliveryImportWorkspace();
-  return resolveWorkspaceRequestActorFromState(snapshot.state);
+  return resolveKnownWorkspaceActorFromState(snapshot.state, { userId });
 }
 
-export async function requireWorkspaceRequestActor(errorMessage: string) {
-  const actor = await resolveWorkspaceRequestActor();
+export async function requireWorkspaceRequestActor(request: Request, errorMessage: string) {
+  const actor = await resolveWorkspaceRequestActor(request);
 
   if (!actor) {
     throw new Error(errorMessage);
@@ -20,8 +27,19 @@ export async function requireWorkspaceRequestActor(errorMessage: string) {
   return actor;
 }
 
-export function resolveWorkspaceRequestActorFromState(state: WorkspaceState): WorkspaceRequestActor | null {
-  const userId = state.currentUserId?.trim();
+export function assertKnownActor(state: WorkspaceState, actor: WorkspaceRequestActor, errorMessage = "unauthenticated") {
+  if (!resolveKnownWorkspaceActorFromState(state, actor)) {
+    throw new Error(errorMessage);
+  }
+
+  return actor;
+}
+
+export function resolveKnownWorkspaceActorFromState(
+  state: WorkspaceState,
+  actor: WorkspaceRequestActor | null
+): WorkspaceRequestActor | null {
+  const userId = actor?.userId.trim();
 
   if (!userId) {
     return null;
@@ -32,4 +50,16 @@ export function resolveWorkspaceRequestActorFromState(state: WorkspaceState): Wo
   }
 
   return { userId };
+}
+
+function resolveCookieUserId(request: Request) {
+  try {
+    return readWorkspaceSessionCookieUserId(request.headers.get("cookie"));
+  } catch (error) {
+    if (error instanceof WorkspaceSessionSecretMissingError) {
+      return null;
+    }
+
+    throw error;
+  }
 }

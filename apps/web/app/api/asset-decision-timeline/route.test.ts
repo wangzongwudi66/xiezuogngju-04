@@ -7,7 +7,10 @@ import { mutateAssetLockRecord } from "../asset-lock-records/service";
 import { createDeliveryImportJob } from "../delivery-import-jobs/service";
 import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { mutateDeliveryPackage } from "../delivery-packages/service";
+import { createWorkspaceSessionCookieValue, WORKSPACE_SESSION_COOKIE_NAME } from "../workspace-session/session-cookie";
 import { GET } from "./route";
+
+let sessionCookie = "";
 
 describe("asset decision timeline route", () => {
   let storeDir: string;
@@ -16,10 +19,13 @@ describe("asset decision timeline route", () => {
     storeDir = join(tmpdir(), `aigc-asset-decision-timeline-route-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
+    process.env.AIGC_WORKSPACE_SESSION_SECRET = "asset-decision-timeline-route-test-secret";
   });
 
   afterEach(async () => {
+    sessionCookie = "";
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
+    delete process.env.AIGC_WORKSPACE_SESSION_SECRET;
     await rm(storeDir, { recursive: true, force: true });
   });
 
@@ -35,12 +41,12 @@ describe("asset decision timeline route", () => {
 
   it("returns a read-only projection for the current project member", async () => {
     const deliveryPackageId = await createPublishedPackage();
-    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-head-writer"));
+    await login("user-head-writer");
     await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Mine Lift", [1]), { userId: "user-head-writer" });
-    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-owner"));
+    await login("user-owner");
 
     const response = await GET(
-      new Request(
+      timelineRequest(
         `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${deliveryPackageId}`
       )
     );
@@ -61,13 +67,13 @@ describe("asset decision timeline route", () => {
 
   it("does not accept client-controlled viewer identity or assignment scope", async () => {
     const deliveryPackageId = await createPublishedPackage();
-    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-head-writer"));
+    await login("user-head-writer");
     await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Mine Lift", [1]), { userId: "user-head-writer" });
     await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Far Signal", [9]), { userId: "user-head-writer" });
-    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-creator-a"));
+    await login("user-creator-a");
 
     const response = await GET(
-      new Request(
+      timelineRequest(
         `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${deliveryPackageId}&viewerUserId=user-owner&viewerRole=coordinator&assignedEpisodeNos=9`
       )
     );
@@ -88,7 +94,7 @@ describe("asset decision timeline route", () => {
 
   it("returns only session-visible explicit source bindings", async () => {
     const deliveryPackageId = await createPublishedPackage();
-    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-head-writer"));
+    await login("user-head-writer");
     const visible = await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Mine Lift", [1]), { userId: "user-head-writer" });
     const hidden = await mutateAssetLockRecord(buildCreateBody(deliveryPackageId, "Far Signal", [9]), { userId: "user-head-writer" });
     await mutateDeliveryImportWorkspace((state) => ({
@@ -120,10 +126,10 @@ describe("asset decision timeline route", () => {
         }
       ]
     }));
-    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-creator-a"));
+    await login("user-creator-a");
 
     const response = await GET(
-      new Request(
+      timelineRequest(
         `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${deliveryPackageId}&viewerRole=coordinator&assignedEpisodeNos=9`
       )
     );
@@ -142,13 +148,13 @@ describe("asset decision timeline route", () => {
   it("maps service errors to stable HTTP statuses", async () => {
     const deliveryPackageId = await createPublishedPackage();
     const unauthenticated = await GET(
-      new Request(
+      timelineRequest(
         `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${deliveryPackageId}`
       )
     );
-    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-owner"));
+    await login("user-owner");
     const missingPackage = await GET(
-      new Request("http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=missing-package")
+      timelineRequest("http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=missing-package")
     );
 
     expect(unauthenticated.status).toBe(401);
@@ -177,37 +183,38 @@ describe("asset decision timeline route", () => {
         }
       ]
     }));
+    sessionCookie = `${WORKSPACE_SESSION_COOKIE_NAME}=${createWorkspaceSessionCookieValue("user-outsider")}`;
     const nonMember = await GET(
-      new Request(
+      timelineRequest(
         `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}`
       )
     );
-    await mutateDeliveryImportWorkspace((state) => loginAsUser(state, "user-owner"));
+    await login("user-owner");
     const missingProject = await GET(
-      new Request(
+      timelineRequest(
         `http://localhost/api/asset-decision-timeline?projectId=missing-project&deliveryPackageId=${publishedPackageId}`
       )
     );
     const unpublishedPackage = await GET(
-      new Request(`http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${draftPackageId}`)
+      timelineRequest(`http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${draftPackageId}`)
     );
     const missingPreviousPackage = await GET(
-      new Request(
+      timelineRequest(
         `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}&previousDeliveryPackageId=missing-previous`
       )
     );
     const draftPreviousPackage = await GET(
-      new Request(
+      timelineRequest(
         `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}&previousDeliveryPackageId=${draftPackageId}`
       )
     );
     const mismatchedPreviousPackage = await GET(
-      new Request(
+      timelineRequest(
         `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}&previousDeliveryPackageId=${mismatchedPreviousPackageId}`
       )
     );
     const samePreviousPackage = await GET(
-      new Request(
+      timelineRequest(
         `http://localhost/api/asset-decision-timeline?projectId=project-jincheng&deliveryPackageId=${publishedPackageId}&previousDeliveryPackageId=${publishedPackageId}`
       )
     );
@@ -282,4 +289,13 @@ function buildCreateBody(deliveryPackageId: string, assetName: string, episodeNo
     createdByUserId: "user-head-writer",
     risk: "attention" as const
   };
+}
+
+async function login(userId: string) {
+  await mutateDeliveryImportWorkspace((state) => loginAsUser(state, userId));
+  sessionCookie = `${WORKSPACE_SESSION_COOKIE_NAME}=${createWorkspaceSessionCookieValue(userId)}`;
+}
+
+function timelineRequest(url: string) {
+  return new Request(url, sessionCookie ? { headers: { cookie: sessionCookie } } : undefined);
 }

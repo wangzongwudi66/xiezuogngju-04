@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const actor = await requireWorkspaceRequestActor("unauthenticated");
+    const actor = await requireWorkspaceRequestActor(request, "unauthenticated");
     return NextResponse.json(await mutateDeliveryPackage(withServerActor(input, actor.userId)));
   } catch (error) {
     if (error instanceof Error && error.message === "unauthenticated") {

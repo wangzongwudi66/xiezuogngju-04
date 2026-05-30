@@ -7,8 +7,11 @@ import { createDeliveryImportJob } from "../delivery-import-jobs/service";
 import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { mutateDeliveryPackage } from "../delivery-packages/service";
 import { mutateAssetLockRecord } from "../asset-lock-records/service";
+import { createWorkspaceSessionCookieValue, WORKSPACE_SESSION_COOKIE_NAME } from "../workspace-session/session-cookie";
 import { GET, POST } from "./route";
 import { DELETE as DELETE_ATTACHMENT, GET as GET_ATTACHMENT } from "./[attachmentId]/route";
+
+let sessionCookie = "";
 
 describe("asset lock attachment route", () => {
   let storeDir: string;
@@ -20,12 +23,15 @@ describe("asset lock attachment route", () => {
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
     process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR = attachmentDir;
+    process.env.AIGC_WORKSPACE_SESSION_SECRET = "asset-lock-attachment-route-test-secret";
     await login("user-head-writer");
   });
 
   afterEach(async () => {
+    sessionCookie = "";
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
     delete process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR;
+    delete process.env.AIGC_WORKSPACE_SESSION_SECRET;
     await rm(storeDir, { recursive: true, force: true });
   });
 
@@ -33,7 +39,7 @@ describe("asset lock attachment route", () => {
     const recordId = (await createAssetRecord()).record.id;
     const uploadResponse = await POST(formRequest(buildUploadForm(recordId, { uploadedByUserId: "user-owner" })));
     const created = await uploadResponse.json();
-    const listResponse = await GET(new Request(`http://localhost/api/asset-lock-attachments?recordId=${recordId}`));
+    const listResponse = await GET(listRequest(recordId));
     const listed = await listResponse.json();
     const serialized = JSON.stringify(created);
 
@@ -64,7 +70,7 @@ describe("asset lock attachment route", () => {
     const created = await uploadResponse.json();
     await POST(formRequest(buildUploadForm(hiddenRecordId, { fileName: "hidden.png" })));
 
-    await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: null }));
+    sessionCookie = "";
     const unauthenticated = await GET(listRequest(visibleRecordId));
 
     await addOutsider();
@@ -95,7 +101,7 @@ describe("asset lock attachment route", () => {
 
   it("requires the current session actor for uploads and does not fall back to uploadedByUserId", async () => {
     const recordId = (await createAssetRecord()).record.id;
-    await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: null }));
+    sessionCookie = "";
     const unauthenticated = await POST(formRequest(buildUploadForm(recordId, { uploadedByUserId: "user-head-writer" })));
 
     await addOutsider();
@@ -217,7 +223,7 @@ describe("asset lock attachment route", () => {
 
     const response = await DELETE_ATTACHMENT(attachmentRequest(created.attachment.id), attachmentContext(created.attachment.id));
     const payload = await response.json();
-    const listResponse = await GET(new Request(`http://localhost/api/asset-lock-attachments?recordId=${recordId}`));
+    const listResponse = await GET(listRequest(recordId));
     const listed = await listResponse.json();
     const serialized = JSON.stringify(payload);
 
@@ -298,7 +304,7 @@ describe("asset lock attachment route", () => {
     const missingId = await GET_ATTACHMENT(attachmentRequest(""), attachmentContext(""));
     const missingAttachment = await GET_ATTACHMENT(attachmentRequest("missing-attachment"), attachmentContext("missing-attachment"));
 
-    await mutateDeliveryImportWorkspace((state) => ({ ...state, currentUserId: null }));
+    sessionCookie = "";
     const unauthenticatedDownload = await GET_ATTACHMENT(attachmentRequest(created.attachment.id), attachmentContext(created.attachment.id));
     const unauthenticatedDelete = await DELETE_ATTACHMENT(attachmentRequest(created.attachment.id), attachmentContext(created.attachment.id));
 
@@ -411,6 +417,7 @@ describe("asset lock attachment route", () => {
 
   async function login(userId: string) {
     await mutateDeliveryImportWorkspace((state) => loginAsUser(state, userId));
+    sessionCookie = `${WORKSPACE_SESSION_COOKIE_NAME}=${createWorkspaceSessionCookieValue(userId)}`;
   }
 
   async function addOutsider() {
@@ -501,19 +508,30 @@ function buildUploadForm(
 function formRequest(form: FormData) {
   return new Request("http://localhost/api/asset-lock-attachments", {
     method: "POST",
+    headers: sessionCookie ? { cookie: sessionCookie } : undefined,
     body: form
   });
 }
 
 function listRequest(recordId: string) {
-  return new Request(`http://localhost/api/asset-lock-attachments?recordId=${recordId}`);
+  return sessionRequest(`http://localhost/api/asset-lock-attachments?recordId=${recordId}`);
 }
 
 function attachmentRequest(attachmentId: string, body?: unknown) {
-  return new Request(`http://localhost/api/asset-lock-attachments/${attachmentId}`, body === undefined ? undefined : {
+  return sessionRequest(`http://localhost/api/asset-lock-attachments/${attachmentId}`, body === undefined ? undefined : {
     method: "DELETE",
     body: JSON.stringify(body)
   });
+}
+
+function sessionRequest(url: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+
+  if (sessionCookie) {
+    headers.set("cookie", sessionCookie);
+  }
+
+  return new Request(url, { ...init, headers });
 }
 
 function attachmentContext(attachmentId: string) {

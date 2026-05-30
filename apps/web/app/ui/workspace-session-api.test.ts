@@ -20,6 +20,7 @@ describe("workspace session API client", () => {
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/workspace-session", {
       body: JSON.stringify({ userId: "user-coordinator" }),
+      credentials: "same-origin",
       headers: {
         "Content-Type": "application/json"
       },

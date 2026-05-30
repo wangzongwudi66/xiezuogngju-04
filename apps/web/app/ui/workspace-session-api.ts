@@ -11,6 +11,7 @@ export type WorkspaceSessionSyncResult =
 export async function syncWorkspaceCurrentUser(userId: string | null): Promise<WorkspaceSessionSyncResult> {
   const response = await fetch("/api/workspace-session", {
     body: JSON.stringify({ userId }),
+    credentials: "same-origin",
     headers: {
       "Content-Type": "application/json"
     },
