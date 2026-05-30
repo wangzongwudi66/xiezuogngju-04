@@ -5,19 +5,20 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-31 01:47:35 +08:00`.
+Timestamp: `2026-05-31 02:36:02 +08:00`.
 
-- Active branch: `main`.
-- Latest merged checkpoint covered by this ledger update: `4bc6ca6 Add auth scope admin UI API helper`.
-- Latest product/test code commit on `main`: `4bc6ca6 Add auth scope admin UI API helper`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-auth-scope-admin-ui-api`.
-- Remote sync target for this checkpoint: push local `main` to `xiezuogongju-04/main` after recording this ledger update.
+- Main baseline branch: `main`.
+- Latest merged checkpoint covered by this ledger update: `5193e97 Guard auth scope local mutations in DB mode`.
+- Latest product/test code commit on `main`: `5193e97 Guard auth scope local mutations in DB mode`.
+- Latest main record commit before this ledger refresh: `5327acf Record auth scope DB mode mutation guard merge`.
+- Worktree at last check: clean after pushing `main` to `xiezuogongju-04/main`.
+- Remote sync target for this checkpoint: push local `main` to `xiezuogongju-04/main` after recording this ledger refresh.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
-- Current gate: real `db:smoke` has passed in GitHub Actions on disposable Postgres for `7a080302bbc6aed551089bae934c24cb2f352f78`; run `26687654863` passed both `Check Drizzle migrations` and `Run Postgres smoke tests`. Local `TEST_DATABASE_URL` is still not set, so do not run local `db:smoke` unless a disposable test URL is explicitly provided.
+- Current gate: real `db:smoke` has passed in GitHub Actions on disposable Postgres for `5327acf167153f9c2a13d911a8f3616004059ac3`; run `26691649592` passed both `Check Drizzle migrations` and `Run Postgres smoke tests`. Local `TEST_DATABASE_URL` is still not set, so do not run local `db:smoke` unless a disposable test URL is explicitly provided.
 - Child 35 rechecked the gate and remained blocked: `TEST_DATABASE_URL` is missing, so `db:check` and `db:smoke` were not run.
 - Child 36 recommends the fastest unblock path: obtain an external disposable Postgres `TEST_DATABASE_URL`; Docker Desktop or local Postgres are secondary options because this shell currently lacks both `docker` and `psql`.
-- Child 37 refreshed the post-smoke priority order: first session/cookie-backed actor, then asset attachment object storage provider, then auth/scope seed/admin write contract. These remain planning-only until real `db:smoke` passes.
+- Child 37 refreshed the post-smoke priority order: first session/cookie-backed actor, then asset attachment object storage provider, then auth/scope seed/admin write contract. That sequence has now landed on `main`; the next phase is hardening and browser-flow coverage rather than broad new backend expansion.
 - Child 38 recommends a GitHub Actions `db-smoke` job on `ubuntu-latest` using `services.postgres`, step-scoped `TEST_DATABASE_URL`, `npm run db:check -w apps/web`, then `npm run db:smoke -w apps/web`; do not set `DATABASE_URL` or use shared databases.
 - Child 39 specifies the post-smoke session/cookie actor design: HttpOnly signed cookie, `AIGC_WORKSPACE_SESSION_SECRET`, request-scoped actor resolution from cookie, overlay user validation, and no password/OAuth/JWT/admin auth expansion in the first slice.
 - Child 40 specifies the post-smoke object storage provider design: keep `AssetAttachmentStorage`, add explicit provider/env resolver later, default local provider unchanged, deterministic keys from `fileId + extension`, and defer `storageKey`/checksum schema fields unless required by deployment needs.
@@ -45,9 +46,40 @@ Timestamp: `2026-05-31 01:47:35 +08:00`.
 - Child 62 reviewed `codex/m3-auth-scope-admin-smoke` at `d6bb88e` and found no P0/P1/P2/P3; it confirmed the branch is suitable for fast-forward merge.
 - Child 63 confirmed the GitHub Actions `db-smoke` run for `1515c601249f2b4d010741d8718d424aeb7faf9b` passed with no connection string leakage observed.
 - Child 64 reviewed `codex/m3-auth-scope-admin-ui-api` at `4bc6ca6` and found no P0/P1/P2/P3; it confirmed the branch is suitable for fast-forward merge.
+- Child 65 confirmed the GitHub Actions `db-smoke` run for `71a70a0f2bb67e7bcd17b9456109318298368d76` passed with no connection string leakage observed.
+- UI integration review confirmed `codex/m3-auth-scope-admin-ui-integration` at `7ea906f` had no P0/P1/P2/P3 and was suitable for fast-forward merge.
+- CI review confirmed the GitHub Actions `db-smoke` run for `c24deabda112072788cc5affcbaa7e1dd82161dd` passed with no connection string leakage observed.
+- Mutation guard review first found an in-place mutation contamination risk in `codex/m3-auth-scope-db-mode-mutation-guard`; the amended branch at `5193e97` fixed it and re-review found no new issues.
+- CI review confirmed the GitHub Actions `db-smoke` run for `5327acf167153f9c2a13d911a8f3616004059ac3` passed with no connection string leakage observed.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `5193e97 Guard auth scope local mutations in DB mode`
+  - Adds `apps/web/app/api/delivery-import-jobs/persistence.test.ts` and updates `apps/web/app/api/delivery-import-jobs/persistence.ts`.
+  - Prevents `mutateDeliveryImportWorkspace` from changing DB-owned auth/scope arrays in DB mode: `users`, `projects`, `members`, `memberPermissions`, `episodes`, and `assignments`.
+  - Allows local-only state such as `currentUserId` to remain mutable in DB mode.
+  - Clones the workspace before passing it to the mutator so rejected in-place mutations cannot contaminate the local store or shared `seedWorkspace`.
+  - Keeps `emptyStore` and invalid parsed workspace fallback from reusing the `seedWorkspace` reference.
+  - Preserves fail-closed behavior when DB mode is requested without `DATABASE_URL`.
+  - Child review found an initial in-place mutation contamination risk; the amended commit fixed it and the follow-up review found no P0/P1/P2/P3. Real local `db:smoke` was not run.
+  - Validation before merge:
+    - `npm.cmd run test -w apps/web -- app/api/delivery-import-jobs/persistence.test.ts app/api/delivery-import-jobs/service.test.ts app/api/delivery-import-jobs/route.test.ts`: passed, 3 files / 35 tests.
+    - `npm.cmd run test -w apps/web -- app/api/workspace-session/route.test.ts app/api/workspace-actor.test.ts app/api/delivery-packages/service.test.ts app/api/delivery-packages/route.test.ts app/api/asset-lock-records/service.test.ts app/api/asset-lock-records/route.test.ts app/api/asset-lock-attachments/service.test.ts app/api/asset-lock-attachments/route.test.ts app/api/asset-lock-attachments/db-repository.test.ts`: passed, 9 files / 143 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `npm.cmd run build -w apps/web`: passed.
+    - `git diff --check main..5193e97`: passed.
+- `7ea906f Wire dashboard auth scope admin API`
+  - Updates `apps/web/app/ui/m1-dashboard.tsx`, `apps/web/app/ui/delivery-import-api.ts`, `apps/web/app/api/delivery-import-jobs/persistence.ts`, `apps/web/app/api/delivery-import-jobs/route.test.ts`, and `apps/web/app/api/asset-lock-attachments/db-repository.test.ts`.
+  - Adds `repositoryMode.authScope` to the workspace snapshot so the frontend can distinguish local prototype auth/scope from DB/server-owned auth/scope without probing by failure.
+  - In DB/server-owned auth/scope mode, routes dashboard project/member/permission/assignment writes through the `/api/auth-scope/admin` helper and refreshes the server workspace snapshot after successful mutations.
+  - Keeps local prototype mode on the existing domain mutations and keeps `AuthGate` register/login/logout out of the admin API path.
+  - Replaces `users`, `projects`, `members`, `memberPermissions`, `episodes`, and `assignments` as whole arrays when applying a DB-owned workspace snapshot, avoiding stale local merge state for replace-style roles, permissions, and assignments.
+  - Child review found no P0/P1/P2/P3. Real local `db:smoke` was not run.
+  - Validation before merge:
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/ui/auth-scope-admin-api.test.ts app/api/auth-scope/admin/route.test.ts app/api/auth-scope/write-service.test.ts app/api/workspace-snapshot.test.ts app/api/delivery-import-jobs/route.test.ts app/api/workspace-session/route.test.ts`: passed, 6 files / 44 tests.
+    - `npm.cmd run build -w apps/web`: passed.
+    - `git diff --check main..codex/m3-auth-scope-admin-ui-integration`: passed.
 - `4bc6ca6 Add auth scope admin UI API helper`
   - Adds `apps/web/app/ui/auth-scope-admin-api.ts` and `apps/web/app/ui/auth-scope-admin-api.test.ts`.
   - Provides a typed frontend API helper for `/api/auth-scope/admin` covering create user/project, update/archive project, member role replacement, custom permission replacement, and episode assignment replacement.
