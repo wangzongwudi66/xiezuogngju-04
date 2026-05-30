@@ -5,18 +5,37 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 18:05:27 +08:00`.
+Timestamp: `2026-05-30 18:20:17 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `0ba6fac Record auth scope overlay merge`.
-- Latest product/test code commit on `main`: `653da0f Overlay DB auth scope in workspace snapshot`.
-- Worktree at last check: clean after pushing `main@0ba6fac`.
-- Remote sync: `xiezuogongju-04/main` is synced to `0ba6fac`.
+- Latest recorded `main` checkpoint: `5dae751 Record current DB backend checkpoint`.
+- Latest product/test code commit on `main`: `65bec60 Add delivery package DB write repository skeleton`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-postgres-smoke-runbook` and rebased `codex/m3-delivery-package-db-write-repository`; ledger update pending commit.
+- Remote sync pending for this ledger update; `main@5dae751` was the last pushed checkpoint before the runbook and delivery package DB repository skeleton merges.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `65bec60 Add delivery package DB write repository skeleton`
+  - Rebases `codex/m3-delivery-package-db-write-repository` onto `main@71b4efb` and fast-forward merges it into `main`; original implementation review commit was `f346573`.
+  - Adds explicit delivery package DB repository write methods for package + episodes creation and status updates without exposing a generic `mutate(callback)`.
+  - Keeps package + episode insert in a transaction, uses returning rows for updates, and raises stable `delivery_package_not_found` on 0-row update.
+  - Keeps the slice scoped to repository plumbing and tests: no route/service runtime wiring, no delivery import DB mutation path, no schema/migration, no UI/browser QA, and no asset-lock overlay changes.
+  - Child review 35 found no P0/P1/P2/P3 and approved merge as low-risk plumbing despite real `db:smoke` still being pending.
+  - Validation after merge:
+    - `npm.cmd run test -w apps/web -- app/api/delivery-packages/db-repository.test.ts`: passed, 1 file / 9 tests.
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
+- `71b4efb docs: add Postgres smoke runbook`
+  - Adds `docs/m3-postgres-smoke-runbook.md` documenting how to run the real Postgres smoke against a disposable `TEST_DATABASE_URL`.
+  - Explicitly forbids using production/development `DATABASE_URL`, documents PowerShell commands, smoke table coverage, cleanup expectations, failure triage, and the current limitation that real smoke cannot be claimed without `TEST_DATABASE_URL`.
+  - Keeps the slice documentation-only: no business code, schema/migration, or `db:smoke` behavior changes.
+  - Child review 34 found no P0/P1/P2/P3 and approved merge.
+  - Validation:
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `653da0f Overlay DB auth scope in workspace snapshot`
   - Rebases `codex/m3-auth-scope-workspace-overlay` onto `main@a4c8515` and fast-forward merges it into `main`; original implementation review commit was `0318a2c`.
   - Extends DB workspace snapshot overlay so DB mode now owns `users`, `projects`, `members`, `memberPermissions`, `episodes`, and `assignments` in addition to asset records, source bindings, delivery packages, and delivery package episodes.
