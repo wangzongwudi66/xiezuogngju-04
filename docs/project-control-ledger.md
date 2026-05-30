@@ -5,18 +5,28 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 17:25:00 +08:00`.
+Timestamp: `2026-05-30 17:36:56 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `441b9e7 Record DB workspace snapshot overlay merge`.
-- Latest product/test code commit on `main`: `c29d878 Add delivery package DB read tests`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-delivery-package-read-tests`; ledger update pending commit.
-- Remote sync pending for this ledger update; `main@441b9e7` was the last pushed checkpoint before the delivery package read-test merge.
+- Latest recorded `main` commit before this ledger update: `796f3be Record delivery package read test merge`.
+- Latest product/test code commit on `main`: `f34f804 Add auth scope DB schema read mapper`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-auth-scope-schema-read`; ledger update pending commit.
+- Remote sync pending for this ledger update; `main@796f3be` was the last pushed checkpoint before the auth/scope schema read merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `f34f804 Add auth scope DB schema read mapper`
+  - Adds Drizzle schema and generated migration `apps/web/db/migrations/0005_odd_bromley.sql` for auth/scope read data: users, projects, project members, member permissions, episodes, and episode assignments.
+  - Adds a pure DB read mapper/helper for auth/scope arrays without connecting it to runtime workspace overlay yet.
+  - Preserves current session/currentUserId semantics and does not change asset-lock repository runtime behavior, routes, UI, or browser QA scope.
+  - Child review 24 found no P0/P1/P2. P3 noted targeted tests do not yet explicitly cover empty rows, multi-role project members, or full PermissionKey enumeration; schema/mapper itself was accepted.
+  - Validation after merge:
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/auth-scope/db-repository.test.ts app/api/delivery-packages/db-repository.test.ts app/api/asset-lock-records/db-repository.test.ts`: passed, 3 files / 19 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `c29d878 Add delivery package DB read tests`
   - Adds focused tests for the delivery package DB read helper that were identified as a P3 coverage gap in review 13.
   - Covers `readDbDeliveryPackageSnapshot()` query behavior directly, empty DB rows returning empty arrays, draft package nullable fields mapping to `undefined`, and delivery package episode `content` / `isConfirmedChange` / `episodeNo` mapping.
