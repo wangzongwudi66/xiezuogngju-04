@@ -7,6 +7,7 @@ import { createDeliveryImportJob, getDeliveryImportWorkspace } from "../delivery
 import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import * as assetLockRecordDbParts from "../asset-lock-records/db-parts";
 import * as authScopeDbRepository from "../auth-scope/db-repository";
+import * as publishReadModelDbRepository from "../publish-read-model/db-repository";
 import * as deliveryPackageDbRepository from "./db-repository";
 import { mutateDeliveryPackage } from "./service";
 
@@ -28,6 +29,11 @@ describe("delivery package service", () => {
     vi.spyOn(assetLockRecordDbParts, "readDbAssetLockRecordParts").mockResolvedValue({
       assetLockRecords: [],
       scriptSourceBindings: []
+    });
+    vi.spyOn(publishReadModelDbRepository, "readDbPublishReadModelSnapshot").mockResolvedValue({
+      episodeRevisions: [],
+      episodeCurrents: [],
+      notifications: []
     });
   });
 

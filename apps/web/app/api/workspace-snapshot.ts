@@ -4,6 +4,9 @@ import type {
   DeliveryPackageEpisode,
   Episode,
   EpisodeAssignment,
+  EpisodeCurrent,
+  EpisodeRevision,
+  Notification,
   Project,
   ProjectMember,
   ProjectMemberPermission,
@@ -14,6 +17,7 @@ import type {
 import { readDbAssetLockRecordParts } from "./asset-lock-records/db-parts";
 import { readDbAuthScopeSnapshot } from "./auth-scope/db-repository";
 import { readDbDeliveryPackageSnapshot } from "./delivery-packages/db-repository";
+import { readDbPublishReadModelSnapshot } from "./publish-read-model/db-repository";
 
 export interface DbWorkspaceSnapshotOverlay {
   users: User[];
@@ -26,6 +30,9 @@ export interface DbWorkspaceSnapshotOverlay {
   scriptSourceBindings: ScriptSourceBinding[];
   deliveryPackages: DeliveryPackage[];
   deliveryPackageEpisodes: DeliveryPackageEpisode[];
+  episodeRevisions: EpisodeRevision[];
+  episodeCurrents: EpisodeCurrent[];
+  notifications: Notification[];
 }
 
 export function composeDbWorkspaceSnapshotOverlay(
@@ -43,15 +50,19 @@ export function composeDbWorkspaceSnapshotOverlay(
     assetLockRecords: overlay.assetLockRecords,
     scriptSourceBindings: overlay.scriptSourceBindings,
     deliveryPackages: overlay.deliveryPackages,
-    deliveryPackageEpisodes: overlay.deliveryPackageEpisodes
+    deliveryPackageEpisodes: overlay.deliveryPackageEpisodes,
+    episodeRevisions: overlay.episodeRevisions,
+    episodeCurrents: overlay.episodeCurrents,
+    notifications: overlay.notifications
   };
 }
 
 export async function readDbWorkspaceOverlayParts(): Promise<DbWorkspaceSnapshotOverlay> {
-  const [authScopeSnapshot, assetLockRecordParts, deliveryPackageSnapshot] = await Promise.all([
+  const [authScopeSnapshot, assetLockRecordParts, deliveryPackageSnapshot, publishReadModelSnapshot] = await Promise.all([
     readDbAuthScopeSnapshot(),
     readDbAssetLockRecordParts(),
-    readDbDeliveryPackageSnapshot()
+    readDbDeliveryPackageSnapshot(),
+    readDbPublishReadModelSnapshot()
   ]);
 
   return {
@@ -64,7 +75,10 @@ export async function readDbWorkspaceOverlayParts(): Promise<DbWorkspaceSnapshot
     assetLockRecords: assetLockRecordParts.assetLockRecords,
     scriptSourceBindings: assetLockRecordParts.scriptSourceBindings,
     deliveryPackages: deliveryPackageSnapshot.deliveryPackages,
-    deliveryPackageEpisodes: deliveryPackageSnapshot.deliveryPackageEpisodes
+    deliveryPackageEpisodes: deliveryPackageSnapshot.deliveryPackageEpisodes,
+    episodeRevisions: publishReadModelSnapshot.episodeRevisions,
+    episodeCurrents: publishReadModelSnapshot.episodeCurrents,
+    notifications: publishReadModelSnapshot.notifications
   };
 }
 

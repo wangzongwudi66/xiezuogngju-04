@@ -43,6 +43,13 @@
       "when": 1780133415083,
       "tag": "0005_odd_bromley",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780142454503,
+      "tag": "0006_foamy_chat",
+      "breakpoints": true
     }
   ]
 }
