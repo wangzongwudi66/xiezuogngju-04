@@ -5,12 +5,12 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 23:11:12 +08:00`.
+Timestamp: `2026-05-30 23:28:19 +08:00`.
 
 - Active branch: `main`.
-- Latest merged checkpoint covered by this ledger update: `8c6a0ad ci: add postgres smoke workflow`.
+- Latest merged checkpoint covered by this ledger update: `88504d3 test: relax smoke projection assertions`.
 - Latest product/test code commit on `main`: `0588d61 Require asset attachment storage delete`.
-- Worktree at last check: clean after fast-forward merging the DB smoke GitHub Actions workflow.
+- Worktree at last check: clean after fast-forward merging the smoke projection assertion fix.
 - Remote sync target for this checkpoint: push local `main` to `xiezuogongju-04/main` after recording this ledger update.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
@@ -22,9 +22,23 @@ Timestamp: `2026-05-30 23:11:12 +08:00`.
 - Child 39 specifies the post-smoke session/cookie actor design: HttpOnly signed cookie, `AIGC_WORKSPACE_SESSION_SECRET`, request-scoped actor resolution from cookie, overlay user validation, and no password/OAuth/JWT/admin auth expansion in the first slice.
 - Child 40 specifies the post-smoke object storage provider design: keep `AssetAttachmentStorage`, add explicit provider/env resolver later, default local provider unchanged, deterministic keys from `fileId + extension`, and defer `storageKey`/checksum schema fields unless required by deployment needs.
 - Child 41 reviewed `codex/m3-db-smoke-github-action` and found no P0/P1/P2/P3; the branch is suitable for fast-forward merge into `main`.
+- Child 42 confirmed the first GitHub Actions `db-smoke` run for `bba42df` failed in `Run Postgres smoke tests`: the projection smoke assertion expected a narrow array shape while the real projection returned additional generated decisions/source excerpts.
+- Child 43 reviewed the first assertion fix and found a P2: the custom `ok:false` smoke error was unreachable because `expect(projection.ok).toBe(true)` executed first.
+- Child 44 reviewed the amended fix at `88504d3` and found no P0/P1/P2/P3; the branch is suitable for fast-forward merge into `main`.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `88504d3 test: relax smoke projection assertions`
+  - Fixes the real CI smoke failure from run `26687297858`.
+  - Updates `apps/web/db/postgres-smoke.ts` so the asset decision timeline projection smoke assertion allows additional generated `decisionQueue` and `sourceExcerpts` entries while still requiring the manually created record and explicit source binding excerpt.
+  - Keeps `ok:false` handling stable by throwing `smoke_asset_timeline_projection_failed:<error>` before the `ok:true` assertion.
+  - Keeps the slice scoped to smoke assertion correctness: no runtime/business/schema/UI changes, no DB schema expansion, no object storage changes, and no `codex/timeline-mobile-crop-hardening` changes.
+  - Child review 43 found a P2 in the first fix; child review 44 confirmed the amended fix and found no P0/P1/P2/P3. Real local `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/asset-decision-timeline/service.test.ts app/asset-decision-timeline/projection.test.ts app/api/asset-decision-timeline/route.test.ts`: passed, 3 files / 36 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `8c6a0ad ci: add postgres smoke workflow`
   - Adds `.github/workflows/db-smoke.yml` as the CI smoke gate infrastructure.
   - Runs on `ubuntu-latest` with a GitHub Actions `postgres:16` service using disposable database credentials scoped to the job.
