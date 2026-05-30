@@ -3,10 +3,17 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { assetAttachments } from "../../../db/schema";
 import { readDbAssetLockRecordRepositorySnapshot } from "../asset-lock-records/db-repository";
-import type { DbAssetAttachmentRepository } from "./repository";
+import type { AssetAttachmentStorageMetadata, DbAssetAttachmentRepository } from "./repository";
 
 export type AssetAttachmentDbRow = typeof assetAttachments.$inferSelect;
 type AssetAttachmentDbInsert = typeof assetAttachments.$inferInsert;
+type AssetAttachmentStorageMetadataLegacyKeyInput = Pick<AssetAttachmentDbRow, "fileId" | "fileName">;
+export interface PersistedAssetAttachmentStorageMetadata {
+  assetAttachmentId: string;
+  checksumSha256?: string;
+  sizeBytes: number;
+  storageKey: string;
+}
 const createMetadataMaxAttempts = 3;
 
 export function createDbAssetAttachmentRepository(): DbAssetAttachmentRepository {
@@ -39,7 +46,7 @@ export function createDbAssetAttachmentRepository(): DbAssetAttachmentRepository
             const nextVersion = await readNextAssetAttachmentVersion(tx, command.attachment.assetLockRecordId);
             const insertedRows = await tx
               .insert(assetAttachments)
-              .values(mapAssetAttachmentToDbRow({ ...command.attachment, version: nextVersion }))
+              .values(mapAssetAttachmentToDbRow({ ...command.attachment, version: nextVersion }, command.storage))
               .returning();
             return mapAssetAttachmentRows(insertedRows)[0];
           });
@@ -125,7 +132,22 @@ export function mapAssetAttachmentRows(rows: AssetAttachmentDbRow[]): AssetAttac
   }));
 }
 
-export function mapAssetAttachmentToDbRow(attachment: AssetAttachment): AssetAttachmentDbInsert {
+export function mapAssetAttachmentStorageMetadataRows(
+  rows: AssetAttachmentDbRow[],
+  legacyStorageKey: (row: AssetAttachmentStorageMetadataLegacyKeyInput) => string
+): PersistedAssetAttachmentStorageMetadata[] {
+  return rows.map((row) => ({
+    assetAttachmentId: row.id,
+    checksumSha256: optional(row.checksumSha256),
+    sizeBytes: row.sizeBytes,
+    storageKey: row.storageKey ?? legacyStorageKey(row)
+  }));
+}
+
+export function mapAssetAttachmentToDbRow(
+  attachment: AssetAttachment,
+  storage?: AssetAttachmentStorageMetadata
+): AssetAttachmentDbInsert {
   return {
     id: attachment.id,
     projectId: attachment.projectId,
@@ -135,6 +157,8 @@ export function mapAssetAttachmentToDbRow(attachment: AssetAttachment): AssetAtt
     fileName: attachment.fileName,
     mime: toAssetAttachmentDbMime(attachment.mime),
     sizeBytes: attachment.size,
+    storageKey: storage?.storageKey ?? null,
+    checksumSha256: storage?.checksumSha256 ?? null,
     version: attachment.version,
     attachmentType: attachment.attachmentType,
     uploadedByUserId: attachment.uploadedByUserId,

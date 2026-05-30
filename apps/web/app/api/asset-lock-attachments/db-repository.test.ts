@@ -9,6 +9,7 @@ import { readDbPublishReadModelSnapshot } from "../publish-read-model/db-reposit
 import {
   createDbAssetAttachmentRepository,
   mapAssetAttachmentRows,
+  mapAssetAttachmentStorageMetadataRows,
   mapAssetAttachmentToDbRow,
   type AssetAttachmentDbRow
 } from "./db-repository";
@@ -46,6 +47,8 @@ describe("asset lock attachment DB repository mappers", () => {
         fileName: "reference.png",
         mime: "image/png",
         sizeBytes: 4096,
+        storageKey: "persisted/asset-att-123e4567-e89b-12d3-a456-426614174000.png",
+        checksumSha256: "1".repeat(64),
         version: 1,
         attachmentType: "reference",
         uploadedByUserId: "user-head-writer",
@@ -64,6 +67,8 @@ describe("asset lock attachment DB repository mappers", () => {
         fileName: "final.pdf",
         mime: "application/pdf",
         sizeBytes: 8192,
+        storageKey: null,
+        checksumSha256: null,
         version: 2,
         attachmentType: "final",
         uploadedByUserId: "user-owner",
@@ -116,6 +121,8 @@ describe("asset lock attachment DB repository mappers", () => {
       }
     ]);
     expect(JSON.stringify(attachments)).not.toContain("sizeBytes");
+    expect(JSON.stringify(attachments)).not.toContain("storageKey");
+    expect(JSON.stringify(attachments)).not.toContain("checksumSha256");
   });
 
   it("maps domain asset attachments into explicit DB insert rows", () => {
@@ -135,6 +142,8 @@ describe("asset lock attachment DB repository mappers", () => {
       fileName: "reference.png",
       mime: "image/png",
       sizeBytes: 4096,
+      storageKey: null,
+      checksumSha256: null,
       version: 1,
       attachmentType: "reference",
       uploadedByUserId: "user-head-writer",
@@ -144,6 +153,74 @@ describe("asset lock attachment DB repository mappers", () => {
       deletedByUserId: "user-owner",
       deletedAt: "2026-05-29T03:00:00.000Z"
     });
+  });
+
+  it("maps persisted storage metadata into DB insert rows without adding content length", () => {
+    const attachment = buildAttachment();
+    const storage = {
+      storageKey: `${attachment.fileId}.png`,
+      checksumSha256: "0".repeat(64),
+      contentLength: attachment.size
+    };
+
+    expect(mapAssetAttachmentToDbRow(attachment, storage)).toEqual({
+      id: "asset-attachment-1",
+      projectId: "project-jincheng",
+      assetLockRecordId: "asset-lock-1",
+      deliveryPackageId: "delivery-1",
+      fileId: "asset-att-123e4567-e89b-12d3-a456-426614174000",
+      fileName: "reference.png",
+      mime: "image/png",
+      sizeBytes: 4096,
+      storageKey: "asset-att-123e4567-e89b-12d3-a456-426614174000.png",
+      checksumSha256: "0".repeat(64),
+      version: 1,
+      attachmentType: "reference",
+      uploadedByUserId: "user-head-writer",
+      uploadedAt: "2026-05-29T00:00:00.000Z",
+      note: null,
+      status: "active",
+      deletedByUserId: null,
+      deletedAt: null
+    });
+    expect(mapAssetAttachmentToDbRow(attachment, storage)).not.toHaveProperty("contentLength");
+  });
+
+  it("maps storage metadata rows with legacy storage key fallback", () => {
+    const persisted = mapAssetAttachmentToDbRow(buildAttachment(), {
+      storageKey: "asset-lock-attachments/asset-att-123e4567-e89b-12d3-a456-426614174000.png",
+      checksumSha256: "0".repeat(64),
+      contentLength: 4096
+    }) as AssetAttachmentDbRow;
+    const legacy = {
+      ...mapAssetAttachmentToDbRow(
+        buildAttachment({
+          id: "asset-attachment-2",
+          fileId: "asset-att-123e4567-e89b-12d3-a456-426614174001",
+          fileName: "legacy.pdf",
+          size: 8192
+        })
+      ),
+      storageKey: null,
+      checksumSha256: null
+    } as AssetAttachmentDbRow;
+
+    expect(
+      mapAssetAttachmentStorageMetadataRows([persisted, legacy], (row) => `${row.fileId}${row.fileName.slice(row.fileName.lastIndexOf("."))}`)
+    ).toEqual([
+      {
+        assetAttachmentId: "asset-attachment-1",
+        checksumSha256: "0".repeat(64),
+        sizeBytes: 4096,
+        storageKey: "asset-lock-attachments/asset-att-123e4567-e89b-12d3-a456-426614174000.png"
+      },
+      {
+        assetAttachmentId: "asset-attachment-2",
+        checksumSha256: undefined,
+        sizeBytes: 8192,
+        storageKey: "asset-att-123e4567-e89b-12d3-a456-426614174001.pdf"
+      }
+    ]);
   });
 });
 
@@ -226,14 +303,15 @@ describe("asset lock attachment DB repository writes", () => {
 
   it("inserts attachment metadata and returns the committed row", async () => {
     const attachment = buildAttachment();
-    const row = mapAssetAttachmentToDbRow(attachment) as AssetAttachmentDbRow;
+    const command = metadataCommandFromAttachment(attachment);
+    const row = mapAssetAttachmentToDbRow(attachment, command.storage) as AssetAttachmentDbRow;
     const mockDb = createMockDb({ insertedRows: [row] });
     mockRuntime(mockDb.db);
 
-    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata(metadataCommandFromAttachment(attachment));
+    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata(command);
 
     expect(mockDb.transaction).toHaveBeenCalledTimes(1);
-    expect(mockDb.insertValues).toHaveBeenCalledWith(mapAssetAttachmentToDbRow(attachment));
+    expect(mockDb.insertValues).toHaveBeenCalledWith(mapAssetAttachmentToDbRow(attachment, command.storage));
     expect(mockDb.insertReturning).toHaveBeenCalledTimes(1);
     expect(committed).toEqual(attachment);
   });
@@ -241,38 +319,36 @@ describe("asset lock attachment DB repository writes", () => {
   it("allocates attachment version inside the DB transaction from current rows", async () => {
     const staleAttachment = buildAttachment({ version: 1 });
     const committedAttachment = buildAttachment({ version: 8 });
+    const command = metadataCommandFromAttachment(staleAttachment);
     const mockDb = createMockDb({
-      insertedRows: [mapAssetAttachmentToDbRow(committedAttachment) as AssetAttachmentDbRow],
+      insertedRows: [mapAssetAttachmentToDbRow(committedAttachment, command.storage) as AssetAttachmentDbRow],
       versionRows: [[{ version: 7 }]]
     });
     mockRuntime(mockDb.db);
 
-    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata(
-      metadataCommandFromAttachment(staleAttachment)
-    );
+    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata(command);
 
     expect(mockDb.transaction).toHaveBeenCalledTimes(1);
     expect(mockDb.selectVersionWhere).toHaveBeenCalledTimes(1);
-    expect(mockDb.insertValues).toHaveBeenCalledWith(mapAssetAttachmentToDbRow(committedAttachment));
+    expect(mockDb.insertValues).toHaveBeenCalledWith(mapAssetAttachmentToDbRow(committedAttachment, command.storage));
     expect(committed).toEqual(committedAttachment);
   });
 
   it("retries a record-version unique conflict with a fresh DB version allocation", async () => {
     const staleAttachment = buildAttachment({ version: 1 });
     const committedAttachment = buildAttachment({ version: 3 });
+    const command = metadataCommandFromAttachment(staleAttachment);
     const mockDb = createMockDb({
-      insertedRows: [mapAssetAttachmentToDbRow(committedAttachment) as AssetAttachmentDbRow],
+      insertedRows: [mapAssetAttachmentToDbRow(committedAttachment, command.storage) as AssetAttachmentDbRow],
       transactionErrors: [recordVersionUniqueViolation()],
       versionRows: [[{ version: 2 }]]
     });
     mockRuntime(mockDb.db);
 
-    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata(
-      metadataCommandFromAttachment(staleAttachment)
-    );
+    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata(command);
 
     expect(mockDb.transaction).toHaveBeenCalledTimes(2);
-    expect(mockDb.insertValues).toHaveBeenCalledWith(mapAssetAttachmentToDbRow(committedAttachment));
+    expect(mockDb.insertValues).toHaveBeenCalledWith(mapAssetAttachmentToDbRow(committedAttachment, command.storage));
     expect(committed).toEqual(committedAttachment);
   });
 

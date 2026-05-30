@@ -50,6 +50,13 @@
       "when": 1780142454503,
       "tag": "0006_foamy_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1780168961526,
+      "tag": "0007_confused_sleeper",
+      "breakpoints": true
     }
   ]
 }

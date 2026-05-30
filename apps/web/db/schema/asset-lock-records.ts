@@ -125,6 +125,8 @@ export const assetAttachments = pgTable(
     fileName: text("file_name").notNull(),
     mime: text("mime", { enum: assetAttachmentMimeValues }).notNull(),
     sizeBytes: integer("size_bytes").notNull(),
+    storageKey: text("storage_key"),
+    checksumSha256: text("checksum_sha256"),
     version: integer("version").notNull(),
     attachmentType: text("attachment_type", { enum: assetAttachmentTypeValues }).notNull(),
     uploadedByUserId: text("uploaded_by_user_id").notNull(),
