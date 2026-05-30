@@ -16,6 +16,8 @@ describe("delivery package service", () => {
 
   afterEach(async () => {
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
+    delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
+    delete process.env.DATABASE_URL;
     await rm(storeDir, { recursive: true, force: true });
   });
 
@@ -146,6 +148,47 @@ describe("delivery package service", () => {
       })
     ).rejects.toThrow("draft");
     await expect(getDeliveryImportWorkspace()).resolves.toEqual(beforeStatusFailure);
+  });
+
+  it("fails closed for all delivery package mutations in DB mode without writing local state", async () => {
+    const deliveryPackageId = await createDraft();
+    const before = await getDeliveryImportWorkspace();
+    process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
+    process.env.DATABASE_URL = "postgres://example.invalid/aigc";
+
+    await expect(
+      mutateDeliveryPackage({
+        action: "update_confirmation",
+        deliveryPackageId,
+        confirmedEpisodeNos: [1]
+      })
+    ).rejects.toThrow("delivery_package_db_mutation_not_supported:update_confirmation");
+    await expect(
+      mutateDeliveryPackage({
+        action: "submit",
+        deliveryPackageId,
+        actorUserId: "user-head-writer"
+      })
+    ).rejects.toThrow("delivery_package_db_mutation_not_supported:submit");
+    await expect(
+      mutateDeliveryPackage({
+        action: "reject",
+        deliveryPackageId,
+        actorUserId: "user-owner",
+        rejectionReason: "\u6682\u4e0d\u652f\u6301"
+      })
+    ).rejects.toThrow("delivery_package_db_mutation_not_supported:reject");
+    await expect(
+      mutateDeliveryPackage({
+        action: "publish",
+        deliveryPackageId,
+        actorUserId: "user-owner"
+      })
+    ).rejects.toThrow("delivery_package_db_mutation_not_supported:publish");
+
+    delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
+    delete process.env.DATABASE_URL;
+    await expect(getDeliveryImportWorkspace()).resolves.toEqual(before);
   });
 });
 

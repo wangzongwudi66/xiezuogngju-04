@@ -6,7 +6,10 @@ import { loginAsUser, seedWorkspace, type AssetLockRecord, type ScriptSourceBind
 import { createDeliveryImportJob, getDeliveryImportWorkspace } from "../delivery-import-jobs/service";
 import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { mutateDeliveryPackage } from "../delivery-packages/service";
+import * as authScopeDbRepository from "../auth-scope/db-repository";
+import * as deliveryPackageDbRepository from "../delivery-packages/db-repository";
 import * as assetLockRecordRepositoryModule from "./repository";
+import * as assetLockRecordDbParts from "./db-parts";
 import type { AssetLockRecordRepositorySnapshot, DbAssetLockRecordRepository } from "./repository";
 import {
   listAssetLockRecords as listAssetLockRecordsForActor,
@@ -24,6 +27,22 @@ describe("asset lock record service", () => {
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
     delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
     delete process.env.DATABASE_URL;
+    vi.spyOn(authScopeDbRepository, "readDbAuthScopeSnapshot").mockResolvedValue({
+      users: seedWorkspace.users,
+      projects: seedWorkspace.projects,
+      members: seedWorkspace.members,
+      memberPermissions: seedWorkspace.memberPermissions,
+      episodes: seedWorkspace.episodes,
+      assignments: seedWorkspace.assignments
+    });
+    vi.spyOn(assetLockRecordDbParts, "readDbAssetLockRecordParts").mockResolvedValue({
+      assetLockRecords: [],
+      scriptSourceBindings: []
+    });
+    vi.spyOn(deliveryPackageDbRepository, "readDbDeliveryPackageSnapshot").mockResolvedValue({
+      deliveryPackages: [],
+      deliveryPackageEpisodes: []
+    });
     await login("user-head-writer");
   });
 
@@ -54,21 +73,21 @@ describe("asset lock record service", () => {
   });
 
   it("fails closed before writing local state when DB mode is requested without DATABASE_URL", async () => {
+    const deliveryPackageId = await createDraft();
     process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
     delete process.env.DATABASE_URL;
-    const deliveryPackageId = await createDraft();
-    const workspaceBefore = await getDeliveryImportWorkspace();
+    const workspaceBefore = await getLocalDeliveryImportWorkspace();
 
     await expect(createAssetRecord(deliveryPackageId, "Fail Closed Asset")).rejects.toThrow(
       "asset_lock_record_database_url_required"
     );
-    await expect(getDeliveryImportWorkspace()).resolves.toEqual(workspaceBefore);
+    await expect(getLocalDeliveryImportWorkspace()).resolves.toEqual(workspaceBefore);
   });
 
   it("rejects DB-mode mutations that are intentionally not DB-backed before writing to local state", async () => {
     process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
     process.env.DATABASE_URL = "postgres://example.invalid/aigc";
-    const workspaceBefore = await getDeliveryImportWorkspace();
+    const workspaceBefore = await getLocalDeliveryImportWorkspace();
 
     await expect(
       mutateAssetLockRecord({
@@ -77,7 +96,7 @@ describe("asset lock record service", () => {
         actorUserId: "user-head-writer"
       })
     ).rejects.toThrow("asset_lock_record_db_mutation_unsupported:prepare_demo");
-    await expect(getDeliveryImportWorkspace()).resolves.toEqual(workspaceBefore);
+    await expect(getLocalDeliveryImportWorkspace()).resolves.toEqual(workspaceBefore);
   });
 
   it("validates the local session user against DB-overlaid auth scope", async () => {
@@ -198,6 +217,63 @@ describe("asset lock record service", () => {
     expect(persisted.state.assetLockRecords ?? []).toEqual(workspace.state.assetLockRecords ?? []);
     expect(persisted.state.deliveryPackages).toEqual([]);
     expect(persisted.state.deliveryPackageEpisodes).toEqual([]);
+  });
+
+  it("generates asset records from a delivery package imported into the DB draft store", async () => {
+    process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
+    process.env.DATABASE_URL = "postgres://example.invalid/aigc";
+    let dbPackageSnapshot: deliveryPackageDbRepository.DeliveryPackageDbSnapshot = {
+      deliveryPackages: [],
+      deliveryPackageEpisodes: []
+    };
+    vi.mocked(deliveryPackageDbRepository.readDbDeliveryPackageSnapshot).mockImplementation(async () => dbPackageSnapshot);
+    vi.spyOn(deliveryPackageDbRepository, "createDbDeliveryPackageWithEpisodes").mockImplementation(
+      async (deliveryPackage, episodes) => {
+        dbPackageSnapshot = {
+          deliveryPackages: [{ ...deliveryPackage, status: "published", publishedAt: "2026-05-30T00:00:00.000Z" }],
+          deliveryPackageEpisodes: episodes
+        };
+
+        return dbPackageSnapshot;
+      }
+    );
+
+    const imported = await createDeliveryImportJob({
+      source: "text",
+      projectId: "project-jincheng",
+      uploadedByUserId: "user-head-writer",
+      declaredRangeText: "1-2",
+      rawText:
+        "\u7b2c 1 \u96c6\n\u9435\u7926\u4e95\u5165\u53e3\u65b0\u589e\u5347\u964d\u7b3c\uff0c\u4f17\u4eba\u7b2c\u4e00\u6b21\u8fdb\u5165\u5317\u4e95\u3002\n\u7b2c 2 \u96c6\n\u7ea2\u8272\u5b89\u5168\u706f\u6cbf\u7528\uff0c\u5730\u56fe\u5c55\u5f00\uff0c\u7c89\u5c18\u7206\u95ea\u4f5c\u4e3a\u584c\u65b9\u524d\u5146\u3002"
+    });
+
+    expect(imported.ok).toBe(true);
+    if (!imported.ok || !imported.job.deliveryPackageId) {
+      return;
+    }
+
+    const localWorkspace = await getLocalDeliveryImportWorkspace();
+    const repository = createMockDbAssetLockRecordRepository(
+      snapshotFromState({
+        ...localWorkspace.state,
+        deliveryPackages: dbPackageSnapshot.deliveryPackages,
+        deliveryPackageEpisodes: dbPackageSnapshot.deliveryPackageEpisodes
+      })
+    );
+    vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
+
+    const result = await mutateAssetLockRecord({
+      action: "generate_from_package",
+      projectId: "project-jincheng",
+      deliveryPackageId: imported.job.deliveryPackageId,
+      actorUserId: "user-head-writer"
+    });
+
+    expect(repository.createAssetLockRecords).toHaveBeenCalledTimes(1);
+    expect(result.records.length).toBeGreaterThan(1);
+    expect(result.records.every((record) => record.deliveryPackageId === imported.job.deliveryPackageId)).toBe(true);
+    expect(localWorkspace.state.deliveryPackages).toEqual([]);
+    expect(localWorkspace.state.deliveryPackageEpisodes).toEqual([]);
   });
 
   it("does not call DB record writes when package generation rejects draft packages", async () => {
@@ -1397,6 +1473,30 @@ function snapshotFromState(state: WorkspaceState): AssetLockRecordRepositorySnap
 async function login(userId: string) {
   currentActorUserId = userId;
   await mutateDeliveryImportWorkspace((state) => loginAsUser(state, userId));
+}
+
+async function getLocalDeliveryImportWorkspace() {
+  const repositoryMode = process.env.ASSET_LOCK_RECORDS_REPOSITORY;
+  const databaseUrl = process.env.DATABASE_URL;
+
+  delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
+  delete process.env.DATABASE_URL;
+
+  try {
+    return await getDeliveryImportWorkspace();
+  } finally {
+    if (repositoryMode === undefined) {
+      delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
+    } else {
+      process.env.ASSET_LOCK_RECORDS_REPOSITORY = repositoryMode;
+    }
+
+    if (databaseUrl === undefined) {
+      delete process.env.DATABASE_URL;
+    } else {
+      process.env.DATABASE_URL = databaseUrl;
+    }
+  }
 }
 
 function listAssetLockRecords(projectId?: string) {

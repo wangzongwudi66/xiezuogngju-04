@@ -9,7 +9,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { readDbAuthScopeSnapshot } from "../auth-scope/db-repository";
-import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
+import { readDeliveryImportLocalWorkspaceState } from "../delivery-import-jobs/persistence";
 import { readDbDeliveryPackageSnapshot } from "../delivery-packages/db-repository";
 import {
   createDbAssetLockRecordRepository,
@@ -28,7 +28,7 @@ vi.mock("../../../db/runtime", () => ({
 }));
 
 vi.mock("../delivery-import-jobs/persistence", () => ({
-  readDeliveryImportWorkspace: vi.fn()
+  readDeliveryImportLocalWorkspaceState: vi.fn()
 }));
 
 vi.mock("../auth-scope/db-repository", () => ({
@@ -414,10 +414,7 @@ describe("asset lock record DB repository snapshot overlay", () => {
     const mockDb = createMockDb({
       selectResults: [[dbRecordRows.record], dbRecordRows.episodes, [mapScriptSourceBindingToDbRow(dbBinding)]]
     });
-    vi.mocked(readDeliveryImportWorkspace).mockResolvedValue({
-      state: localState,
-      deliveryParseIssuesByPackageId: {}
-    });
+    vi.mocked(readDeliveryImportLocalWorkspaceState).mockResolvedValue(localState);
     vi.mocked(readDbDeliveryPackageSnapshot).mockResolvedValue({
       deliveryPackages: [dbPackage],
       deliveryPackageEpisodes: [dbPackageEpisode]
@@ -463,10 +460,7 @@ describe("asset lock record DB repository snapshot overlay", () => {
 describe("asset lock record DB repository source binding writes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(readDeliveryImportWorkspace).mockResolvedValue({
-      state: seedWorkspace,
-      deliveryParseIssuesByPackageId: {}
-    });
+    vi.mocked(readDeliveryImportLocalWorkspaceState).mockResolvedValue(seedWorkspace);
   });
 
   it("batch inserts generated asset lock records and episodes in one transaction", async () => {
@@ -511,7 +505,7 @@ describe("asset lock record DB repository source binding writes", () => {
     );
     expect(mockDb.transaction).toHaveBeenCalledTimes(1);
     expect(mockDb.insertValues).toHaveBeenCalledTimes(2);
-    expect(readDeliveryImportWorkspace).not.toHaveBeenCalled();
+    expect(readDeliveryImportLocalWorkspaceState).not.toHaveBeenCalled();
   });
 
   it("inserts source bindings in a transaction and returns the refreshed snapshot", async () => {
@@ -563,17 +557,14 @@ describe("asset lock record DB repository source binding writes", () => {
     await expect(createDbAssetLockRecordRepository().removeSourceBinding("missing-source-binding")).rejects.toThrow(
       "script_source_binding_not_found"
     );
-    expect(readDeliveryImportWorkspace).not.toHaveBeenCalled();
+    expect(readDeliveryImportLocalWorkspaceState).not.toHaveBeenCalled();
   });
 });
 
 describe("asset lock record DB repository lifecycle writes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(readDeliveryImportWorkspace).mockResolvedValue({
-      state: seedWorkspace,
-      deliveryParseIssuesByPackageId: {}
-    });
+    vi.mocked(readDeliveryImportLocalWorkspaceState).mockResolvedValue(seedWorkspace);
   });
 
   it("updates explicit record fields, returns the refreshed snapshot, and preserves episode rows", async () => {
@@ -611,7 +602,7 @@ describe("asset lock record DB repository lifecycle writes", () => {
     await expect(createDbAssetLockRecordRepository().updateAssetLockRecord(buildRecord({ id: "missing-record" }))).rejects.toThrow(
       "asset_lock_record_not_found"
     );
-    expect(readDeliveryImportWorkspace).not.toHaveBeenCalled();
+    expect(readDeliveryImportLocalWorkspaceState).not.toHaveBeenCalled();
   });
 });
 
@@ -634,7 +625,6 @@ function buildRecord(overrides: Partial<AssetLockRecord> = {}): AssetLockRecord 
     ...overrides
   };
 }
-
 function buildDeliveryPackage(overrides: Partial<DeliveryPackage> = {}): DeliveryPackage {
   return {
     id: "delivery-1",

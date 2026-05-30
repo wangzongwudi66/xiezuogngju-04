@@ -2,6 +2,9 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createDeliveryPackageDraft, seedWorkspace } from "@aigc/domain";
 import type { WordDeliveryIssue, WorkspaceState } from "@aigc/domain";
+import { isAssetLockRecordDbRepositoryEnabled } from "../asset-lock-records/db-mode";
+import { createDbDeliveryPackageWithEpisodes } from "../delivery-packages/db-repository";
+import { readDbWorkspaceSnapshotOverlay } from "../workspace-snapshot";
 import type { DeliveryImportJobResponse } from "./service";
 
 interface DeliveryImportJobStore {
@@ -31,6 +34,10 @@ export async function saveDeliveryImportJobResultWithDraft(result: DeliveryImpor
   if (!result.ok) {
     await saveDeliveryImportJobResult(result);
     return result;
+  }
+
+  if (isAssetLockRecordDbRepositoryEnabled()) {
+    return saveDeliveryImportJobResultWithDbDraft(result);
   }
 
   const store = await readDeliveryImportJobStore();
@@ -64,6 +71,44 @@ export async function saveDeliveryImportJobResultWithDraft(result: DeliveryImpor
   return persistedResult;
 }
 
+async function saveDeliveryImportJobResultWithDbDraft(result: Extract<DeliveryImportJobResponse, { ok: true }>) {
+  const store = await readDeliveryImportJobStore();
+  const workspace = await readDbWorkspaceSnapshotOverlay(store.workspace);
+  const nextWorkspace = createDeliveryPackageDraft(workspace, result.draft);
+  const existingPackageIds = new Set(workspace.deliveryPackages.map((item) => item.id));
+  const deliveryPackage = nextWorkspace.deliveryPackages.find((item) => !existingPackageIds.has(item.id));
+
+  if (!deliveryPackage) {
+    await saveDeliveryImportJobResult(result);
+    return result;
+  }
+
+  const packageEpisodes = nextWorkspace.deliveryPackageEpisodes.filter(
+    (episode) => episode.deliveryPackageId === deliveryPackage.id
+  );
+  await createDbDeliveryPackageWithEpisodes(deliveryPackage, packageEpisodes);
+
+  const persistedResult: DeliveryImportJobResponse = {
+    ...result,
+    job: {
+      ...result.job,
+      deliveryPackageId: deliveryPackage.id
+    }
+  };
+  const nextResults = [persistedResult, ...store.results.filter((item) => item.job.id !== result.job.id)].slice(0, 200);
+
+  await writeDeliveryImportJobStore({
+    ...store,
+    results: nextResults,
+    deliveryParseIssuesByPackageId: {
+      ...store.deliveryParseIssuesByPackageId,
+      [deliveryPackage.id]: result.issues
+    }
+  });
+
+  return persistedResult;
+}
+
 export async function readDeliveryImportJobResult(jobId: string) {
   const store = await readDeliveryImportJobStore();
   return store.results.find((result) => result.job.id === jobId) ?? null;
@@ -79,10 +124,16 @@ export async function readDeliveryImportJobs(projectId?: string) {
 
 export async function readDeliveryImportWorkspace(): Promise<DeliveryImportWorkspaceSnapshot> {
   const store = await readDeliveryImportJobStore();
+  const state = isAssetLockRecordDbRepositoryEnabled() ? await readDbWorkspaceSnapshotOverlay(store.workspace) : store.workspace;
+
   return {
-    state: store.workspace,
+    state,
     deliveryParseIssuesByPackageId: store.deliveryParseIssuesByPackageId
   };
+}
+
+export async function readDeliveryImportLocalWorkspaceState(): Promise<WorkspaceState> {
+  return (await readDeliveryImportJobStore()).workspace;
 }
 
 export async function mutateDeliveryImportWorkspace(

@@ -5,6 +5,7 @@ import {
   updateDeliveryPackageConfirmation
 } from "@aigc/domain";
 import type { WorkspaceState } from "@aigc/domain";
+import { isAssetLockRecordDbRepositoryEnabled } from "../asset-lock-records/db-mode";
 import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 
 export type DeliveryPackageMutationRequest =
@@ -31,6 +32,10 @@ export type DeliveryPackageMutationRequest =
     };
 
 export async function mutateDeliveryPackage(input: DeliveryPackageMutationRequest) {
+  if (isAssetLockRecordDbRepositoryEnabled()) {
+    throw new Error(`delivery_package_db_mutation_not_supported:${input.action}`);
+  }
+
   return mutateDeliveryImportWorkspace((state) => applyDeliveryPackageMutation(state, input));
 }
 

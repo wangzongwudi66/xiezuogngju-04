@@ -1,6 +1,9 @@
 import type { AssetLockRecord, ScriptSourceBinding, WorkspaceState } from "@aigc/domain";
 import { mutateDeliveryImportWorkspace, readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
 import { createDbAssetLockRecordRepository } from "./db-repository";
+import { isAssetLockRecordDbRepositoryEnabled, type AssetLockRecordRepositoryEnv } from "./db-mode";
+
+export { isAssetLockRecordDbRepositoryEnabled } from "./db-mode";
 
 export interface AssetLockRecordRepositorySnapshot {
   state: WorkspaceState;
@@ -28,9 +31,6 @@ export interface DbAssetLockRecordRepository {
 
 export type AssetLockRecordRepository = LocalAssetLockRecordRepository | DbAssetLockRecordRepository;
 
-const assetLockRecordRepositoryEnvKey = "ASSET_LOCK_RECORDS_REPOSITORY";
-type AssetLockRecordRepositoryEnv = Record<string, string | undefined>;
-
 export const localAssetLockRecordRepository: LocalAssetLockRecordRepository = {
   mode: "local",
   async read() {
@@ -51,22 +51,6 @@ export function resolveAssetLockRecordRepository(env: AssetLockRecordRepositoryE
   }
 
   return localAssetLockRecordRepository;
-}
-
-export function isAssetLockRecordDbRepositoryEnabled(env: AssetLockRecordRepositoryEnv = process.env) {
-  if (!isAssetLockRecordDbRepositoryRequested(env)) {
-    return false;
-  }
-
-  if (!env.DATABASE_URL?.trim()) {
-    throw new Error("asset_lock_record_database_url_required");
-  }
-
-  return true;
-}
-
-function isAssetLockRecordDbRepositoryRequested(env: AssetLockRecordRepositoryEnv) {
-  return env[assetLockRecordRepositoryEnvKey]?.trim().toLowerCase() === "db";
 }
 
 function toAssetLockRecordRepositorySnapshot(state: WorkspaceState): AssetLockRecordRepositorySnapshot {

@@ -11,6 +11,9 @@ import type {
   User,
   WorkspaceState
 } from "@aigc/domain";
+import { readDbAssetLockRecordParts } from "./asset-lock-records/db-parts";
+import { readDbAuthScopeSnapshot } from "./auth-scope/db-repository";
+import { readDbDeliveryPackageSnapshot } from "./delivery-packages/db-repository";
 
 export interface DbWorkspaceSnapshotOverlay {
   users: User[];
@@ -28,7 +31,7 @@ export interface DbWorkspaceSnapshotOverlay {
 export function composeDbWorkspaceSnapshotOverlay(
   localState: WorkspaceState,
   overlay: DbWorkspaceSnapshotOverlay
-): WorkspaceState {
+): WorkspaceState & DbWorkspaceSnapshotOverlay {
   return {
     ...localState,
     users: overlay.users,
@@ -42,4 +45,29 @@ export function composeDbWorkspaceSnapshotOverlay(
     deliveryPackages: overlay.deliveryPackages,
     deliveryPackageEpisodes: overlay.deliveryPackageEpisodes
   };
+}
+
+export async function readDbWorkspaceOverlayParts(): Promise<DbWorkspaceSnapshotOverlay> {
+  const [authScopeSnapshot, assetLockRecordParts, deliveryPackageSnapshot] = await Promise.all([
+    readDbAuthScopeSnapshot(),
+    readDbAssetLockRecordParts(),
+    readDbDeliveryPackageSnapshot()
+  ]);
+
+  return {
+    users: authScopeSnapshot.users,
+    projects: authScopeSnapshot.projects,
+    members: authScopeSnapshot.members,
+    memberPermissions: authScopeSnapshot.memberPermissions,
+    episodes: authScopeSnapshot.episodes,
+    assignments: authScopeSnapshot.assignments,
+    assetLockRecords: assetLockRecordParts.assetLockRecords,
+    scriptSourceBindings: assetLockRecordParts.scriptSourceBindings,
+    deliveryPackages: deliveryPackageSnapshot.deliveryPackages,
+    deliveryPackageEpisodes: deliveryPackageSnapshot.deliveryPackageEpisodes
+  };
+}
+
+export async function readDbWorkspaceSnapshotOverlay(localState: WorkspaceState): Promise<WorkspaceState & DbWorkspaceSnapshotOverlay> {
+  return composeDbWorkspaceSnapshotOverlay(localState, await readDbWorkspaceOverlayParts());
 }

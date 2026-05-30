@@ -1,38 +1,31 @@
-import type { AssetLockRecord, ScriptSourceBinding, WorkspaceState } from "@aigc/domain";
-import { asc, eq } from "drizzle-orm";
+import type { AssetLockRecord } from "@aigc/domain";
+import { eq } from "drizzle-orm";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { assetLockRecordEpisodes, assetLockRecords, scriptSourceBindings } from "../../../db/schema";
-import { readDbAuthScopeSnapshot, type AuthScopeDbSnapshot } from "../auth-scope/db-repository";
-import { readDeliveryImportWorkspace } from "../delivery-import-jobs/persistence";
-import { readDbDeliveryPackageSnapshot } from "../delivery-packages/db-repository";
-import { composeDbWorkspaceSnapshotOverlay } from "../workspace-snapshot";
+import { readDeliveryImportLocalWorkspaceState } from "../delivery-import-jobs/persistence";
+import { readDbWorkspaceSnapshotOverlay } from "../workspace-snapshot";
+import {
+  mapAssetLockRecordRows,
+  mapAssetLockRecordToDbRows,
+  mapAssetLockRecordToDbUpdateRow,
+  mapScriptSourceBindingRows,
+  mapScriptSourceBindingToDbRow,
+  type AssetLockRecordDbEpisodeRow,
+  type AssetLockRecordDbRecordRow,
+  type ScriptSourceBindingDbRow
+} from "./db-parts";
 import type { DbAssetLockRecordRepository } from "./repository";
 
-export type AssetLockRecordDbRecordRow = typeof assetLockRecords.$inferSelect;
-export type AssetLockRecordDbEpisodeRow = typeof assetLockRecordEpisodes.$inferSelect;
-export type ScriptSourceBindingDbRow = typeof scriptSourceBindings.$inferSelect;
-
-type AssetLockRecordDbRecordInsert = typeof assetLockRecords.$inferInsert;
-type AssetLockRecordDbEpisodeInsert = typeof assetLockRecordEpisodes.$inferInsert;
-type ScriptSourceBindingDbInsert = typeof scriptSourceBindings.$inferInsert;
-type AssetLockRecordDbRecordUpdate = Pick<
-  AssetLockRecordDbRecordInsert,
-  | "writerConfirmation"
-  | "writerConfirmedByUserId"
-  | "writerConfirmedAt"
-  | "writerNote"
-  | "productionConfirmation"
-  | "productionConfirmedByUserId"
-  | "productionConfirmedAt"
-  | "productionNote"
-  | "risk"
-  | "status"
-  | "missingInfo"
-  | "disputeReason"
-  | "finalLockedByUserId"
-  | "finalLockedAt"
-  | "updatedAt"
->;
+export {
+  mapAssetLockRecordRows,
+  mapAssetLockRecordToDbRows,
+  mapAssetLockRecordToDbUpdateRow,
+  mapScriptSourceBindingRows,
+  mapScriptSourceBindingToDbRow,
+  type AssetLockRecordDbEpisodeRow,
+  type AssetLockRecordDbRecordRow,
+  type ScriptSourceBindingDbRow
+} from "./db-parts";
 
 export function createDbAssetLockRecordRepository(): DbAssetLockRecordRepository {
   return {
@@ -105,202 +98,11 @@ async function createAssetLockRecordsInDb(records: AssetLockRecord[]) {
 }
 
 export async function readDbAssetLockRecordRepositorySnapshot() {
-  const { db } = getAssetLockDbRuntime();
-  const [workspace, recordRows, episodeRows, sourceBindingRows, authScopeSnapshot, deliveryPackageSnapshot] = await Promise.all([
-    readDeliveryImportWorkspace(),
-    db.select().from(assetLockRecords).orderBy(asc(assetLockRecords.createdAt), asc(assetLockRecords.id)),
-    db
-      .select()
-      .from(assetLockRecordEpisodes)
-      .orderBy(asc(assetLockRecordEpisodes.assetLockRecordId), asc(assetLockRecordEpisodes.episodeNo)),
-    db
-      .select()
-      .from(scriptSourceBindings)
-      .orderBy(
-        asc(scriptSourceBindings.projectId),
-        asc(scriptSourceBindings.deliveryPackageId),
-        asc(scriptSourceBindings.assetLockRecordId),
-        asc(scriptSourceBindings.episodeNo),
-        asc(scriptSourceBindings.startLine),
-        asc(scriptSourceBindings.endLine),
-        asc(scriptSourceBindings.id)
-      ),
-    readDbAuthScopeSnapshot(),
-    readDbDeliveryPackageSnapshot()
-  ]);
-
-  return toDbRepositorySnapshot(
-    workspace.state,
-    mapAssetLockRecordRows(recordRows, episodeRows),
-    mapScriptSourceBindingRows(sourceBindingRows),
-    authScopeSnapshot,
-    deliveryPackageSnapshot
-  );
-}
-
-export function mapAssetLockRecordRows(
-  recordRows: AssetLockRecordDbRecordRow[],
-  episodeRows: AssetLockRecordDbEpisodeRow[]
-): AssetLockRecord[] {
-  const episodeNosByRecordId = new Map<string, number[]>();
-
-  for (const row of episodeRows) {
-    const episodeNos = episodeNosByRecordId.get(row.assetLockRecordId) ?? [];
-    episodeNos.push(row.episodeNo);
-    episodeNosByRecordId.set(row.assetLockRecordId, episodeNos);
-  }
-
-  return recordRows.map((row) => ({
-    id: row.id,
-    projectId: row.projectId,
-    deliveryPackageId: row.deliveryPackageId,
-    episodeNos: Array.from(new Set(episodeNosByRecordId.get(row.id) ?? [])).sort((a, b) => a - b),
-    assetName: row.assetName,
-    assetType: row.assetType,
-    changeType: row.changeType,
-    writerConfirmation: row.writerConfirmation,
-    writerConfirmedByUserId: optional(row.writerConfirmedByUserId),
-    writerConfirmedAt: optional(row.writerConfirmedAt),
-    writerNote: optional(row.writerNote),
-    productionConfirmation: row.productionConfirmation,
-    productionConfirmedByUserId: optional(row.productionConfirmedByUserId),
-    productionConfirmedAt: optional(row.productionConfirmedAt),
-    productionNote: optional(row.productionNote),
-    risk: row.risk,
-    status: row.status,
-    missingInfo: optional(row.missingInfo),
-    disputeReason: optional(row.disputeReason),
-    finalLockedByUserId: optional(row.finalLockedByUserId),
-    finalLockedAt: optional(row.finalLockedAt),
-    createdByUserId: row.createdByUserId,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt
-  }));
-}
-
-export function mapAssetLockRecordToDbRows(record: AssetLockRecord): {
-  record: AssetLockRecordDbRecordInsert;
-  episodes: AssetLockRecordDbEpisodeInsert[];
-} {
-  return {
-    record: {
-      id: record.id,
-      projectId: record.projectId,
-      deliveryPackageId: record.deliveryPackageId,
-      assetName: record.assetName,
-      assetNameKey: normalizeAssetLockNameKey(record.assetName),
-      assetType: record.assetType,
-      changeType: record.changeType,
-      writerConfirmation: record.writerConfirmation,
-      writerConfirmedByUserId: record.writerConfirmedByUserId ?? null,
-      writerConfirmedAt: record.writerConfirmedAt ?? null,
-      writerNote: record.writerNote ?? null,
-      productionConfirmation: record.productionConfirmation,
-      productionConfirmedByUserId: record.productionConfirmedByUserId ?? null,
-      productionConfirmedAt: record.productionConfirmedAt ?? null,
-      productionNote: record.productionNote ?? null,
-      risk: record.risk,
-      status: record.status,
-      missingInfo: record.missingInfo ?? null,
-      disputeReason: record.disputeReason ?? null,
-      finalLockedByUserId: record.finalLockedByUserId ?? null,
-      finalLockedAt: record.finalLockedAt ?? null,
-      createdByUserId: record.createdByUserId,
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt
-    },
-    episodes: record.episodeNos.map((episodeNo) => ({
-      assetLockRecordId: record.id,
-      episodeNo,
-      createdAt: record.createdAt
-    }))
-  };
-}
-
-export function mapAssetLockRecordToDbUpdateRow(record: AssetLockRecord): AssetLockRecordDbRecordUpdate {
-  return {
-    writerConfirmation: record.writerConfirmation,
-    writerConfirmedByUserId: record.writerConfirmedByUserId ?? null,
-    writerConfirmedAt: record.writerConfirmedAt ?? null,
-    writerNote: record.writerNote ?? null,
-    productionConfirmation: record.productionConfirmation,
-    productionConfirmedByUserId: record.productionConfirmedByUserId ?? null,
-    productionConfirmedAt: record.productionConfirmedAt ?? null,
-    productionNote: record.productionNote ?? null,
-    risk: record.risk,
-    status: record.status,
-    missingInfo: record.missingInfo ?? null,
-    disputeReason: record.disputeReason ?? null,
-    finalLockedByUserId: record.finalLockedByUserId ?? null,
-    finalLockedAt: record.finalLockedAt ?? null,
-    updatedAt: record.updatedAt
-  };
-}
-
-export function mapScriptSourceBindingRows(bindingRows: ScriptSourceBindingDbRow[]): ScriptSourceBinding[] {
-  return bindingRows.map((row) => ({
-    id: row.id,
-    projectId: row.projectId,
-    deliveryPackageId: row.deliveryPackageId,
-    assetLockRecordId: row.assetLockRecordId,
-    episodeNo: row.episodeNo,
-    startLine: row.startLine,
-    endLine: row.endLine,
-    excerptSnapshot: row.excerptSnapshot,
-    createdByUserId: row.createdByUserId,
-    createdAt: row.createdAt
-  }));
-}
-
-export function mapScriptSourceBindingToDbRow(binding: ScriptSourceBinding): ScriptSourceBindingDbInsert {
-  return {
-    id: binding.id,
-    projectId: binding.projectId,
-    deliveryPackageId: binding.deliveryPackageId,
-    assetLockRecordId: binding.assetLockRecordId,
-    episodeNo: binding.episodeNo,
-    startLine: binding.startLine,
-    endLine: binding.endLine,
-    excerptSnapshot: binding.excerptSnapshot,
-    createdByUserId: binding.createdByUserId,
-    createdAt: binding.createdAt
-  };
-}
-
-function toDbRepositorySnapshot(
-  state: WorkspaceState,
-  records: AssetLockRecord[],
-  sourceBindings: ScriptSourceBinding[],
-  authScopeSnapshot: AuthScopeDbSnapshot,
-  deliveryPackageSnapshot: {
-    deliveryPackages: WorkspaceState["deliveryPackages"];
-    deliveryPackageEpisodes: WorkspaceState["deliveryPackageEpisodes"];
-  }
-) {
-  const nextState = composeDbWorkspaceSnapshotOverlay(state, {
-    users: authScopeSnapshot.users,
-    projects: authScopeSnapshot.projects,
-    members: authScopeSnapshot.members,
-    memberPermissions: authScopeSnapshot.memberPermissions,
-    episodes: authScopeSnapshot.episodes,
-    assignments: authScopeSnapshot.assignments,
-    assetLockRecords: records,
-    scriptSourceBindings: sourceBindings,
-    deliveryPackages: deliveryPackageSnapshot.deliveryPackages,
-    deliveryPackageEpisodes: deliveryPackageSnapshot.deliveryPackageEpisodes
-  });
+  const workspaceState = await readDbWorkspaceSnapshotOverlay(await readDeliveryImportLocalWorkspaceState());
 
   return {
-    state: nextState,
-    assetLockRecords: records,
-    scriptSourceBindings: sourceBindings
+    state: workspaceState,
+    assetLockRecords: workspaceState.assetLockRecords,
+    scriptSourceBindings: workspaceState.scriptSourceBindings
   };
-}
-
-function normalizeAssetLockNameKey(assetName: string) {
-  return assetName.trim().replace(/\s+/g, " ").toLocaleLowerCase();
-}
-
-function optional<T>(value: T | null | undefined) {
-  return value ?? undefined;
 }

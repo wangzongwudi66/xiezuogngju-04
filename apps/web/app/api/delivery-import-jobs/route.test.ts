@@ -1,8 +1,12 @@
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { seedWorkspace } from "@aigc/domain";
 import { GET, POST } from "./route";
+import * as assetLockRecordDbParts from "../asset-lock-records/db-parts";
+import * as authScopeDbRepository from "../auth-scope/db-repository";
+import * as deliveryPackageDbRepository from "../delivery-packages/db-repository";
 
 describe("delivery import job route", () => {
   let storeDir: string;
@@ -12,11 +16,26 @@ describe("delivery import job route", () => {
     await mkdir(storeDir, { recursive: true });
     process.env.AIGC_DELIVERY_IMPORT_STORE_PATH = join(storeDir, "store.json");
     process.env.AIGC_DELIVERY_IMPORT_FILE_DIR = join(storeDir, "files");
+    vi.spyOn(authScopeDbRepository, "readDbAuthScopeSnapshot").mockResolvedValue({
+      users: seedWorkspace.users,
+      projects: seedWorkspace.projects,
+      members: seedWorkspace.members,
+      memberPermissions: seedWorkspace.memberPermissions,
+      episodes: seedWorkspace.episodes,
+      assignments: seedWorkspace.assignments
+    });
+    vi.spyOn(assetLockRecordDbParts, "readDbAssetLockRecordParts").mockResolvedValue({
+      assetLockRecords: [],
+      scriptSourceBindings: []
+    });
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     delete process.env.AIGC_DELIVERY_IMPORT_STORE_PATH;
     delete process.env.AIGC_DELIVERY_IMPORT_FILE_DIR;
+    delete process.env.ASSET_LOCK_RECORDS_REPOSITORY;
+    delete process.env.DATABASE_URL;
     await rm(storeDir, { recursive: true, force: true });
   });
 
@@ -152,6 +171,48 @@ describe("delivery import job route", () => {
       ok: false,
       error: "delivery_import_job_not_found"
     });
+  });
+
+  it("returns DB workspace overlay for workspace scope in DB mode", async () => {
+    const createResponse = await POST(new Request("http://localhost/api/delivery-import-jobs", { method: "POST", body: buildTextForm() }));
+    const localCreated = await createResponse.json();
+
+    process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
+    process.env.DATABASE_URL = "postgres://example.invalid/aigc";
+    vi.spyOn(deliveryPackageDbRepository, "readDbDeliveryPackageSnapshot").mockResolvedValue({
+      deliveryPackages: [
+        {
+          id: "delivery-db-route-overlay",
+          projectId: "project-jincheng",
+          type: "range",
+          title: "DB route overlay package",
+          declaredEpisodeFrom: 1,
+          declaredEpisodeTo: 1,
+          status: "draft",
+          uploadedByUserId: "user-head-writer",
+          createdAt: "2026-05-30T00:00:00.000Z"
+        }
+      ],
+      deliveryPackageEpisodes: [
+        {
+          id: "delivery-episode-db-route-overlay-1",
+          deliveryPackageId: "delivery-db-route-overlay",
+          episodeNo: 1,
+          title: "DB route episode",
+          content: "DB route overlay source",
+          isConfirmedChange: true
+        }
+      ]
+    });
+
+    const workspaceResponse = await GET(new Request("http://localhost/api/delivery-import-jobs?scope=workspace"));
+    const workspace = await workspaceResponse.json();
+
+    expect(workspace.state.deliveryPackages.map((item: { id: string }) => item.id)).toEqual(["delivery-db-route-overlay"]);
+    expect(workspace.state.deliveryPackageEpisodes.map((item: { content: string }) => item.content)).toEqual([
+      "DB route overlay source"
+    ]);
+    expect(workspace.state.deliveryPackages).not.toContainEqual(expect.objectContaining({ id: localCreated.job.deliveryPackageId }));
   });
 });
 
