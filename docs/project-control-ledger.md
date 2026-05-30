@@ -5,13 +5,13 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 19:22:43 +08:00`.
+Timestamp: `2026-05-30 19:25:56 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `083e1dd Record delivery import DB draft merge`.
+- Latest recorded `main` checkpoint: `8cede26 Record Postgres smoke import draft coverage`.
 - Latest product/test code commit on `main`: `075cb85 test: cover postgres smoke delivery import draft`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-postgres-smoke-import-draft`; ledger update pending commit.
-- Remote sync pending for this ledger update; `main@083e1dd` was the last pushed checkpoint before the Postgres smoke import-draft coverage merge.
+- Worktree at last check: clean after recording the `codex/m3-postgres-smoke-import-draft` merge and smoke coverage ledger update.
+- Remote sync complete for this checkpoint: local `main` and `xiezuogongju-04/main` both point at `8cede26`.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
