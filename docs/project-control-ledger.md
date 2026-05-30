@@ -5,16 +5,16 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 23:28:19 +08:00`.
+Timestamp: `2026-05-30 23:34:03 +08:00`.
 
 - Active branch: `main`.
-- Latest merged checkpoint covered by this ledger update: `88504d3 test: relax smoke projection assertions`.
+- Latest operational checkpoint covered by this ledger update: `7a08030 Record smoke projection assertion fix`.
 - Latest product/test code commit on `main`: `0588d61 Require asset attachment storage delete`.
-- Worktree at last check: clean after fast-forward merging the smoke projection assertion fix.
+- Worktree at last check: clean after GitHub Actions `db-smoke` pass confirmation.
 - Remote sync target for this checkpoint: push local `main` to `xiezuogongju-04/main` after recording this ledger update.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
-- Current gate: real `db:smoke` remains blocked because `TEST_DATABASE_URL` is not set. A local disposable database cannot be provisioned in this shell because neither `docker` nor `psql` is available. Do not merge further DB schema/runtime expansion until a disposable Postgres `TEST_DATABASE_URL` is provided and `npm.cmd run db:smoke -w apps/web` passes.
+- Current gate: real `db:smoke` has passed in GitHub Actions on disposable Postgres for `7a080302bbc6aed551089bae934c24cb2f352f78`; run `26687654863` passed both `Check Drizzle migrations` and `Run Postgres smoke tests`. Local `TEST_DATABASE_URL` is still not set, so do not run local `db:smoke` unless a disposable test URL is explicitly provided.
 - Child 35 rechecked the gate and remained blocked: `TEST_DATABASE_URL` is missing, so `db:check` and `db:smoke` were not run.
 - Child 36 recommends the fastest unblock path: obtain an external disposable Postgres `TEST_DATABASE_URL`; Docker Desktop or local Postgres are secondary options because this shell currently lacks both `docker` and `psql`.
 - Child 37 refreshed the post-smoke priority order: first session/cookie-backed actor, then asset attachment object storage provider, then auth/scope seed/admin write contract. These remain planning-only until real `db:smoke` passes.
@@ -25,6 +25,7 @@ Timestamp: `2026-05-30 23:28:19 +08:00`.
 - Child 42 confirmed the first GitHub Actions `db-smoke` run for `bba42df` failed in `Run Postgres smoke tests`: the projection smoke assertion expected a narrow array shape while the real projection returned additional generated decisions/source excerpts.
 - Child 43 reviewed the first assertion fix and found a P2: the custom `ok:false` smoke error was unreachable because `expect(projection.ok).toBe(true)` executed first.
 - Child 44 reviewed the amended fix at `88504d3` and found no P0/P1/P2/P3; the branch is suitable for fast-forward merge into `main`.
+- Child 45 confirmed the GitHub Actions `db-smoke` run for `7a080302bbc6aed551089bae934c24cb2f352f78` passed with no connection string leakage observed. This unlocks the next phase: start with `session/cookie-backed actor`, then object storage provider, then auth/scope seed/admin write contract.
 
 Recently completed after the xiezuogongju-04 handoff:
 
