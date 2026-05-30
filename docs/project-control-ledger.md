@@ -5,18 +5,29 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 21:09:11 +08:00`.
+Timestamp: `2026-05-30 21:41:19 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `4d54543 test: cover postgres smoke publish flow`.
-- Latest product/test code commit on `main`: `4d54543 test: cover postgres smoke publish flow`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-postgres-smoke-publish` and running post-merge validation.
-- Remote sync note: `main@3ed220a` was the last pushed checkpoint before this Postgres smoke publish coverage merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
+- Latest recorded `main` checkpoint: `6e0dc6c Use server workspace actor for delivery routes`.
+- Latest product/test code commit on `main`: `6e0dc6c Use server workspace actor for delivery routes`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-delivery-routes-server-actor` and running post-merge validation.
+- Remote sync note: `main@c59a37f` was the last pushed checkpoint before this delivery routes server actor merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `6e0dc6c Use server workspace actor for delivery routes`
+  - Delivery import create/retry now derives the actor from the server workspace `currentUserId` and ignores client-supplied `uploadedByUserId`; retry no longer reuses a historical job actor.
+  - Delivery package `submit`, `publish`, and `reject` routes now derive `actorUserId` from the server workspace actor while preserving old request body field compatibility.
+  - `workspace-session` now validates login users against the overlaid workspace and only persists `currentUserId`; DB mode can accept DB-only users from the auth/scope overlay.
+  - Keeps the slice scoped: no DB schema/migration, UI/browser QA, domain permission-model rewrite, `db:smoke`, object storage, or `codex/timeline-mobile-crop-hardening` changes.
+  - Child review 21 found no P0/P1/P2/P3 and approved fast-forward merge. Real `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run test -w apps/web -- app/api/workspace-session/route.test.ts app/api/delivery-import-jobs/route.test.ts app/api/delivery-import-jobs/service.test.ts app/api/delivery-packages/route.test.ts app/api/delivery-packages/service.test.ts`: passed, 5 files / 52 tests.
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/service.test.ts`: passed, 1 file / 38 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `4d54543 test: cover postgres smoke publish flow`
   - Extends `apps/web/db/postgres-smoke.ts` so the smoke harness covers the DB mode publish happy path through the real `mutateDeliveryPackage({ action: "publish" })` service runtime.
   - Verifies the DB workspace overlay sees the published package, new `episodeRevisions`, `episodeCurrents` pointing to the new revision, touched episode production status/unread flags, and new notifications.
