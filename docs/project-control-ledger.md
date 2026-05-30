@@ -5,12 +5,12 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-31 01:01:29 +08:00`.
+Timestamp: `2026-05-31 01:18:26 +08:00`.
 
 - Active branch: `main`.
-- Latest merged checkpoint covered by this ledger update: `ff0a1b4 Add auth scope DB write contract`.
-- Latest product/test code commit on `main`: `ff0a1b4 Add auth scope DB write contract`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-auth-scope-db-write-contract`.
+- Latest merged checkpoint covered by this ledger update: `e7d8a14 Add auth scope admin route`.
+- Latest product/test code commit on `main`: `e7d8a14 Add auth scope admin route`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-auth-scope-admin-routes`.
 - Remote sync target for this checkpoint: push local `main` to `xiezuogongju-04/main` after recording this ledger update.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
@@ -38,9 +38,24 @@ Timestamp: `2026-05-31 01:01:29 +08:00`.
 - Child 55 confirmed the GitHub Actions `db-smoke` run for `77104f8342e3e6c14c5a9b84f3a2c7bca4a03a1e` passed with no connection string leakage observed.
 - Child 56 reviewed the first auth/scope DB write contract and found a P1 owner-escalation issue in `createUser(defaultRole: "owner")`, plus P2 missing assignment guard tests.
 - Child 57 reviewed amended `codex/m3-auth-scope-db-write-contract` at `ff0a1b4` and found no P0/P1/P2/P3; it confirmed the branch is suitable for fast-forward merge.
+- Child 58 confirmed the GitHub Actions `db-smoke` run for `69e6df4d6a96c2ebe62e3e200453b8246218350e` passed with no connection string leakage observed.
+- Child 59 reviewed the first auth/scope admin route and found a P2: internal DB/env configuration error codes could be returned in API `{ ok:false,error }`.
+- Child 60 reviewed amended `codex/m3-auth-scope-admin-routes` at `e7d8a14` and found no P0/P1/P2/P3; it confirmed the branch is suitable for fast-forward merge.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `e7d8a14 Add auth scope admin route`
+  - Adds `apps/web/app/api/auth-scope/admin/route.ts` and `apps/web/app/api/auth-scope/admin/route.test.ts`.
+  - Wires the existing auth/scope write service and DB write repository behind a focused admin POST route; no UI, schema, migration, or existing business runtime changes are included.
+  - Derives identity only from the signed server session cookie via `requireWorkspaceRequestActor`; client `actorUserId` is ignored and cannot escalate permissions.
+  - Supports create user, create/update/archive project, replace member roles, replace custom member permissions, and replace episode assignments through explicit action payloads.
+  - Preserves the write service protections for owner creation, permission checks, last-owner guard, non-member permission/assignment rejection, invalid ranges, and stable business error codes.
+  - Fixes the child 59 P2 by mapping internal DB/env/config errors to `auth_scope_admin_request_failed` / HTTP 500 instead of returning raw configuration error codes.
+  - Child review 59 found the internal error code leakage P2; child review 60 confirmed the amended fix and found no P0/P1/P2/P3. Real local `db:smoke` was not run.
+  - Validation before merge:
+    - `npm.cmd run test -w apps/web -- app/api/auth-scope`: passed, 5 files / 40 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check main..codex/m3-auth-scope-admin-routes`: passed.
 - `ff0a1b4 Add auth scope DB write contract`
   - Adds `apps/web/app/api/auth-scope/write-service.ts` and `apps/web/app/api/auth-scope/db-write-repository.ts` with focused tests.
   - Introduces a narrow auth/scope DB write service for user creation, project creation/update/archive, member role replacement, custom permission replacement, and episode assignment replacement.
