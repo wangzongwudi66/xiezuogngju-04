@@ -5,18 +5,43 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 15:32:11 +08:00`.
+Timestamp: `2026-05-30 15:52:15 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `61d9d93 Record DB env fail closed merge`.
-- Latest product/test code commit on `main`: `34e4598 Add real Postgres smoke test`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-real-postgres-smoke`; ledger update pending commit.
-- Remote sync pending for this ledger update; `main@61d9d93` was the last pushed checkpoint before the smoke harness merge.
+- Latest recorded `main` commit before this ledger update: `ddaf020 Record Postgres smoke harness merge`.
+- Latest product/test code commit on `main`: `6ee78d6 Harden DB attachment version allocation`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-generate-from-package-db-path` and rebased `codex/m3-attachment-version-db-allocation`; ledger update pending commit.
+- Remote sync pending for this ledger update; `main@ddaf020` was the last pushed checkpoint before these two backend DB slices.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `6ee78d6 Harden DB attachment version allocation`
+  - Rebased `codex/m3-attachment-version-db-allocation` onto `main@c14e1b3` and fast-forward merged it into `main`; original implementation review commit was `5d9e01b`.
+  - DB attachment metadata create now allocates `version` inside the DB transaction by reading the current maximum `asset_attachments.version` for the record and inserting the next version.
+  - Keeps `asset_attachments_record_version_unique` as the DB-level concurrency guard, retries that unique conflict up to three times, then raises `asset_attachment_version_conflict`; other unique metadata conflicts map to `asset_attachment_metadata_conflict`.
+  - Preserves local mode, list/download/delete behavior, and file cleanup semantics: metadata commit failure still lets service remove the just-written local file, while committed metadata is not reversed by deleting bytes.
+  - Keeps the slice scoped: no schema/migration, no object storage, no checksum/storage key, no file migration, no route/UI/browser QA changes.
+  - Child review 5 found no P0/P1/P2/P3 and approved merge.
+  - Validation after merging both backend slices:
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-attachments/repository.test.ts app/api/asset-lock-attachments/db-repository.test.ts app/api/asset-lock-attachments/service.test.ts app/api/asset-lock-attachments/route.test.ts`: passed, 4 files / 57 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `git diff --check`: passed.
+- `c14e1b3 Support DB package asset lock generation`
+  - DB mode now supports `generate_from_package` while continuing to use `repository.read()` for DB-backed asset records/source bindings plus local workspace project/package/episode context.
+  - Adds explicit DB repository batch create for generated asset lock records, inserting `asset_lock_records` and `asset_lock_record_episodes` in one transaction.
+  - Reuses existing service/domain generation, permission, package status, episode, and duplicate handling before DB writes.
+  - Keeps `prepare_demo` unsupported in DB mode and does not write generated records back to local workspace state.
+  - Keeps the slice scoped: no UI, no migration, no attachment/storage/object store changes.
+  - Child review 4 found no P0/P1/P2; P3 noted a non-blocking gap where some DB-mode validation-failure paths do not explicitly assert `createAssetLockRecords` is not called.
+  - Validation after merging both backend slices:
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/db-repository.test.ts app/api/asset-lock-records/service.test.ts app/api/asset-lock-records/route.test.ts`: passed, 3 files / 61 tests.
+    - `npm.cmd run test -w apps/web -- app/api/asset-decision-timeline/service.test.ts`: passed, 1 file / 13 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `34e4598 Add real Postgres smoke test`
   - Adds `npm run db:smoke -w apps/web` through a dedicated Vitest config and `apps/web/db/postgres-smoke.ts`.
   - Smoke harness intentionally requires `TEST_DATABASE_URL`; it fails closed when missing and explicitly ignores raw `DATABASE_URL` to avoid accidental production/development DB use.
