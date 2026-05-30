@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -644,6 +645,15 @@ describe("asset lock attachment service", () => {
 
     expect(repository.read).toHaveBeenCalledTimes(1);
     expect(repository.createAssetAttachmentMetadata).toHaveBeenCalledTimes(1);
+    expect(repository.createAssetAttachmentMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        storage: {
+          storageKey: `${attachment.fileId}.png`,
+          checksumSha256: sha256Hex(pngBytes()),
+          contentLength: pngBytes().byteLength
+        }
+      })
+    );
     expect(attachment).toMatchObject({
       assetLockRecordId: record.id,
       fileId: expect.stringMatching(/^asset-att-/),
@@ -674,6 +684,31 @@ describe("asset lock attachment service", () => {
       status: "active"
     });
     await expect(readSavedFileNames()).resolves.toEqual([`${attachment.fileId}.png`]);
+  });
+
+  it("fails downloads with a stable integrity error when storage length differs from metadata", async () => {
+    const record = (await createAssetRecord()).record;
+    const storage = createMockAssetAttachmentStorage();
+    const attachment = await uploadAssetAttachment(buildUploadInput(record.id), { userId: currentActorUserId }, { storage });
+    const corruptedStorage = createMockAssetAttachmentStorage({
+      get: vi.fn(async () => new Uint8Array([1, 2, 3, 4, 5]))
+    });
+
+    await expect(
+      downloadAssetAttachmentForActor(attachment.id, { userId: currentActorUserId }, { storage: corruptedStorage })
+    ).rejects.toThrow("asset_attachment_file_integrity_failed");
+
+    try {
+      await downloadAssetAttachmentForActor(attachment.id, { userId: currentActorUserId }, { storage: corruptedStorage });
+    } catch (error) {
+      const message = (error as Error).message;
+
+      expect(message).toBe("asset_attachment_file_integrity_failed");
+      expect(message).not.toContain(attachment.fileId);
+      expect(message).not.toContain(".png");
+      expect(message).not.toContain(storeDir);
+      expect(message).not.toContain(attachmentDir);
+    }
   });
 
   it("uses DB-only asset lock records for DB attachment upload, list, download, and delete validation", async () => {
@@ -1070,4 +1105,8 @@ describe("asset lock attachment service", () => {
 
 function pngBytes() {
   return new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+}
+
+function sha256Hex(bytes: Uint8Array) {
+  return createHash("sha256").update(bytes).digest("hex");
 }

@@ -15,6 +15,13 @@ export interface AssetAttachmentRepositorySnapshot {
 export interface AssetAttachmentMetadataCreateCommand {
   attachment: AssetAttachment;
   metadataInput: AssetAttachmentMetadataInput;
+  storage: AssetAttachmentStorageMetadata;
+}
+
+export interface AssetAttachmentStorageMetadata {
+  checksumSha256: string;
+  contentLength: number;
+  storageKey: string;
 }
 
 export interface LocalAssetAttachmentRepository {

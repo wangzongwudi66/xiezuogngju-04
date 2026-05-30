@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { createAssetAttachmentMetadata, listAssetAttachmentsForRecord, selectPrimaryRole } from "@aigc/domain";
 import type {
@@ -85,11 +85,12 @@ export async function uploadAssetAttachment(
   }
 
   const storageKey = storage.makeKey({ fileId, extension: fileRule.extension });
+  const storageMetadata = createAssetAttachmentStorageMetadata(storageKey, bytes);
 
   await storage.put({ key: storageKey, bytes, mime: fileRule.mime });
 
   try {
-    return await repository.createAssetAttachmentMetadata({ attachment, metadataInput });
+    return await repository.createAssetAttachmentMetadata({ attachment, metadataInput, storage: storageMetadata });
   } catch (error) {
     try {
       await storage.delete({ key: storageKey });
@@ -134,12 +135,28 @@ export async function downloadAssetAttachment(
     throw error;
   }
 
+  assertAttachmentBytesIntegrity(attachment, bytes);
+
   return {
     bytes,
     fileName: attachment.fileName,
     mime: attachment.mime,
     size: bytes.byteLength
   };
+}
+
+function createAssetAttachmentStorageMetadata(storageKey: string, bytes: Uint8Array) {
+  return {
+    storageKey,
+    checksumSha256: createHash("sha256").update(bytes).digest("hex"),
+    contentLength: bytes.byteLength
+  };
+}
+
+function assertAttachmentBytesIntegrity(attachment: AssetAttachment, bytes: Uint8Array) {
+  if (bytes.byteLength !== attachment.size) {
+    throw new Error("asset_attachment_file_integrity_failed");
+  }
 }
 
 export async function deleteAssetAttachment(

@@ -230,10 +230,7 @@ describe("asset lock attachment DB repository writes", () => {
     const mockDb = createMockDb({ insertedRows: [row] });
     mockRuntime(mockDb.db);
 
-    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata({
-      attachment,
-      metadataInput: metadataInputFromAttachment(attachment)
-    });
+    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata(metadataCommandFromAttachment(attachment));
 
     expect(mockDb.transaction).toHaveBeenCalledTimes(1);
     expect(mockDb.insertValues).toHaveBeenCalledWith(mapAssetAttachmentToDbRow(attachment));
@@ -250,10 +247,9 @@ describe("asset lock attachment DB repository writes", () => {
     });
     mockRuntime(mockDb.db);
 
-    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata({
-      attachment: staleAttachment,
-      metadataInput: metadataInputFromAttachment(staleAttachment)
-    });
+    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata(
+      metadataCommandFromAttachment(staleAttachment)
+    );
 
     expect(mockDb.transaction).toHaveBeenCalledTimes(1);
     expect(mockDb.selectVersionWhere).toHaveBeenCalledTimes(1);
@@ -271,10 +267,9 @@ describe("asset lock attachment DB repository writes", () => {
     });
     mockRuntime(mockDb.db);
 
-    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata({
-      attachment: staleAttachment,
-      metadataInput: metadataInputFromAttachment(staleAttachment)
-    });
+    const committed = await createDbAssetAttachmentRepository().createAssetAttachmentMetadata(
+      metadataCommandFromAttachment(staleAttachment)
+    );
 
     expect(mockDb.transaction).toHaveBeenCalledTimes(2);
     expect(mockDb.insertValues).toHaveBeenCalledWith(mapAssetAttachmentToDbRow(committedAttachment));
@@ -289,10 +284,7 @@ describe("asset lock attachment DB repository writes", () => {
     mockRuntime(mockDb.db);
 
     await expect(
-      createDbAssetAttachmentRepository().createAssetAttachmentMetadata({
-        attachment,
-        metadataInput: metadataInputFromAttachment(attachment)
-      })
+      createDbAssetAttachmentRepository().createAssetAttachmentMetadata(metadataCommandFromAttachment(attachment))
     ).rejects.toThrow("asset_attachment_version_conflict");
     expect(mockDb.transaction).toHaveBeenCalledTimes(3);
   });
@@ -305,10 +297,7 @@ describe("asset lock attachment DB repository writes", () => {
     mockRuntime(mockDb.db);
 
     await expect(
-      createDbAssetAttachmentRepository().createAssetAttachmentMetadata({
-        attachment,
-        metadataInput: metadataInputFromAttachment(attachment)
-      })
+      createDbAssetAttachmentRepository().createAssetAttachmentMetadata(metadataCommandFromAttachment(attachment))
     ).rejects.toThrow("asset_attachment_metadata_conflict");
     expect(mockDb.transaction).toHaveBeenCalledTimes(1);
   });
@@ -319,10 +308,7 @@ describe("asset lock attachment DB repository writes", () => {
     mockRuntime(mockDb.db);
 
     await expect(
-      createDbAssetAttachmentRepository().createAssetAttachmentMetadata({
-        attachment,
-        metadataInput: metadataInputFromAttachment(attachment)
-      })
+      createDbAssetAttachmentRepository().createAssetAttachmentMetadata(metadataCommandFromAttachment(attachment))
     ).rejects.toThrow("asset_attachment_metadata_not_created");
   });
 
@@ -413,6 +399,18 @@ function metadataInputFromAttachment(attachment: AssetAttachment) {
     attachmentType: attachment.attachmentType,
     uploadedByUserId: attachment.uploadedByUserId,
     note: attachment.note
+  };
+}
+
+function metadataCommandFromAttachment(attachment: AssetAttachment) {
+  return {
+    attachment,
+    metadataInput: metadataInputFromAttachment(attachment),
+    storage: {
+      storageKey: `${attachment.fileId}.png`,
+      checksumSha256: "0".repeat(64),
+      contentLength: attachment.size
+    }
   };
 }
 
