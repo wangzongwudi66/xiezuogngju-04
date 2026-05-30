@@ -1,0 +1,43 @@
+name: db-smoke
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  db-smoke:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: aigc_smoke
+          POSTGRES_USER: smoke
+          POSTGRES_PASSWORD: smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U smoke -d aigc_smoke"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check Drizzle migrations
+        run: npm run db:check -w apps/web
+
+      - name: Run Postgres smoke tests
+        run: npm run db:smoke -w apps/web
+        env:
+          TEST_DATABASE_URL: postgres://smoke:smoke@localhost:5432/aigc_smoke
