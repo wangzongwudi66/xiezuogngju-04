@@ -5,12 +5,12 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 23:34:03 +08:00`.
+Timestamp: `2026-05-31 00:05:20 +08:00`.
 
 - Active branch: `main`.
-- Latest operational checkpoint covered by this ledger update: `7a08030 Record smoke projection assertion fix`.
-- Latest product/test code commit on `main`: `0588d61 Require asset attachment storage delete`.
-- Worktree at last check: clean after GitHub Actions `db-smoke` pass confirmation.
+- Latest merged checkpoint covered by this ledger update: `3b8181d Use signed cookie for workspace actors`.
+- Latest product/test code commit on `main`: `3b8181d Use signed cookie for workspace actors`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-session-cookie-backed-actor`.
 - Remote sync target for this checkpoint: push local `main` to `xiezuogongju-04/main` after recording this ledger update.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
@@ -26,9 +26,28 @@ Timestamp: `2026-05-30 23:34:03 +08:00`.
 - Child 43 reviewed the first assertion fix and found a P2: the custom `ok:false` smoke error was unreachable because `expect(projection.ok).toBe(true)` executed first.
 - Child 44 reviewed the amended fix at `88504d3` and found no P0/P1/P2/P3; the branch is suitable for fast-forward merge into `main`.
 - Child 45 confirmed the GitHub Actions `db-smoke` run for `7a080302bbc6aed551089bae934c24cb2f352f78` passed with no connection string leakage observed. This unlocks the next phase: start with `session/cookie-backed actor`, then object storage provider, then auth/scope seed/admin write contract.
+- Child 46 reviewed `codex/m3-session-cookie-backed-actor` and found no blocking code issue. It did not run npm verification because the worktree had been switched externally, so the main control conversation reran target branch validation before merge.
+- Child 47 implemented `codex/m3-asset-attachment-object-storage-provider` at `2db9e01`; it is not yet reviewed or merged.
+- Child 48 completed the auth/scope seed/admin write contract split. Recommended order: seed contract, DB write service/repository, then admin route after session cookie actor is on `main`.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `3b8181d Use signed cookie for workspace actors`
+  - Replaces shared workspace `currentUserId` actor derivation on protected API routes with a request-scoped signed HttpOnly cookie.
+  - Adds `apps/web/app/api/workspace-session/session-cookie.ts` using an HMAC-signed `aigc_workspace_session` cookie with expiration, `HttpOnly`, `SameSite=Lax`, `Path=/`, and production `Secure`.
+  - `/api/workspace-session` now validates the selected user against the overlaid workspace snapshot and sets/clears the cookie; it no longer writes the selected actor into the shared workspace store. Missing `AIGC_WORKSPACE_SESSION_SECRET` fails closed.
+  - `workspace-actor` now resolves actors from the request cookie and revalidates the cookie user against overlaid `state.users` on each protected request. Missing, malformed, tampered, expired, or unknown-user cookies do not produce an actor.
+  - Protected routes now pass the request into actor resolution: asset-lock records, asset-lock attachments and attachment item routes, delivery import jobs, delivery packages, and asset decision timeline.
+  - Client session sync now uses `credentials: "same-origin"`; existing response shape remains `{ ok, currentUserId }`.
+  - Updates `docs/m3-db-backed-readiness-status.md` to record that CI `db:smoke` has passed and that signed cookie actor derivation exists, while still avoiding a formal backend-ready claim.
+  - Keeps the slice scoped: no DB schema/migration, object storage provider, auth/admin route, password/OAuth/JWT account system, or `codex/timeline-mobile-crop-hardening` changes.
+  - Child review 46 found no blocking code issue and approved fast-forward ancestry. Main control reran missing verification before merge. Real local `db:smoke` was not run.
+  - Validation before merge:
+    - `npm.cmd run test -w apps/web -- app/api/workspace-actor.test.ts app/api/workspace-session/route.test.ts app/api/delivery-import-jobs/route.test.ts app/api/delivery-packages/route.test.ts app/api/asset-lock-records/route.test.ts app/api/asset-lock-attachments/route.test.ts app/api/asset-decision-timeline/route.test.ts app/ui/workspace-session-api.test.ts`: passed, 8 files / 65 tests.
+    - `npm.cmd run test -w apps/web`: passed, 33 files / 331 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `npm.cmd run build -w apps/web`: passed.
+    - `git diff --check main..codex/m3-session-cookie-backed-actor`: passed.
 - `88504d3 test: relax smoke projection assertions`
   - Fixes the real CI smoke failure from run `26687297858`.
   - Updates `apps/web/db/postgres-smoke.ts` so the asset decision timeline projection smoke assertion allows additional generated `decisionQueue` and `sourceExcerpts` entries while still requiring the manually created record and explicit source binding excerpt.
