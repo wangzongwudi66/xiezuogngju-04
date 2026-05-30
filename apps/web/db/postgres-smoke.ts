@@ -20,6 +20,7 @@ import {
   readDbDeliveryPackageSnapshot,
   updateDbDeliveryPackage
 } from "../app/api/delivery-packages/db-repository";
+import { mutateDeliveryPackage } from "../app/api/delivery-packages/service";
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
 
@@ -75,6 +76,8 @@ describe("real Postgres asset lock smoke", () => {
 
   it("generates, creates, binds, uploads, deletes, projects, locks, and cleans asset data through Postgres", async () => {
     deliveryPackageId = await createSmokeDeliveryImportDraft();
+    await verifySmokeDeliveryPackageBasicMutations(deliveryPackageId);
+    await markDeliveryPackagePublishedForAssetGeneration(deliveryPackageId);
 
     const generated = await mutateAssetLockRecord(
       {
@@ -575,16 +578,93 @@ async function createSmokeDeliveryImportDraft() {
     throw new Error("smoke_delivery_import_package_missing");
   }
 
-  await updateDbDeliveryPackage({
-    ...importedPackage,
-    status: "published",
-    submittedByUserId: "user-head-writer",
+  return importedDeliveryPackageId;
+}
+
+async function verifySmokeDeliveryPackageBasicMutations(importedDeliveryPackageId: string) {
+  const confirmationSnapshot = await mutateDeliveryPackage({
+    action: "update_confirmation",
+    deliveryPackageId: importedDeliveryPackageId,
+    confirmedEpisodeNos: [1]
+  });
+  const confirmedEpisodes = confirmationSnapshot.state.deliveryPackageEpisodes.filter(
+    (episode) => episode.deliveryPackageId === importedDeliveryPackageId
+  );
+
+  expect(confirmedEpisodes.map((episode) => [episode.episodeNo, episode.isConfirmedChange])).toEqual([
+    [1, true],
+    [2, false]
+  ]);
+
+  const submittedSnapshot = await mutateDeliveryPackage({
+    action: "submit",
+    deliveryPackageId: importedDeliveryPackageId,
+    actorUserId: "user-head-writer"
+  });
+  const submittedPackage = submittedSnapshot.state.deliveryPackages.find((item) => item.id === importedDeliveryPackageId);
+
+  expect(submittedPackage).toMatchObject({
+    status: "pending_review",
+    submittedByUserId: "user-head-writer"
+  });
+  expect(submittedPackage?.submittedAt).toBeTruthy();
+  await expectLocalDeliveryPackageStateToStayCanonical();
+
+  const rejectedDeliveryPackageId = await createSmokeDeliveryImportDraft();
+
+  await mutateDeliveryPackage({
+    action: "update_confirmation",
+    deliveryPackageId: rejectedDeliveryPackageId,
+    confirmedEpisodeNos: [2]
+  });
+  await mutateDeliveryPackage({
+    action: "submit",
+    deliveryPackageId: rejectedDeliveryPackageId,
+    actorUserId: "user-head-writer"
+  });
+  const rejectedSnapshot = await mutateDeliveryPackage({
+    action: "reject",
+    deliveryPackageId: rejectedDeliveryPackageId,
+    actorUserId: "user-owner",
+    rejectionReason: "smoke reject isolated package"
+  });
+  const rejectedPackage = rejectedSnapshot.state.deliveryPackages.find((item) => item.id === rejectedDeliveryPackageId);
+
+  expect(rejectedPackage).toMatchObject({
+    status: "rejected",
     reviewedByUserId: "user-owner",
-    submittedAt: now,
+    rejectionReason: "smoke reject isolated package"
+  });
+  expect(rejectedPackage?.rejectedAt).toBeTruthy();
+  expect(rejectedDeliveryPackageId).not.toBe(importedDeliveryPackageId);
+  await expectLocalDeliveryPackageStateToStayCanonical();
+}
+
+async function markDeliveryPackagePublishedForAssetGeneration(importedDeliveryPackageId: string) {
+  const dbSnapshot = await readDbDeliveryPackageSnapshot();
+  const submittedPackage = dbSnapshot.deliveryPackages.find((item) => item.id === importedDeliveryPackageId);
+
+  expect(submittedPackage).toMatchObject({
+    status: "pending_review",
+    submittedByUserId: "user-head-writer"
+  });
+  if (!submittedPackage) {
+    throw new Error("smoke_delivery_import_package_missing");
+  }
+
+  await updateDbDeliveryPackage({
+    ...submittedPackage,
+    status: "published",
+    reviewedByUserId: "user-owner",
     publishedAt: now
   });
+}
 
-  return importedDeliveryPackageId;
+async function expectLocalDeliveryPackageStateToStayCanonical() {
+  const localWorkspace = await readDeliveryImportLocalWorkspaceState();
+
+  expect(localWorkspace.deliveryPackages).toEqual([]);
+  expect(localWorkspace.deliveryPackageEpisodes).toEqual([]);
 }
 
 function buildSmokeWorkspace(): WorkspaceState {
