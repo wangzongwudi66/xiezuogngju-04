@@ -53,18 +53,16 @@ describe("asset lock record service", () => {
     expect(persisted.state.assetLockRecords).toContainEqual(result.record);
   });
 
-  it("falls back to the local repository when DB mode is requested without DATABASE_URL", async () => {
+  it("fails closed before writing local state when DB mode is requested without DATABASE_URL", async () => {
     process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
     delete process.env.DATABASE_URL;
     const deliveryPackageId = await createDraft();
-    const result = await createAssetRecord(deliveryPackageId, "Fallback Local Asset");
-    const persisted = await getDeliveryImportWorkspace();
+    const workspaceBefore = await getDeliveryImportWorkspace();
 
-    expect(result.record).toMatchObject({
-      deliveryPackageId,
-      assetName: "Fallback Local Asset"
-    });
-    expect(persisted.state.assetLockRecords).toContainEqual(result.record);
+    await expect(createAssetRecord(deliveryPackageId, "Fail Closed Asset")).rejects.toThrow(
+      "asset_lock_record_database_url_required"
+    );
+    await expect(getDeliveryImportWorkspace()).resolves.toEqual(workspaceBefore);
   });
 
   it("rejects DB-mode mutations that are intentionally not DB-backed before writing to local state", async () => {

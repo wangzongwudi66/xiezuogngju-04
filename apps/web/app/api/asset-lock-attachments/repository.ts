@@ -93,7 +93,19 @@ export function resolveAssetAttachmentRepository(env: AssetAttachmentRepositoryE
 }
 
 export function isAssetAttachmentDbRepositoryEnabled(env: AssetAttachmentRepositoryEnv = process.env) {
-  return env[assetAttachmentRepositoryEnvKey]?.trim().toLowerCase() === "db" && isAssetLockRecordDbRepositoryEnabled(env);
+  if (!isAssetAttachmentDbRepositoryRequested(env)) {
+    return false;
+  }
+
+  if (!isAssetLockRecordDbRepositoryEnabled(env)) {
+    throw new Error("asset_attachment_record_db_required");
+  }
+
+  return true;
+}
+
+function isAssetAttachmentDbRepositoryRequested(env: AssetAttachmentRepositoryEnv) {
+  return env[assetAttachmentRepositoryEnvKey]?.trim().toLowerCase() === "db";
 }
 
 function toAssetAttachmentRepositorySnapshot(state: WorkspaceState): AssetAttachmentRepositorySnapshot {
