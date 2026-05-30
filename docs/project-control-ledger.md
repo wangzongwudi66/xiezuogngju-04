@@ -5,18 +5,31 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 19:53:21 +08:00`.
+Timestamp: `2026-05-30 20:23:22 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `6644ee2 Clarify Postgres smoke cleanup scope`.
-- Latest product/test code commit on `main`: `1f27d66 test: cover Postgres smoke delivery package basic mutations`.
-- Worktree at last check: clean after fast-forward merging `codex/postgres-smoke-cleanup-doc` and running post-merge validation.
-- Remote sync note: `main@de3435c` was the last pushed checkpoint before this smoke cleanup runbook merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
+- Latest recorded `main` checkpoint: `58c0b16 Add publish read-model DB schema`.
+- Latest product/test code commit on `main`: `58c0b16 Add publish read-model DB schema`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-publish-schema-read` and running post-merge validation.
+- Remote sync note: `main@7c3bccc` was the last pushed checkpoint before this publish read-model schema merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `58c0b16 Add publish read-model DB schema`
+  - Adds the publish read-model DB schema and migration `apps/web/db/migrations/0006_foamy_chat.sql` for `episode_revisions`, `episode_currents`, and `notifications`.
+  - Adds `apps/web/app/api/publish-read-model/db-repository.ts` read mappers/helpers and tests for `EpisodeRevision`, `EpisodeCurrent`, and `Notification`.
+  - Extends `apps/web/app/api/workspace-snapshot.ts` so DB mode now treats `episodeRevisions`, `episodeCurrents`, and `notifications` as DB-owned arrays in addition to prior DB-owned workspace arrays.
+  - Keeps DB mode delivery package `publish` unsupported; no publish transaction, service publish runtime, UI/browser QA, object storage, or `prepare_demo` DB fallback was added.
+  - Initial review found a P1 due to over-broad FK/cascade boundaries; the branch was amended to remove cross `projects` / `episodes` / `users` / `delivery_packages` FK/cascade constraints and retain only `episode_currents.current_revision_id -> episode_revisions.id` with no action.
+  - Child review 10 found no P0/P1/P2/P3 and approved fast-forward merge. Real `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run db:generate -w apps/web`: passed, no schema changes / nothing to migrate.
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/publish-read-model/db-repository.test.ts app/api/workspace-snapshot.test.ts app/api/delivery-packages/service.test.ts`: passed, 3 files / 16 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `6644ee2 Clarify Postgres smoke cleanup scope`
   - Updates `docs/m3-postgres-smoke-runbook.md` to accurately describe smoke cleanup scope: cleanup is scoped by smoke delivery package prefix and by the smoke project/projectId for related asset rows.
   - Clarifies that the smoke target must be a disposable `TEST_DATABASE_URL` database and must not be a shared, development, staging, or production database.
