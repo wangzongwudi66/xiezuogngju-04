@@ -5,18 +5,30 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 19:04:49 +08:00`.
+Timestamp: `2026-05-30 19:22:43 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `6856fb0 Record delivery package repository skeleton merge`.
-- Latest product/test code commit on `main`: `9892733 Wire delivery import drafts to DB mode`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-delivery-import-db-draft`; ledger update pending commit.
-- Remote sync pending for this ledger update; `main@6856fb0` was the last pushed checkpoint before the delivery import DB draft wiring merge.
+- Latest recorded `main` checkpoint: `083e1dd Record delivery import DB draft merge`.
+- Latest product/test code commit on `main`: `075cb85 test: cover postgres smoke delivery import draft`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-postgres-smoke-import-draft`; ledger update pending commit.
+- Remote sync pending for this ledger update; `main@083e1dd` was the last pushed checkpoint before the Postgres smoke import-draft coverage merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `075cb85 test: cover postgres smoke delivery import draft`
+  - Updates `apps/web/db/postgres-smoke.ts` so the smoke harness creates a DB draft delivery package through `createDeliveryImportJob` instead of only seeding delivery package rows manually.
+  - Verifies the DB workspace overlay can see the import-created package/episodes, while the local canonical `deliveryPackages` and `deliveryPackageEpisodes` arrays remain empty.
+  - Reuses the same import-created package for `generate_from_package` in the smoke happy path.
+  - Keeps cleanup scoped to the smoke project/package rows and preserves fail-closed behavior when `TEST_DATABASE_URL` is missing.
+  - Keeps the slice scoped: no business service/repository changes, no schema/migration, no publish runtime, no UI/browser QA.
+  - Child review 45 found no P0/P1/P2/P3 and approved merge. Real `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/delivery-import-jobs/service.test.ts app/api/asset-lock-records/service.test.ts`: passed, 2 files / 55 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `9892733 Wire delivery import drafts to DB mode`
   - DB mode delivery imports now write successful draft delivery packages and package episodes to the DB repository, while local JSON only keeps job/result metadata and parse issues.
   - DB mode delivery import workspace reads now return the full DB workspace overlay instead of only overlaying delivery packages, preventing stale local DB-owned arrays from leaking through `GET /api/delivery-import-jobs?scope=workspace`.
