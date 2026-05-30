@@ -5,12 +5,12 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-31 00:25:57 +08:00`.
+Timestamp: `2026-05-31 00:39:05 +08:00`.
 
 - Active branch: `main`.
-- Latest merged checkpoint covered by this ledger update: `f0108ca Add asset attachment object storage provider`.
-- Latest product/test code commit on `main`: `f0108ca Add asset attachment object storage provider`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-asset-attachment-object-storage-provider`.
+- Latest merged checkpoint covered by this ledger update: `564d648 Add auth scope seed contract`.
+- Latest product/test code commit on `main`: `564d648 Add auth scope seed contract`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-auth-scope-seed-contract`.
 - Remote sync target for this checkpoint: push local `main` to `xiezuogongju-04/main` after recording this ledger update.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
@@ -34,9 +34,21 @@ Timestamp: `2026-05-31 00:25:57 +08:00`.
 - Child 51 confirmed the GitHub Actions `db-smoke` run for `73268d32d6f6c47401fabcaadcf2b81b207892cb` passed with no connection string leakage observed.
 - Child 52 reviewed the amended object storage provider at `f0108ca` and found no P0/P1/P2/P3; the P2 is fixed.
 - Child 53 reviewed `codex/m3-auth-scope-seed-contract` at `7cf5a87` and found no blocking issue, but the branch was reviewed before the object storage provider moved `main`.
+- Child 54 reviewed the rebased `codex/m3-auth-scope-seed-contract` at `564d648` and found no P0/P1/P2/P3; it confirmed the branch is suitable for fast-forward merge.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `564d648 Add auth scope seed contract`
+  - Adds `apps/web/app/api/auth-scope/seed-contract.ts` and `apps/web/app/api/auth-scope/seed-contract.test.ts`.
+  - Defines a deterministic DB seed contract for the six auth/scope arrays only: `users`, `projects`, `project_members`, `project_member_permissions`, `episodes`, and `episode_assignments`.
+  - Keeps the seed order fixed for FK and business dependencies: users, projects, project members, member permissions, episodes, then episode assignments.
+  - Does not seed `currentUserId`, delivery packages, asset records, asset attachments, notifications, or any UI state.
+  - Keeps the slice scoped: no admin route, UI, session/cookie actor changes, object storage changes, DB schema/migration changes, or `codex/timeline-mobile-crop-hardening` changes.
+  - Child review 53 approved the original branch before the object storage merge; child review 54 approved the rebased branch at `564d648`. Real local `db:smoke` was not run.
+  - Validation before merge:
+    - `npm.cmd run test -w apps/web -- app/api/auth-scope`: passed, 2 files / 13 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check main..codex/m3-auth-scope-seed-contract`: passed.
 - `f0108ca Add asset attachment object storage provider`
   - Adds S3-compatible object storage support behind the existing `AssetAttachmentStorage` contract.
   - Keeps default attachment byte storage local; object storage is enabled explicitly with `ASSET_LOCK_ATTACHMENT_STORAGE_PROVIDER=s3`.
