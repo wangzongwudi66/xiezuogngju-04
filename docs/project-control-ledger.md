@@ -5,12 +5,12 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-31 01:38:40 +08:00`.
+Timestamp: `2026-05-31 01:47:35 +08:00`.
 
 - Active branch: `main`.
-- Latest merged checkpoint covered by this ledger update: `d6bb88e Cover auth scope admin route in postgres smoke`.
-- Latest product/test code commit on `main`: `d6bb88e Cover auth scope admin route in postgres smoke`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-auth-scope-admin-smoke`.
+- Latest merged checkpoint covered by this ledger update: `4bc6ca6 Add auth scope admin UI API helper`.
+- Latest product/test code commit on `main`: `4bc6ca6 Add auth scope admin UI API helper`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-auth-scope-admin-ui-api`.
 - Remote sync target for this checkpoint: push local `main` to `xiezuogongju-04/main` after recording this ledger update.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
@@ -43,9 +43,22 @@ Timestamp: `2026-05-31 01:38:40 +08:00`.
 - Child 60 reviewed amended `codex/m3-auth-scope-admin-routes` at `e7d8a14` and found no P0/P1/P2/P3; it confirmed the branch is suitable for fast-forward merge.
 - Child 61 confirmed the GitHub Actions `db-smoke` run for `ab806b5b9df68c0c7cdee4b480f045c524abe763` passed with no connection string leakage observed.
 - Child 62 reviewed `codex/m3-auth-scope-admin-smoke` at `d6bb88e` and found no P0/P1/P2/P3; it confirmed the branch is suitable for fast-forward merge.
+- Child 63 confirmed the GitHub Actions `db-smoke` run for `1515c601249f2b4d010741d8718d424aeb7faf9b` passed with no connection string leakage observed.
+- Child 64 reviewed `codex/m3-auth-scope-admin-ui-api` at `4bc6ca6` and found no P0/P1/P2/P3; it confirmed the branch is suitable for fast-forward merge.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `4bc6ca6 Add auth scope admin UI API helper`
+  - Adds `apps/web/app/ui/auth-scope-admin-api.ts` and `apps/web/app/ui/auth-scope-admin-api.test.ts`.
+  - Provides a typed frontend API helper for `/api/auth-scope/admin` covering create user/project, update/archive project, member role replacement, custom permission replacement, and episode assignment replacement.
+  - Sends requests with `credentials: "same-origin"` so signed cookie actor resolution remains server-owned.
+  - Keeps the slice scoped: no `m1-dashboard.tsx`, UI runtime, route, schema, migration, smoke, or workflow changes.
+  - Error handling throws stable route error codes and falls back to `auth_scope_admin_request_failed` for non-JSON failures.
+  - Child review 64 found no P0/P1/P2/P3. Real local `db:smoke` was not run.
+  - Validation before merge:
+    - `npm.cmd run test -w apps/web -- app/ui/auth-scope-admin-api.test.ts`: passed, 1 file / 4 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check main..codex/m3-auth-scope-admin-ui-api`: passed.
 - `d6bb88e Cover auth scope admin route in postgres smoke`
   - Extends `apps/web/db/postgres-smoke.ts` only; no runtime, UI, schema, migration, package, or workflow files changed.
   - Adds real Postgres smoke coverage for the auth/scope admin route using signed cookie actor requests.
