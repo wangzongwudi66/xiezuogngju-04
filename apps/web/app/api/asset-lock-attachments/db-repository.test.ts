@@ -169,7 +169,8 @@ describe("asset lock attachment DB repository writes", () => {
     });
     vi.mocked(readDeliveryImportWorkspace).mockResolvedValue({
       state: seedWorkspace,
-      deliveryParseIssuesByPackageId: {}
+      deliveryParseIssuesByPackageId: {},
+      repositoryMode: { authScope: "local" }
     });
     vi.mocked(readDeliveryImportLocalWorkspaceState).mockResolvedValue(seedWorkspace);
   });
@@ -204,7 +205,8 @@ describe("asset lock attachment DB repository writes", () => {
         assetLockRecords: [],
         assetAttachments: [staleLocal]
       },
-      deliveryParseIssuesByPackageId: {}
+      deliveryParseIssuesByPackageId: {},
+      repositoryMode: { authScope: "local" }
     });
     vi.mocked(readDeliveryImportLocalWorkspaceState).mockResolvedValue({
       ...seedWorkspace,

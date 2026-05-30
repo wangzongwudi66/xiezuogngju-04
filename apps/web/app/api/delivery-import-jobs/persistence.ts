@@ -17,6 +17,11 @@ interface DeliveryImportJobStore {
 export interface DeliveryImportWorkspaceSnapshot {
   state: WorkspaceState;
   deliveryParseIssuesByPackageId: Record<string, WordDeliveryIssue[]>;
+  repositoryMode: DeliveryImportWorkspaceRepositoryMode;
+}
+
+export interface DeliveryImportWorkspaceRepositoryMode {
+  authScope: "db" | "local";
 }
 
 const storePathEnvKey = "AIGC_DELIVERY_IMPORT_STORE_PATH";
@@ -124,11 +129,13 @@ export async function readDeliveryImportJobs(projectId?: string) {
 
 export async function readDeliveryImportWorkspace(): Promise<DeliveryImportWorkspaceSnapshot> {
   const store = await readDeliveryImportJobStore();
-  const state = isAssetLockRecordDbRepositoryEnabled() ? await readDbWorkspaceSnapshotOverlay(store.workspace) : store.workspace;
+  const repositoryMode = resolveDeliveryImportWorkspaceRepositoryMode();
+  const state = repositoryMode.authScope === "db" ? await readDbWorkspaceSnapshotOverlay(store.workspace) : store.workspace;
 
   return {
     state,
-    deliveryParseIssuesByPackageId: store.deliveryParseIssuesByPackageId
+    deliveryParseIssuesByPackageId: store.deliveryParseIssuesByPackageId,
+    repositoryMode
   };
 }
 
@@ -149,8 +156,13 @@ export async function mutateDeliveryImportWorkspace(
 
   return {
     state: nextWorkspace,
-    deliveryParseIssuesByPackageId: store.deliveryParseIssuesByPackageId
+    deliveryParseIssuesByPackageId: store.deliveryParseIssuesByPackageId,
+    repositoryMode: { authScope: "local" }
   };
+}
+
+function resolveDeliveryImportWorkspaceRepositoryMode(): DeliveryImportWorkspaceRepositoryMode {
+  return { authScope: isAssetLockRecordDbRepositoryEnabled() ? "db" : "local" };
 }
 
 export async function saveDeliveryImportJobFile(input: { fileBuffer: ArrayBuffer | Uint8Array; fileId: string }) {

@@ -2,7 +2,13 @@ import type { DeliveryImportJobResponse, DeliveryImportJobRetryResponse } from "
 import type { DeliveryImportJob } from "./workspace-persistence";
 import type { M2WorkspacePersistenceSnapshot } from "./workspace-persistence";
 
-type DeliveryWorkspaceSnapshot = Pick<M2WorkspacePersistenceSnapshot, "state" | "deliveryParseIssuesByPackageId">;
+export interface DeliveryWorkspaceRepositoryMode {
+  authScope: "db" | "local";
+}
+
+export type DeliveryWorkspaceSnapshot = Pick<M2WorkspacePersistenceSnapshot, "state" | "deliveryParseIssuesByPackageId"> & {
+  repositoryMode?: DeliveryWorkspaceRepositoryMode;
+};
 
 export type DeliveryPackageMutationInput =
   | {

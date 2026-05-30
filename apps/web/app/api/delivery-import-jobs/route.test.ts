@@ -109,6 +109,7 @@ describe("delivery import job route", () => {
     const workspaceResponse = await GET(new Request("http://localhost/api/delivery-import-jobs?scope=workspace"));
     const workspace = await workspaceResponse.json();
 
+    expect(workspace.repositoryMode).toEqual({ authScope: "local" });
     expect(workspace.state.deliveryPackages).toContainEqual(
       expect.objectContaining({
         id: created.job.deliveryPackageId,
@@ -256,6 +257,7 @@ describe("delivery import job route", () => {
     const workspaceResponse = await GET(new Request("http://localhost/api/delivery-import-jobs?scope=workspace"));
     const workspace = await workspaceResponse.json();
 
+    expect(workspace.repositoryMode).toEqual({ authScope: "db" });
     expect(workspace.state.deliveryPackages.map((item: { id: string }) => item.id)).toEqual(["delivery-db-route-overlay"]);
     expect(workspace.state.deliveryPackageEpisodes.map((item: { content: string }) => item.content)).toEqual([
       "DB route overlay source"

@@ -99,6 +99,14 @@ import {
   selectRealAssetTimelineDeliveryPackageId
 } from "./delivery-role-view";
 import {
+  archiveAuthScopeProject,
+  assignAuthScopeEpisodes,
+  createAuthScopeProject,
+  saveAuthScopeMemberRoles,
+  updateAuthScopeMemberPermissions,
+  updateAuthScopeProject
+} from "./auth-scope-admin-api";
+import {
   fetchDeliveryImportJobs,
   fetchDeliveryImportWorkspace,
   mutateDeliveryPackageState,
@@ -106,6 +114,7 @@ import {
   submitDocxDeliveryImport,
   submitTextDeliveryImport
 } from "./delivery-import-api";
+import type { DeliveryWorkspaceRepositoryMode, DeliveryWorkspaceSnapshot } from "./delivery-import-api";
 import { clearM2WorkspacePersistence, readM2WorkspacePersistence, writeM2WorkspacePersistence } from "./workspace-persistence";
 import type { DeliveryImportJob } from "./workspace-persistence";
 import { syncWorkspaceCurrentUser } from "./workspace-session-api";
@@ -372,10 +381,13 @@ function buildM2PrototypeWorkspace(): WorkspaceState {
   return next;
 }
 
+const localDeliveryWorkspaceRepositoryMode: DeliveryWorkspaceRepositoryMode = { authScope: "local" };
+
 export function M1Dashboard() {
   const [hasHydrated, setHasHydrated] = useState(false);
   const [syncedServerUserId, setSyncedServerUserId] = useState<string | null>(null);
   const [state, setState] = useState<WorkspaceState>(seedWorkspace);
+  const [repositoryMode, setRepositoryMode] = useState<DeliveryWorkspaceRepositoryMode>(localDeliveryWorkspaceRepositoryMode);
   const [selectedProjectId, setSelectedProjectId] = useState(seedWorkspace.projects[0].id);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [projectDraft, setProjectDraft] = useState({ name: "裂隙边境", code: "LX", episodeCount: 60 });
@@ -570,6 +582,7 @@ export function M1Dashboard() {
   }
 
   const currentUserId = currentUser.id;
+  const isServerOwnedAuthScope = repositoryMode.authScope === "db";
   const permissions = selectPermissions(state, currentUser.id, selectedProject.id);
   const primaryRole = selectPrimaryRole(state, currentUser.id, selectedProject.id);
   const canReviewDelivery = canReviewDeliveryRole(primaryRole);
@@ -648,6 +661,7 @@ export function M1Dashboard() {
     const next = buildM2PrototypeWorkspace();
     clearM2WorkspacePersistence();
     setState(next);
+    setRepositoryMode(localDeliveryWorkspaceRepositoryMode);
     setServerDeliveryPackageIds([]);
     setSelectedProjectId(next.projects[0]?.id ?? seedWorkspace.projects[0].id);
     setSelectedDeliveryPackageId(null);
@@ -887,7 +901,11 @@ export function M1Dashboard() {
     }
   }
 
-  function applyDeliveryWorkspaceSnapshot(snapshot: Awaited<ReturnType<typeof fetchDeliveryImportWorkspace>>) {
+  function applyDeliveryWorkspaceSnapshot(snapshot: DeliveryWorkspaceSnapshot) {
+    const nextRepositoryMode = snapshot.repositoryMode ?? localDeliveryWorkspaceRepositoryMode;
+    const shouldReplaceAuthScope = nextRepositoryMode.authScope === "db";
+
+    setRepositoryMode(nextRepositoryMode);
     setServerDeliveryPackageIds(snapshot.state.deliveryPackages.map((deliveryPackage) => deliveryPackage.id));
     setDeliveryParseIssuesByPackageId((current) => ({
       ...current,
@@ -895,7 +913,12 @@ export function M1Dashboard() {
     }));
     setState((current) => ({
       ...current,
-      episodes: mergeById(current.episodes, snapshot.state.episodes),
+      users: shouldReplaceAuthScope ? snapshot.state.users : current.users,
+      projects: shouldReplaceAuthScope ? snapshot.state.projects : current.projects,
+      members: shouldReplaceAuthScope ? snapshot.state.members : current.members,
+      memberPermissions: shouldReplaceAuthScope ? snapshot.state.memberPermissions : current.memberPermissions,
+      episodes: shouldReplaceAuthScope ? snapshot.state.episodes : mergeById(current.episodes, snapshot.state.episodes),
+      assignments: shouldReplaceAuthScope ? snapshot.state.assignments : current.assignments,
       deliveryPackages: mergeById(current.deliveryPackages, snapshot.state.deliveryPackages),
       deliveryPackageEpisodes: mergeById(current.deliveryPackageEpisodes, snapshot.state.deliveryPackageEpisodes),
       episodeRevisions: mergeById(current.episodeRevisions, snapshot.state.episodeRevisions),
@@ -915,8 +938,38 @@ export function M1Dashboard() {
     return snapshot;
   }
 
-  function handleCreateProject(event: FormEvent<HTMLFormElement>) {
+  async function mutateAuthScopeFromServer<T>(
+    mutation: () => Promise<T>,
+    successText: string,
+    afterRefresh?: (snapshot: DeliveryWorkspaceSnapshot, result: T) => void
+  ) {
+    try {
+      const result = await mutation();
+      const snapshot = await refreshDeliveryWorkspaceFromServer();
+      afterRefresh?.(snapshot, result);
+      setActionMessage({ tone: "success", text: successText });
+    } catch (error) {
+      setActionMessage({ tone: "error", text: formatActionError(error) });
+    }
+  }
+
+  async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isServerOwnedAuthScope) {
+      await mutateAuthScopeFromServer(
+        () => createAuthScopeProject(projectDraft),
+        "项目已创建",
+        (snapshot, result) => {
+          const created = snapshot.state.projects.find((project) => project.id === result.project.id) ?? result.project;
+          setSelectedProjectId(created.id);
+          setSelectedDeliveryPackageId(null);
+          setSelectedEpisodeId(null);
+          navigateToModule("项目总览");
+        }
+      );
+      return;
+    }
+
     runMutation((current) => {
       const next = createProject(current, projectDraft);
       const created = next.projects.at(-1);
@@ -935,9 +988,24 @@ export function M1Dashboard() {
     setProjectDraft({ name: "新项目", code: "NEW", episodeCount: 12 });
   }
 
-  function handleUpdateProject(event: FormEvent<HTMLFormElement>) {
+  async function handleUpdateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editingProjectId) {
+      return;
+    }
+
+    if (isServerOwnedAuthScope) {
+      const projectId = editingProjectId;
+      await mutateAuthScopeFromServer(
+        () =>
+          updateAuthScopeProject({
+            projectId,
+            name: projectDraft.name,
+            code: projectDraft.code
+          }),
+        "项目已保存",
+        () => setEditingProjectId(null)
+      );
       return;
     }
 
@@ -945,7 +1013,21 @@ export function M1Dashboard() {
     setEditingProjectId(null);
   }
 
-  function handleArchiveProject(projectId: string) {
+  async function handleArchiveProject(projectId: string) {
+    if (isServerOwnedAuthScope) {
+      await mutateAuthScopeFromServer(
+        () => archiveAuthScopeProject(projectId),
+        "项目已归档",
+        (snapshot) => {
+          const nextProject = snapshot.state.projects.find((project) => project.status === "active" && project.id !== projectId);
+          if (nextProject) {
+            setSelectedProjectId(nextProject.id);
+          }
+        }
+      );
+      return;
+    }
+
     runMutation((current) => archiveProject(current, projectId), "项目已归档");
     const nextProject = activeProjects.find((project) => project.id !== projectId);
     if (nextProject) {
@@ -953,8 +1035,20 @@ export function M1Dashboard() {
     }
   }
 
-  function handleUpsertMember(event: FormEvent<HTMLFormElement>) {
+  async function handleUpsertMember(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isServerOwnedAuthScope) {
+      await mutateAuthScopeFromServer(
+        () =>
+          saveAuthScopeMemberRoles({
+            projectId: selectedProject.id,
+            ...memberDraft
+          }),
+        "成员身份已保存"
+      );
+      return;
+    }
+
     runMutation((current) =>
       saveProjectMemberRoles(current, {
         projectId: selectedProject.id,
@@ -964,8 +1058,20 @@ export function M1Dashboard() {
     );
   }
 
-  function handleUpdateMemberPermissions(event: FormEvent<HTMLFormElement>) {
+  async function handleUpdateMemberPermissions(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isServerOwnedAuthScope) {
+      await mutateAuthScopeFromServer(
+        () =>
+          updateAuthScopeMemberPermissions({
+            projectId: selectedProject.id,
+            ...permissionDraft
+          }),
+        "成员权限已保存"
+      );
+      return;
+    }
+
     runMutation((current) =>
       updateProjectMemberPermissions(current, {
         projectId: selectedProject.id,
@@ -975,8 +1081,23 @@ export function M1Dashboard() {
     );
   }
 
-  function handleAssignEpisodes(event: FormEvent<HTMLFormElement>) {
+  async function handleAssignEpisodes(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isServerOwnedAuthScope) {
+      await mutateAuthScopeFromServer(
+        () =>
+          assignAuthScopeEpisodes({
+            projectId: selectedProject.id,
+            userId: assignmentDraft.userId,
+            episodeFrom: assignmentDraft.episodeFrom,
+            episodeTo: assignmentDraft.episodeTo,
+            responsibility: assignmentDraft.responsibility
+          }),
+        "集数分配已保存"
+      );
+      return;
+    }
+
     if (!projectMembers.some((member) => member.userId === assignmentDraft.userId)) {
       setActionMessage({ tone: "error", text: "请先在“成员与角色”里把这个人加入当前项目，再分配集数。" });
       return;
@@ -3511,6 +3632,30 @@ function formatActionError(error: unknown) {
 
   if (message.includes("delivery_package_mutation_failed")) {
     return "操作失败，请刷新后重试。";
+  }
+
+  if (message.includes("auth_scope_unauthenticated")) {
+    return "服务端会话不可用，请重新选择当前用户后再试。";
+  }
+
+  if (message.includes("auth_scope_permission_denied")) {
+    return "当前账号没有权限执行这项项目管理操作。";
+  }
+
+  if (message.includes("auth_scope_target_user_not_project_member")) {
+    return "请先把这个人加入当前项目，再保存权限或分配集数。";
+  }
+
+  if (message.includes("auth_scope_project_code_conflict")) {
+    return "项目编码已存在，请换一个编码。";
+  }
+
+  if (message.includes("auth_scope_episode_range_invalid") || message.includes("auth_scope_episode_range_not_found")) {
+    return "集数范围无效，请确认起止集数后重试。";
+  }
+
+  if (message.includes("auth_scope_")) {
+    return "项目成员与权限服务操作失败，请检查输入后重试。";
   }
 
   if (message.includes("交稿包状态必须是")) {
