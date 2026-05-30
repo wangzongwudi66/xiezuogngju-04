@@ -122,7 +122,53 @@ describe("asset lock record service", () => {
     expect(persisted.state.assetLockRecords ?? []).toEqual(workspace.state.assetLockRecords ?? []);
   });
 
-  it("does not call DB record writes when package generation finds only existing records", async () => {
+  it("does not call DB record writes when package generation rejects draft packages", async () => {
+    const deliveryPackageId = await createCandidateDraft({ publish: false });
+    const workspace = await getDeliveryImportWorkspace();
+    const repository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
+
+    await expect(
+      mutateAssetLockRecord({
+        action: "generate_from_package",
+        projectId: "project-jincheng",
+        deliveryPackageId,
+        actorUserId: "user-head-writer"
+      })
+    ).rejects.toThrow("published");
+
+    expect(repository.read).toHaveBeenCalledTimes(1);
+    expect(repository.createAssetLockRecords).not.toHaveBeenCalled();
+    expect(repository.createAssetLockRecord).not.toHaveBeenCalled();
+    expect(repository.updateAssetLockRecord).not.toHaveBeenCalled();
+    expect(repository.createSourceBinding).not.toHaveBeenCalled();
+    expect(repository.removeSourceBinding).not.toHaveBeenCalled();
+  });
+
+  it("does not call DB record writes when package generation finds no candidates", async () => {
+    const deliveryPackageId = await createDraft();
+    const workspace = await getDeliveryImportWorkspace();
+    const repository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
+    vi.spyOn(assetLockRecordRepositoryModule, "resolveAssetLockRecordRepository").mockReturnValue(repository);
+
+    await expect(
+      mutateAssetLockRecord({
+        action: "generate_from_package",
+        projectId: "project-jincheng",
+        deliveryPackageId,
+        actorUserId: "user-head-writer"
+      })
+    ).rejects.toThrow("asset_lock_candidates_empty");
+
+    expect(repository.read).toHaveBeenCalledTimes(1);
+    expect(repository.createAssetLockRecords).not.toHaveBeenCalled();
+    expect(repository.createAssetLockRecord).not.toHaveBeenCalled();
+    expect(repository.updateAssetLockRecord).not.toHaveBeenCalled();
+    expect(repository.createSourceBinding).not.toHaveBeenCalled();
+    expect(repository.removeSourceBinding).not.toHaveBeenCalled();
+  });
+
+  it("returns existing DB records without a second write when package generation is idempotent", async () => {
     const deliveryPackageId = await createCandidateDraft();
     const workspace = await getDeliveryImportWorkspace();
     const repository = createMockDbAssetLockRecordRepository(snapshotFromState(workspace.state));
@@ -134,6 +180,7 @@ describe("asset lock record service", () => {
       deliveryPackageId,
       actorUserId: "user-head-writer"
     });
+    const writesAfterFirstGenerate = vi.mocked(repository.createAssetLockRecords).mock.calls.length;
     const second = await mutateAssetLockRecord({
       action: "generate_from_package",
       projectId: "project-jincheng",
@@ -143,7 +190,9 @@ describe("asset lock record service", () => {
 
     expect(repository.read).toHaveBeenCalledTimes(2);
     expect(repository.createAssetLockRecords).toHaveBeenCalledTimes(1);
+    expect(repository.createAssetLockRecords).toHaveBeenCalledTimes(writesAfterFirstGenerate);
     expect(second.records).toHaveLength(first.records.length);
+    expect(second.records.map((record) => record.id).sort()).toEqual(first.records.map((record) => record.id).sort());
     expect(new Set(second.records.map((record) => record.assetName)).size).toBe(second.records.length);
   });
 
