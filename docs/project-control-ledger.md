@@ -5,18 +5,30 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 19:31:03 +08:00`.
+Timestamp: `2026-05-30 19:40:28 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `f27bfa1 Support delivery package DB basic mutations`.
-- Latest product/test code commit on `main`: `f27bfa1 Support delivery package DB basic mutations`.
-- Worktree at last check: clean after rebasing and fast-forward merging `codex/m3-delivery-package-db-basic-mutations`; ledger update pending commit.
-- Remote sync pending for this ledger update; `main@d723bf2` was the last pushed checkpoint before the delivery package DB basic mutations merge.
+- Latest recorded `main` checkpoint: `1f27d66 test: cover Postgres smoke delivery package basic mutations`.
+- Latest product/test code commit on `main`: `1f27d66 test: cover Postgres smoke delivery package basic mutations`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-postgres-smoke-basic-mutations` and running post-merge validation.
+- Remote sync note: `main@4ff3141` was the last pushed checkpoint before this smoke basic-mutations coverage merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `1f27d66 test: cover Postgres smoke delivery package basic mutations`
+  - Extends `apps/web/db/postgres-smoke.ts` so the smoke harness covers DB mode delivery package `update_confirmation`, `submit`, and `reject` mutations.
+  - Keeps the main import-created package path intact for `submit` and subsequent `generate_from_package`; uses a separate package for `reject` so it does not pollute the generation happy path.
+  - Verifies DB workspace overlay visibility for package status and episode confirmation changes.
+  - Keeps local canonical `deliveryPackages` and `deliveryPackageEpisodes` empty in DB mode and preserves cleanup/count assertions for the smoke package rows.
+  - Keeps `publish` unsupported in DB mode; no publish runtime, schema/migration, UI/browser QA, object storage, or business service behavior change was added.
+  - Child review 52 found no P0/P1/P2/P3 and approved fast-forward merge. Real `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/delivery-packages/service.test.ts app/api/delivery-import-jobs/service.test.ts app/api/asset-lock-records/service.test.ts`: passed, 3 files / 65 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `f27bfa1 Support delivery package DB basic mutations`
   - Rebases `codex/m3-delivery-package-db-basic-mutations` onto `main@d723bf2` and fast-forward merges it into `main`; original implementation commit was `6807b91`.
   - DB mode now supports `/api/delivery-packages` basic mutations for `update_confirmation`, `submit`, and `reject` through the delivery package DB repository.
