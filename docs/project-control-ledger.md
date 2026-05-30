@@ -5,18 +5,31 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 14:57:30 +08:00`.
+Timestamp: `2026-05-30 15:32:11 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` commit before this ledger update: `37ce1dc Fail closed for DB repository env gates`.
-- Latest product/test code commit on `main`: `37ce1dc Fail closed for DB repository env gates`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-db-env-fail-closed`.
-- Remote sync pending for this ledger update; `main@3663479` was the last pushed checkpoint before the fail-closed merge.
+- Latest recorded `main` commit before this ledger update: `61d9d93 Record DB env fail closed merge`.
+- Latest product/test code commit on `main`: `34e4598 Add real Postgres smoke test`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-real-postgres-smoke`; ledger update pending commit.
+- Remote sync pending for this ledger update; `main@61d9d93` was the last pushed checkpoint before the smoke harness merge.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `34e4598 Add real Postgres smoke test`
+  - Adds `npm run db:smoke -w apps/web` through a dedicated Vitest config and `apps/web/db/postgres-smoke.ts`.
+  - Smoke harness intentionally requires `TEST_DATABASE_URL`; it fails closed when missing and explicitly ignores raw `DATABASE_URL` to avoid accidental production/development DB use.
+  - When a disposable Postgres URL is provided, the smoke process maps `TEST_DATABASE_URL` into `DATABASE_URL`, applies existing migrations, uses temp local workspace/file stores, enables records and attachments DB repositories, and exercises the happy path across record create/lifecycle, source binding bind/remove, attachment metadata upload/delete, and timeline projection.
+  - Keeps the slice scoped: no business repository/service changes, no schema/migration generation, no `drizzle.config.ts` change, no object storage, no project/user/delivery persistence migration, no UI, and no browser QA.
+  - Fast-forward merged `codex/m3-real-postgres-smoke` into `main` after AU implementation and main-control review found no P0/P1/P2/P3.
+  - Validation:
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/asset-lock-records/db-repository.test.ts app/api/asset-lock-attachments/db-repository.test.ts app/api/asset-decision-timeline/service.test.ts`: passed, 3 files / 30 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check main..HEAD`: passed before merge.
+    - `npm.cmd run db:smoke -w apps/web` without `TEST_DATABASE_URL`: failed as expected with `db_smoke_test_database_url_required`.
+  - Real Postgres smoke has not yet been executed because no disposable `TEST_DATABASE_URL` is available in the current environment.
 - `37ce1dc Fail closed for DB repository env gates`
   - Records repository now fails closed when `ASSET_LOCK_RECORDS_REPOSITORY=db` is set without `DATABASE_URL`, raising `asset_lock_record_database_url_required` instead of falling back to local workspace state.
   - Attachments repository now fails closed when `ASSET_LOCK_ATTACHMENTS_REPOSITORY=db` is requested without records DB mode and `DATABASE_URL`, preventing record/attachment storage split-brain.
