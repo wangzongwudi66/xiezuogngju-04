@@ -5,18 +5,31 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 20:23:22 +08:00`.
+Timestamp: `2026-05-30 20:53:08 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `58c0b16 Add publish read-model DB schema`.
-- Latest product/test code commit on `main`: `58c0b16 Add publish read-model DB schema`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-publish-schema-read` and running post-merge validation.
-- Remote sync note: `main@7c3bccc` was the last pushed checkpoint before this publish read-model schema merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
+- Latest recorded `main` checkpoint: `2b30983 Implement DB delivery package publish transaction`.
+- Latest product/test code commit on `main`: `2b30983 Implement DB delivery package publish transaction`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-delivery-package-db-publish-transaction` and running post-merge validation.
+- Remote sync note: `main@de6e5e1` was the last pushed checkpoint before this delivery package DB publish transaction merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `2b30983 Implement DB delivery package publish transaction`
+  - DB mode `/api/delivery-packages` now supports `publish` by running the domain publish mutation against the DB-overlaid workspace, calculating a publish delta, and persisting it through one DB transaction.
+  - Adds `publishDbDeliveryPackage` to update `delivery_packages`, insert `episode_revisions`, upsert `episode_currents`, update touched `episodes`, and insert `notifications`.
+  - Adds publish read-model insert mappers while keeping schema/migration unchanged.
+  - Keeps local workspace arrays unchanged in DB mode and returns the DB-overlaid workspace after publish; validation failures remain no-write.
+  - Keeps the slice scoped: no `postgres-smoke` publish coverage yet, no UI/browser QA, no object storage, no `prepare_demo` DB fallback, and no schema/migration changes.
+  - Child review 13 found no P0/P1/P2/P3 and approved fast-forward merge. Real `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run test -w apps/web -- app/api/delivery-packages/service.test.ts app/api/delivery-packages/db-repository.test.ts app/api/publish-read-model/db-repository.test.ts`: passed, 3 files / 33 tests.
+    - `npm.cmd run test -w apps/web -- app/api/delivery-import-jobs/service.test.ts app/api/asset-lock-records/service.test.ts`: passed, 2 files / 55 tests.
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `58c0b16 Add publish read-model DB schema`
   - Adds the publish read-model DB schema and migration `apps/web/db/migrations/0006_foamy_chat.sql` for `episode_revisions`, `episode_currents`, and `notifications`.
   - Adds `apps/web/app/api/publish-read-model/db-repository.ts` read mappers/helpers and tests for `EpisodeRevision`, `EpisodeCurrent`, and `Notification`.
