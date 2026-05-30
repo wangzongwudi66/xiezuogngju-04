@@ -18,6 +18,8 @@ import { createDeliveryImportJob, getDeliveryImportWorkspace } from "../app/api/
 import { readDeliveryImportLocalWorkspaceState } from "../app/api/delivery-import-jobs/persistence";
 import { readDbDeliveryPackageSnapshot } from "../app/api/delivery-packages/db-repository";
 import { mutateDeliveryPackage } from "../app/api/delivery-packages/service";
+import { POST as postAuthScopeAdmin } from "../app/api/auth-scope/admin/route";
+import { createWorkspaceSessionCookieValue, WORKSPACE_SESSION_COOKIE_NAME } from "../app/api/workspace-session/session-cookie";
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
 
@@ -32,10 +34,12 @@ const originalEnv = {
   deliveryImportStorePath: process.env.AIGC_DELIVERY_IMPORT_STORE_PATH,
   attachmentFileDir: process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR,
   assetLockRecordsRepository: process.env.ASSET_LOCK_RECORDS_REPOSITORY,
-  assetLockAttachmentsRepository: process.env.ASSET_LOCK_ATTACHMENTS_REPOSITORY
+  assetLockAttachmentsRepository: process.env.ASSET_LOCK_ATTACHMENTS_REPOSITORY,
+  workspaceSessionSecret: process.env.AIGC_WORKSPACE_SESSION_SECRET
 };
 
 const projectId = "project-jincheng";
+const adminProjectCode = "SMKADM";
 const deliveryPackagePrefix = "smoke-delivery-";
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const now = "2026-05-30T00:00:00.000Z";
@@ -54,6 +58,7 @@ describe("real Postgres asset lock smoke", () => {
     process.env.AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR = attachmentDir;
     process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
     process.env.ASSET_LOCK_ATTACHMENTS_REPOSITORY = "db";
+    process.env.AIGC_WORKSPACE_SESSION_SECRET = "postgres-smoke-workspace-session-secret";
 
     await applyMigrations();
     await cleanupSmokeRows();
@@ -75,6 +80,7 @@ describe("real Postgres asset lock smoke", () => {
     deliveryPackageId = await createSmokeDeliveryImportDraft();
     await verifySmokeDeliveryPackageBasicMutations(deliveryPackageId);
     await publishSmokeDeliveryPackage(deliveryPackageId);
+    await verifySmokeAuthScopeAdminRouteWrites();
 
     const generated = await mutateAssetLockRecord(
       {
@@ -278,7 +284,11 @@ describe("real Postgres asset lock smoke", () => {
     await cleanupSmokeRows();
     await expect(countSmokeRows()).resolves.toEqual({
       attachments: 0,
+      adminAssignments: 0,
+      adminMemberPermissions: 0,
       assignments: 0,
+      adminProjects: 0,
+      adminUsers: 0,
       deliveryPackageEpisodes: 0,
       deliveryPackages: 0,
       episodeCurrents: 0,
@@ -358,17 +368,35 @@ async function cleanupSmokeRows() {
       "delete from episode_assignments where id like 'smoke-assignment-%'"
     );
     await runtime.pool.query(
+      "delete from episode_assignments where id like 'assign-smoke-episode-%'"
+    );
+    await runtime.pool.query(
       "delete from episodes where id like 'smoke-episode-%'"
+    );
+    await runtime.pool.query(
+      "delete from episodes where project_id in (select id from projects where id like 'project-smkadm-%')"
     );
     await runtime.pool.query(
       "delete from project_member_permissions where id like 'smoke-permission-%'"
     );
     await runtime.pool.query(
+      "delete from project_member_permissions where id like 'permission-project-jincheng-user-head-writer-%'"
+    );
+    await runtime.pool.query(
       "delete from project_members where id like 'smoke-member-%'"
+    );
+    await runtime.pool.query(
+      "delete from project_members where project_id in (select id from projects where id like 'project-smkadm-%')"
+    );
+    await runtime.pool.query(
+      "delete from projects where id like 'project-smkadm-%'"
     );
     await runtime.pool.query(
       "delete from projects where id = $1",
       [projectId]
+    );
+    await runtime.pool.query(
+      "delete from users where id like 'user-smoke-admin-user-%'"
     );
     await runtime.pool.query(
       "delete from users where id in ($1, $2, $3)",
@@ -400,9 +428,13 @@ async function countSmokeRows() {
       episodeCurrents,
       episodeRevisions,
       assignments,
+      adminAssignments,
       episodes,
       memberPermissions,
+      adminMemberPermissions,
       members,
+      adminProjects,
+      adminUsers,
       notifications,
       projects,
       users
@@ -426,9 +458,13 @@ async function countSmokeRows() {
       countRows(runtime, "select count(*)::int as count from episode_currents where project_id = $1"),
       countRows(runtime, "select count(*)::int as count from episode_revisions where project_id = $1"),
       countRows(runtime, "select count(*)::int as count from episode_assignments where id like 'smoke-assignment-%'", []),
+      countRows(runtime, "select count(*)::int as count from episode_assignments where id like 'assign-smoke-episode-%'", []),
       countRows(runtime, "select count(*)::int as count from episodes where id like 'smoke-episode-%'", []),
       countRows(runtime, "select count(*)::int as count from project_member_permissions where id like 'smoke-permission-%'", []),
+      countRows(runtime, "select count(*)::int as count from project_member_permissions where id like 'permission-project-jincheng-user-head-writer-%'", []),
       countRows(runtime, "select count(*)::int as count from project_members where id like 'smoke-member-%'", []),
+      countRows(runtime, "select count(*)::int as count from projects where id like 'project-smkadm-%'", []),
+      countRows(runtime, "select count(*)::int as count from users where id like 'user-smoke-admin-user-%'", []),
       countRows(runtime, "select count(*)::int as count from notifications where project_id = $1"),
       countRows(runtime, "select count(*)::int as count from projects where id = $1", [projectId]),
       countRows(runtime, "select count(*)::int as count from users where id in ($1, $2, $3)", [
@@ -440,7 +476,11 @@ async function countSmokeRows() {
 
     return {
       attachments,
+      adminAssignments,
+      adminMemberPermissions,
       assignments,
+      adminProjects,
+      adminUsers,
       deliveryPackageEpisodes,
       deliveryPackages,
       episodeCurrents,
@@ -745,6 +785,172 @@ async function publishSmokeDeliveryPackage(importedDeliveryPackageId: string) {
   await expectLocalDeliveryPackageStateToStayCanonical();
 }
 
+async function verifySmokeAuthScopeAdminRouteWrites() {
+  const createdUserResponse = await postAuthScopeAdmin(
+    authScopeAdminRequest(
+      {
+        action: "create_user",
+        name: `Smoke Admin User ${runId}`,
+        defaultRole: "writer"
+      },
+      "user-owner"
+    )
+  );
+  const createdUser = await createdUserResponse.json();
+
+  expect(createdUserResponse.status).toBe(200);
+  expect(createdUser).toMatchObject({
+    ok: true,
+    user: {
+      name: `Smoke Admin User ${runId}`,
+      defaultRole: "writer"
+    }
+  });
+  expect(createdUser.user.id).toMatch(/^user-smoke-admin-user-/);
+
+  const createdProjectResponse = await postAuthScopeAdmin(
+    authScopeAdminRequest(
+      {
+        action: "create_project",
+        name: `Smoke Admin Project ${runId}`,
+        code: adminProjectCode,
+        episodeCount: 2
+      },
+      "user-owner"
+    )
+  );
+  const createdProject = await createdProjectResponse.json();
+
+  expect(createdProjectResponse.status).toBe(200);
+  expect(createdProject).toMatchObject({
+    ok: true,
+    project: {
+      code: adminProjectCode,
+      episodeCount: 2,
+      status: "active"
+    },
+    episodes: [expect.objectContaining({ episodeNo: 1 }), expect.objectContaining({ episodeNo: 2 })]
+  });
+  expect(createdProject.project.id).toMatch(/^project-smkadm-/);
+  expect(createdProject.episodes).toHaveLength(2);
+
+  const updatedPermissionsResponse = await postAuthScopeAdmin(
+    authScopeAdminRequest(
+      {
+        action: "update_member_permissions",
+        projectId,
+        userId: "user-head-writer",
+        permissions: ["canReviewAssets", "canManageMembers"]
+      },
+      "user-owner"
+    )
+  );
+  const updatedPermissions = await updatedPermissionsResponse.json();
+
+  expect(updatedPermissionsResponse.status).toBe(200);
+  expect(updatedPermissions).toMatchObject({
+    ok: true,
+    memberPermissions: [
+      expect.objectContaining({ permission: "canReviewAssets" }),
+      expect.objectContaining({ permission: "canManageMembers" })
+    ]
+  });
+
+  const deniedOwnerCreateResponse = await postAuthScopeAdmin(
+    authScopeAdminRequest(
+      {
+        action: "create_user",
+        name: `Smoke Escalated Owner ${runId}`,
+        defaultRole: "owner"
+      },
+      "user-head-writer"
+    )
+  );
+
+  expect(deniedOwnerCreateResponse.status).toBe(403);
+  await expect(deniedOwnerCreateResponse.json()).resolves.toEqual({
+    ok: false,
+    error: "auth_scope_permission_denied"
+  });
+
+  const assignedResponse = await postAuthScopeAdmin(
+    authScopeAdminRequest(
+      {
+        action: "assign_episodes",
+        projectId,
+        userId: "user-creator-a",
+        episodeFrom: 2,
+        episodeTo: 2,
+        responsibility: "creator"
+      },
+      "user-owner"
+    )
+  );
+  const assigned = await assignedResponse.json();
+
+  expect(assignedResponse.status).toBe(200);
+  expect(assigned).toMatchObject({
+    ok: true,
+    episodeIds: ["smoke-episode-jc-2"],
+    assignments: [
+      expect.objectContaining({
+        episodeId: "smoke-episode-jc-2",
+        userId: "user-creator-a",
+        responsibility: "creator"
+      })
+    ]
+  });
+
+  const workspace = await getDeliveryImportWorkspace();
+
+  expect(workspace.state.users).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: createdUser.user.id,
+        name: `Smoke Admin User ${runId}`,
+        defaultRole: "writer"
+      })
+    ])
+  );
+  expect(workspace.state.projects).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: createdProject.project.id,
+        code: adminProjectCode
+      })
+    ])
+  );
+  expect(workspace.state.memberPermissions).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        projectId,
+        userId: "user-head-writer",
+        permission: "canManageMembers"
+      })
+    ])
+  );
+  expect(workspace.state.assignments).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        episodeId: "smoke-episode-jc-2",
+        userId: "user-creator-a",
+        responsibility: "creator"
+      })
+    ])
+  );
+}
+
+function authScopeAdminRequest(body: unknown, userId: string) {
+  return new Request("http://localhost/api/auth-scope/admin", {
+    body: JSON.stringify(body),
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: `${WORKSPACE_SESSION_COOKIE_NAME}=${createWorkspaceSessionCookieValue(userId)}`
+    },
+    method: "POST"
+  });
+}
+
 async function expectLocalDeliveryPackageStateToStayCanonical() {
   const localWorkspace = await readDeliveryImportLocalWorkspaceState();
 
@@ -784,6 +990,7 @@ function restoreEnv() {
   restoreEnvValue("AIGC_ASSET_LOCK_ATTACHMENT_FILE_DIR", originalEnv.attachmentFileDir);
   restoreEnvValue("ASSET_LOCK_RECORDS_REPOSITORY", originalEnv.assetLockRecordsRepository);
   restoreEnvValue("ASSET_LOCK_ATTACHMENTS_REPOSITORY", originalEnv.assetLockAttachmentsRepository);
+  restoreEnvValue("AIGC_WORKSPACE_SESSION_SECRET", originalEnv.workspaceSessionSecret);
 }
 
 function restoreEnvValue(key: string, value: string | undefined) {
