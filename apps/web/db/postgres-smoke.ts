@@ -160,19 +160,22 @@ describe("real Postgres asset lock smoke", () => {
       deliveryPackageId,
       actor: { userId: "user-owner" }
     });
-    expect(projection).toMatchObject({
-      ok: true,
-      projection: {
-        decisionQueue: [expect.objectContaining({ assetLockRecordId: created.record.id })],
-        sourceExcerpts: [
-          expect.objectContaining({
-            id: `source-binding-${bound.sourceBinding?.id}`,
-            sourceKind: "explicit_binding",
-            excerpt: "Smoke Mine Lift source binding line."
-          })
-        ]
-      }
-    });
+    if (!projection.ok) {
+      throw new Error(`smoke_asset_timeline_projection_failed:${projection.error}`);
+    }
+    expect(projection.ok).toBe(true);
+    expect(projection.projection.decisionQueue).toEqual(
+      expect.arrayContaining([expect.objectContaining({ assetLockRecordId: created.record.id })])
+    );
+    expect(projection.projection.sourceExcerpts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: `source-binding-${bound.sourceBinding?.id}`,
+          sourceKind: "explicit_binding",
+          excerpt: "Smoke Mine Lift source binding line."
+        })
+      ])
+    );
 
     const firstAttachment = await uploadAssetAttachment(
       {
