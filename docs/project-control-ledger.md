@@ -5,16 +5,19 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 22:44:20 +08:00`.
+Timestamp: `2026-05-30 22:52:23 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `339c1c2 Record DB readiness status document merge`.
+- Latest recorded `main` checkpoint: `e70fc36 Record DB smoke gate status`.
 - Latest product/test code commit on `main`: `0588d61 Require asset attachment storage delete`.
-- Worktree at last check: clean after recording the DB readiness status document merge.
-- Remote sync complete for this checkpoint: local `main` and `xiezuogongju-04/main` both point at `339c1c2`.
+- Worktree at last check: clean after recording the DB smoke gate status and child 35/36/37 planning results.
+- Remote sync complete for this checkpoint: local `main` and `xiezuogongju-04/main` both point at `e70fc36`.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 - Current gate: real `db:smoke` remains blocked because `TEST_DATABASE_URL` is not set. A local disposable database cannot be provisioned in this shell because neither `docker` nor `psql` is available. Do not merge further DB schema/runtime expansion until a disposable Postgres `TEST_DATABASE_URL` is provided and `npm.cmd run db:smoke -w apps/web` passes.
+- Child 35 rechecked the gate and remained blocked: `TEST_DATABASE_URL` is missing, so `db:check` and `db:smoke` were not run.
+- Child 36 recommends the fastest unblock path: obtain an external disposable Postgres `TEST_DATABASE_URL`; Docker Desktop or local Postgres are secondary options because this shell currently lacks both `docker` and `psql`.
+- Child 37 refreshed the post-smoke priority order: first session/cookie-backed actor, then asset attachment object storage provider, then auth/scope seed/admin write contract. These remain planning-only until real `db:smoke` passes.
 
 Recently completed after the xiezuogongju-04 handoff:
 
