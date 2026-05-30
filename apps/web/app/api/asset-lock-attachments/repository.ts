@@ -10,6 +10,12 @@ import { createDbAssetAttachmentRepository } from "./db-repository";
 export interface AssetAttachmentRepositorySnapshot {
   state: WorkspaceState;
   assetAttachments: AssetAttachment[];
+  storageMetadataByAttachmentId?: ReadonlyMap<string, AssetAttachmentPersistedStorageMetadata>;
+}
+
+export interface AssetAttachmentPersistedStorageMetadata {
+  checksumSha256?: string;
+  storageKey?: string;
 }
 
 export interface AssetAttachmentMetadataCreateCommand {

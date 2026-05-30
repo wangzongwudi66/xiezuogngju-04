@@ -9,6 +9,7 @@ import { readDbPublishReadModelSnapshot } from "../publish-read-model/db-reposit
 import {
   createDbAssetAttachmentRepository,
   mapAssetAttachmentRows,
+  mapAssetAttachmentStorageMetadataById,
   mapAssetAttachmentStorageMetadataRows,
   mapAssetAttachmentToDbRow,
   type AssetAttachmentDbRow
@@ -222,6 +223,32 @@ describe("asset lock attachment DB repository mappers", () => {
       }
     ]);
   });
+
+  it("maps persisted storage metadata into a non-domain sidecar", () => {
+    const rows = [
+      mapAssetAttachmentToDbRow(buildAttachment(), {
+        storageKey: "old-prefix/asset-att-123e4567-e89b-12d3-a456-426614174000.png",
+        checksumSha256: "0".repeat(64),
+        contentLength: 4096
+      }) as AssetAttachmentDbRow,
+      mapAssetAttachmentToDbRow(
+        buildAttachment({
+          id: "asset-attachment-2",
+          fileId: "asset-att-123e4567-e89b-12d3-a456-426614174001"
+        })
+      ) as AssetAttachmentDbRow
+    ];
+
+    const sidecar = mapAssetAttachmentStorageMetadataById(rows);
+
+    expect(sidecar.get("asset-attachment-1")).toEqual({
+      checksumSha256: "0".repeat(64),
+      storageKey: "old-prefix/asset-att-123e4567-e89b-12d3-a456-426614174000.png"
+    });
+    expect(sidecar.has("asset-attachment-2")).toBe(false);
+    expect(JSON.stringify(mapAssetAttachmentRows(rows))).not.toContain("storageKey");
+    expect(JSON.stringify(mapAssetAttachmentRows(rows))).not.toContain("checksumSha256");
+  });
 });
 
 describe("asset lock attachment DB repository writes", () => {
@@ -273,7 +300,13 @@ describe("asset lock attachment DB repository writes", () => {
         [dbRecordRows.record],
         dbRecordRows.episodes,
         [],
-        [mapAssetAttachmentToDbRow(dbAttachment) as AssetAttachmentDbRow]
+        [
+          mapAssetAttachmentToDbRow(dbAttachment, {
+            storageKey: "old-prefix/asset-att-123e4567-e89b-12d3-a456-426614174011.png",
+            checksumSha256: "1".repeat(64),
+            contentLength: dbAttachment.size
+          }) as AssetAttachmentDbRow
+        ]
       ]
     });
     vi.mocked(readDeliveryImportWorkspace).mockResolvedValue({
@@ -297,6 +330,10 @@ describe("asset lock attachment DB repository writes", () => {
     expect(snapshot.state.assetLockRecords).toEqual([dbOnlyRecord]);
     expect(snapshot.assetAttachments).toEqual([dbAttachment]);
     expect(snapshot.state.assetAttachments).toEqual([dbAttachment]);
+    expect(snapshot.storageMetadataByAttachmentId?.get(dbAttachment.id)).toEqual({
+      checksumSha256: "1".repeat(64),
+      storageKey: "old-prefix/asset-att-123e4567-e89b-12d3-a456-426614174011.png"
+    });
     expect(snapshot.state.assetAttachments).not.toContainEqual(staleLocal);
     expect(readDeliveryImportLocalWorkspaceState).toHaveBeenCalledTimes(1);
   });

@@ -236,6 +236,60 @@ describe("asset lock attachment service", () => {
     });
   });
 
+  it("prefers persisted storage keys from the repository sidecar when downloading", async () => {
+    const record = (await createAssetRecord()).record;
+    const attachment = await upload(record.id);
+    const workspace = await getDeliveryImportWorkspace();
+    const persistedKey = `legacy-prefix/${attachment.fileId}.png`;
+    const repository = createMockDbAssetAttachmentRepository(
+      snapshotFromState(workspace.state, new Map([[attachment.id, { storageKey: persistedKey, checksumSha256: sha256Hex(pngBytes()) }]]))
+    );
+    const storage = createMockAssetAttachmentStorage();
+
+    const downloaded = await downloadAssetAttachmentForActor(attachment.id, { userId: currentActorUserId }, { repository, storage });
+
+    expect(storage.get).toHaveBeenCalledWith({ key: persistedKey });
+    expect(storage.makeKey).not.toHaveBeenCalled();
+    expect(Buffer.from(downloaded.bytes)).toEqual(Buffer.from(pngBytes()));
+    expect(JSON.stringify(downloaded)).not.toContain("storageKey");
+    expect(JSON.stringify(downloaded)).not.toContain("checksumSha256");
+  });
+
+  it("falls back to the legacy storage key when no persisted storage key is available", async () => {
+    const record = (await createAssetRecord()).record;
+    const attachment = await upload(record.id);
+    const workspace = await getDeliveryImportWorkspace();
+    const repository = createMockDbAssetAttachmentRepository(
+      snapshotFromState(workspace.state, new Map([[attachment.id, { checksumSha256: sha256Hex(pngBytes()) }]]))
+    );
+    const storage = createMockAssetAttachmentStorage();
+
+    await downloadAssetAttachmentForActor(attachment.id, { userId: currentActorUserId }, { repository, storage });
+
+    expect(storage.makeKey).toHaveBeenCalledWith({ fileId: attachment.fileId, extension: ".png" });
+    expect(storage.get).toHaveBeenCalledWith({ key: `${attachment.fileId}.png` });
+  });
+
+  it("fails downloads with a stable integrity error when persisted checksum validation fails", async () => {
+    const record = (await createAssetRecord()).record;
+    const attachment = await upload(record.id);
+    const workspace = await getDeliveryImportWorkspace();
+    const storage = createMockAssetAttachmentStorage();
+    const mismatchRepository = createMockDbAssetAttachmentRepository(
+      snapshotFromState(workspace.state, new Map([[attachment.id, { checksumSha256: "0".repeat(64) }]]))
+    );
+    const invalidRepository = createMockDbAssetAttachmentRepository(
+      snapshotFromState(workspace.state, new Map([[attachment.id, { checksumSha256: "not-a-sha256" }]]))
+    );
+
+    await expect(
+      downloadAssetAttachmentForActor(attachment.id, { userId: currentActorUserId }, { repository: mismatchRepository, storage })
+    ).rejects.toThrow("asset_attachment_file_integrity_failed");
+    await expect(
+      downloadAssetAttachmentForActor(attachment.id, { userId: currentActorUserId }, { repository: invalidRepository, storage })
+    ).rejects.toThrow("asset_attachment_file_integrity_failed");
+  });
+
   it("maps missing storage bytes to a stable download error without leaking keys or paths", async () => {
     const record = (await createAssetRecord()).record;
     const storage = createMockAssetAttachmentStorage();
@@ -1072,7 +1126,10 @@ describe("asset lock attachment service", () => {
     };
   }
 
-  function snapshotFromState(state: WorkspaceState): AssetAttachmentRepositorySnapshot {
+  function snapshotFromState(
+    state: WorkspaceState,
+    storageMetadataByAttachmentId?: AssetAttachmentRepositorySnapshot["storageMetadataByAttachmentId"]
+  ): AssetAttachmentRepositorySnapshot {
     const assetAttachments = state.assetAttachments ?? [];
 
     return {
@@ -1080,7 +1137,8 @@ describe("asset lock attachment service", () => {
         ...state,
         assetAttachments
       },
-      assetAttachments
+      assetAttachments,
+      ...(storageMetadataByAttachmentId ? { storageMetadataByAttachmentId } : {})
     };
   }
 

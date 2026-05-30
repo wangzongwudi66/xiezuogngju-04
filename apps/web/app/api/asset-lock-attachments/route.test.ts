@@ -239,6 +239,24 @@ describe("asset lock attachment route", () => {
     expect(serializedHeaders).not.toContain(resolve(attachmentDir));
   });
 
+  it("maps attachment integrity failures to a stable conflict response", async () => {
+    vi.spyOn(assetAttachmentService, "downloadAssetAttachment").mockRejectedValue(
+      new Error(
+        "asset_attachment_file_integrity_failed key legacy-prefix/asset-att-123e4567-e89b-12d3-a456-426614174000.png checksum abc"
+      )
+    );
+
+    const response = await GET_ATTACHMENT(attachmentRequest("asset-attachment-1"), attachmentContext("asset-attachment-1"));
+    const payload = await response.json();
+    const serialized = JSON.stringify(payload);
+
+    expect(response.status).toBe(409);
+    expect(payload).toEqual({ error: "asset_attachment_file_integrity_failed" });
+    expect(serialized).not.toContain("legacy-prefix");
+    expect(serialized).not.toContain("asset-att-123e4567-e89b-12d3-a456-426614174000");
+    expect(serialized).not.toContain("checksum");
+  });
+
   it("soft deletes an attachment and leaves the stored file in place", async () => {
     const recordId = (await createAssetRecord()).record.id;
     const uploadResponse = await POST(formRequest(buildUploadForm(recordId)));

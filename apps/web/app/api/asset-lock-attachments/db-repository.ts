@@ -3,7 +3,11 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { assetAttachments } from "../../../db/schema";
 import { readDbAssetLockRecordRepositorySnapshot } from "../asset-lock-records/db-repository";
-import type { AssetAttachmentStorageMetadata, DbAssetAttachmentRepository } from "./repository";
+import type {
+  AssetAttachmentPersistedStorageMetadata,
+  AssetAttachmentStorageMetadata,
+  DbAssetAttachmentRepository
+} from "./repository";
 
 export type AssetAttachmentDbRow = typeof assetAttachments.$inferSelect;
 type AssetAttachmentDbInsert = typeof assetAttachments.$inferInsert;
@@ -31,7 +35,7 @@ export function createDbAssetAttachmentRepository(): DbAssetAttachmentRepository
         asc(assetAttachments.id)
       );
 
-    return toDbRepositorySnapshot(recordSnapshot.state, mapAssetAttachmentRows(rows));
+    return toDbRepositorySnapshot(recordSnapshot.state, mapAssetAttachmentRows(rows), mapAssetAttachmentStorageMetadataById(rows));
   }
 
   return {
@@ -144,6 +148,31 @@ export function mapAssetAttachmentStorageMetadataRows(
   }));
 }
 
+export function mapAssetAttachmentStorageMetadataById(
+  rows: AssetAttachmentDbRow[]
+): ReadonlyMap<string, AssetAttachmentPersistedStorageMetadata> {
+  return new Map(
+    rows
+      .map((row): [string, AssetAttachmentPersistedStorageMetadata] | null => {
+        const storageKey = optional(row.storageKey);
+        const checksumSha256 = row.checksumSha256 ?? undefined;
+
+        if (!storageKey && checksumSha256 === undefined) {
+          return null;
+        }
+
+        return [
+          row.id,
+          {
+            ...(checksumSha256 !== undefined ? { checksumSha256 } : {}),
+            ...(storageKey ? { storageKey } : {})
+          }
+        ];
+      })
+      .filter((entry): entry is [string, AssetAttachmentPersistedStorageMetadata] => entry !== null)
+  );
+}
+
 export function mapAssetAttachmentToDbRow(
   attachment: AssetAttachment,
   storage?: AssetAttachmentStorageMetadata
@@ -170,7 +199,11 @@ export function mapAssetAttachmentToDbRow(
   };
 }
 
-function toDbRepositorySnapshot(state: WorkspaceState, attachments: AssetAttachment[]) {
+function toDbRepositorySnapshot(
+  state: WorkspaceState,
+  attachments: AssetAttachment[],
+  storageMetadataByAttachmentId: ReadonlyMap<string, AssetAttachmentPersistedStorageMetadata>
+) {
   const nextState: WorkspaceState = {
     ...state,
     assetAttachments: attachments
@@ -178,7 +211,8 @@ function toDbRepositorySnapshot(state: WorkspaceState, attachments: AssetAttachm
 
   return {
     state: nextState,
-    assetAttachments: attachments
+    assetAttachments: attachments,
+    storageMetadataByAttachmentId
   };
 }
 

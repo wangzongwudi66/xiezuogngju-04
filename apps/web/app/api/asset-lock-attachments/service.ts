@@ -122,7 +122,11 @@ export async function downloadAssetAttachment(
   const storage = resolveServiceStorage(options);
   const snapshot = await repository.read();
   const { attachment } = requireActiveAttachmentAccess(snapshot.state, attachmentId, actor);
-  const storageKey = storage.makeKey({ fileId: attachment.fileId, extension: path.extname(attachment.fileName) });
+  const persistedStorageMetadata = snapshot.storageMetadataByAttachmentId?.get(attachment.id);
+  const persistedStorageKey = persistedStorageMetadata?.storageKey?.trim();
+  const storageKey = persistedStorageKey
+    ? persistedStorageKey
+    : storage.makeKey({ fileId: attachment.fileId, extension: path.extname(attachment.fileName) });
   let bytes: Uint8Array;
 
   try {
@@ -136,6 +140,7 @@ export async function downloadAssetAttachment(
   }
 
   assertAttachmentBytesIntegrity(attachment, bytes);
+  assertAttachmentChecksumIntegrity(persistedStorageMetadata?.checksumSha256, bytes);
 
   return {
     bytes,
@@ -155,6 +160,22 @@ function createAssetAttachmentStorageMetadata(storageKey: string, bytes: Uint8Ar
 
 function assertAttachmentBytesIntegrity(attachment: AssetAttachment, bytes: Uint8Array) {
   if (bytes.byteLength !== attachment.size) {
+    throw new Error("asset_attachment_file_integrity_failed");
+  }
+}
+
+function assertAttachmentChecksumIntegrity(checksumSha256: string | undefined, bytes: Uint8Array) {
+  if (checksumSha256 === undefined) {
+    return;
+  }
+
+  if (!/^[a-f0-9]{64}$/i.test(checksumSha256)) {
+    throw new Error("asset_attachment_file_integrity_failed");
+  }
+
+  const downloadedChecksumSha256 = createHash("sha256").update(bytes).digest("hex");
+
+  if (downloadedChecksumSha256 !== checksumSha256.toLowerCase()) {
     throw new Error("asset_attachment_file_integrity_failed");
   }
 }

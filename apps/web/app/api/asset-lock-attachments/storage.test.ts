@@ -62,6 +62,51 @@ describe("asset attachment storage resolver", () => {
     expect(deleteCommand.input).toMatchObject({ Bucket: "asset-bucket", Key: key });
   });
 
+  it("allows safe persisted s3 read keys outside the current prefix", async () => {
+    const client = createMockS3Client({ getBody: new Uint8Array([7, 8, 9]) });
+    const storage = createS3AssetAttachmentStorage({ bucket: "asset-bucket", prefix: "current-prefix", client });
+
+    await expect(
+      storage.get({ key: "legacy-prefix\\asset-att-123e4567-e89b-12d3-a456-426614174000.png" })
+    ).resolves.toEqual(new Uint8Array([7, 8, 9]));
+
+    const getCommand = client.send.mock.calls[0][0] as GetObjectCommand;
+    expect(getCommand.input).toMatchObject({
+      Bucket: "asset-bucket",
+      Key: "legacy-prefix/asset-att-123e4567-e89b-12d3-a456-426614174000.png"
+    });
+  });
+
+  it("keeps s3 writes and deletes constrained to the current prefix", async () => {
+    const client = createMockS3Client();
+    const storage = createS3AssetAttachmentStorage({ bucket: "asset-bucket", prefix: "current-prefix", client });
+    const legacyKey = "legacy-prefix/asset-att-123e4567-e89b-12d3-a456-426614174000.png";
+
+    await expect(storage.put({ key: legacyKey, bytes: new Uint8Array([1]), mime: "image/png" })).rejects.toThrow(
+      "asset_attachment_storage_key_invalid"
+    );
+    await expect(storage.delete({ key: legacyKey })).rejects.toThrow("asset_attachment_storage_key_invalid");
+    expect(client.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsafe persisted s3 read keys", async () => {
+    const storage = createS3AssetAttachmentStorage({ bucket: "asset-bucket", client: createMockS3Client() });
+    const unsafeKeys = [
+      "",
+      "/asset-att-123e4567-e89b-12d3-a456-426614174000.png",
+      "C:\\asset-att-123e4567-e89b-12d3-a456-426614174000.png",
+      "legacy-prefix//asset-att-123e4567-e89b-12d3-a456-426614174000.png",
+      "legacy-prefix/./asset-att-123e4567-e89b-12d3-a456-426614174000.png",
+      "legacy-prefix/../asset-att-123e4567-e89b-12d3-a456-426614174000.png",
+      "legacy-prefix/not-asset-att-123e4567-e89b-12d3-a456-426614174000.png",
+      "legacy-prefix/asset-att-123e4567-e89b-12d3-a456-426614174000.txt"
+    ];
+
+    for (const key of unsafeKeys) {
+      await expect(storage.get({ key })).rejects.toThrow("asset_attachment_storage_key_invalid");
+    }
+  });
+
   it("maps missing s3 objects to the stable storage file-not-found error", async () => {
     const client = createMockS3Client({
       getError: Object.assign(new Error("missing"), { name: "NoSuchKey" })

@@ -80,7 +80,7 @@ export function createS3AssetAttachmentStorage(input: {
         const output = (await client.send(
           new GetObjectCommand({
             Bucket: bucket,
-            Key: assertSafeS3ObjectKey(key, prefix)
+            Key: assertSafeStorageReadKey(key)
           })
         )) as GetObjectCommandOutput;
 
@@ -144,7 +144,7 @@ export function resolveAssetAttachmentFilePath(fileId: string, extension: string
 const localAssetAttachmentStorage: AssetAttachmentStorage = {
   makeKey: makeLocalAssetAttachmentKey,
   async put(input) {
-    const filePath = resolveAssetAttachmentStoragePath(input.key);
+    const filePath = resolveAssetAttachmentWriteStoragePath(input.key);
 
     await mkdir(/* turbopackIgnore: true */ path.dirname(filePath), { recursive: true });
     await writeFile(/* turbopackIgnore: true */ filePath, input.bytes);
@@ -159,7 +159,7 @@ const localAssetAttachmentStorage: AssetAttachmentStorage = {
     }
   },
   async delete(input) {
-    const filePath = resolveAssetAttachmentStoragePath(input.key);
+    const filePath = resolveAssetAttachmentWriteStoragePath(input.key);
 
     await rm(/* turbopackIgnore: true */ filePath, { force: true });
   }
@@ -170,6 +170,18 @@ function makeLocalAssetAttachmentKey(input: { fileId: string; extension: string 
 }
 
 function resolveAssetAttachmentStoragePath(key: string) {
+  const baseDir = path.resolve(/* turbopackIgnore: true */ resolveAssetAttachmentFileDir());
+  const filePath = path.resolve(/* turbopackIgnore: true */ baseDir, assertSafeStorageReadKey(key));
+  const relativePath = path.relative(baseDir, filePath);
+
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    throw new Error("asset_attachment_file_path_invalid");
+  }
+
+  return filePath;
+}
+
+function resolveAssetAttachmentWriteStoragePath(key: string) {
   const baseDir = path.resolve(/* turbopackIgnore: true */ resolveAssetAttachmentFileDir());
   const filePath = path.resolve(/* turbopackIgnore: true */ baseDir, assertSafeStorageKey(key));
   const relativePath = path.relative(baseDir, filePath);
@@ -183,7 +195,7 @@ function resolveAssetAttachmentStoragePath(key: string) {
 
 function assertSafeStorageKey(key: string) {
   const normalizedKey = key.trim();
-  const extension = path.extname(normalizedKey);
+  const extension = path.posix.extname(normalizedKey);
   const fileId = normalizedKey.slice(0, -extension.length);
   const safeKey = makeLocalAssetAttachmentKey({ fileId, extension });
 
@@ -192,6 +204,49 @@ function assertSafeStorageKey(key: string) {
   }
 
   return safeKey;
+}
+
+function assertSafeStorageReadKey(key: string) {
+  const normalizedKey = normalizeStorageReadKey(key);
+  const segments = normalizedKey.split("/");
+  const fileName = segments.at(-1);
+
+  if (!fileName) {
+    throw new Error("asset_attachment_storage_key_invalid");
+  }
+
+  const extension = path.posix.extname(fileName);
+  const fileId = fileName.slice(0, -extension.length);
+  const safeFileName = tryMakeLocalAssetAttachmentKey({ fileId, extension });
+
+  if (safeFileName !== fileName) {
+    throw new Error("asset_attachment_storage_key_invalid");
+  }
+
+  return normalizedKey;
+}
+
+function tryMakeLocalAssetAttachmentKey(input: { fileId: string; extension: string }) {
+  try {
+    return makeLocalAssetAttachmentKey(input);
+  } catch {
+    throw new Error("asset_attachment_storage_key_invalid");
+  }
+}
+
+function normalizeStorageReadKey(key: string) {
+  const trimmed = key.trim();
+  const normalized = trimmed.replace(/\\/g, "/");
+
+  if (!trimmed || path.posix.isAbsolute(normalized) || path.win32.isAbsolute(trimmed)) {
+    throw new Error("asset_attachment_storage_key_invalid");
+  }
+
+  if (normalized.split("/").some((segment) => !segment || segment === "." || segment === "..")) {
+    throw new Error("asset_attachment_storage_key_invalid");
+  }
+
+  return normalized;
 }
 
 function createS3ClientFromEnv(env: AssetAttachmentStorageEnv = process.env) {

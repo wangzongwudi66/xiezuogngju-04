@@ -58,6 +58,10 @@ function attachmentErrorResponse(error: string) {
 
 function errorCodeFromUnknown(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : "";
+  if (message.startsWith("asset_attachment_file_integrity_failed")) {
+    return "asset_attachment_file_integrity_failed";
+  }
+
   return message.startsWith("asset_attachment_") ? message : fallback;
 }
 
@@ -76,6 +80,7 @@ function statusForAttachmentError(error: string) {
     case "asset_attachment_file_not_found":
       return 404;
     case "asset_attachment_locked_record_delete_forbidden":
+    case "asset_attachment_file_integrity_failed":
     case "asset_attachment_record_mismatch":
       return 409;
     default:
