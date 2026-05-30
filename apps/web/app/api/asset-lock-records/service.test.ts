@@ -8,6 +8,7 @@ import { mutateDeliveryImportWorkspace } from "../delivery-import-jobs/persisten
 import { mutateDeliveryPackage } from "../delivery-packages/service";
 import * as authScopeDbRepository from "../auth-scope/db-repository";
 import * as deliveryPackageDbRepository from "../delivery-packages/db-repository";
+import * as publishReadModelDbRepository from "../publish-read-model/db-repository";
 import * as assetLockRecordRepositoryModule from "./repository";
 import * as assetLockRecordDbParts from "./db-parts";
 import type { AssetLockRecordRepositorySnapshot, DbAssetLockRecordRepository } from "./repository";
@@ -42,6 +43,11 @@ describe("asset lock record service", () => {
     vi.spyOn(deliveryPackageDbRepository, "readDbDeliveryPackageSnapshot").mockResolvedValue({
       deliveryPackages: [],
       deliveryPackageEpisodes: []
+    });
+    vi.spyOn(publishReadModelDbRepository, "readDbPublishReadModelSnapshot").mockResolvedValue({
+      episodeRevisions: [],
+      episodeCurrents: [],
+      notifications: []
     });
     await login("user-head-writer");
   });

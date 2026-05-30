@@ -1,7 +1,26 @@
-import type { DeliveryPackage, DeliveryPackageEpisode } from "@aigc/domain";
-import { and, asc, eq } from "drizzle-orm";
+import type {
+  DeliveryPackage,
+  DeliveryPackageEpisode,
+  Episode,
+  EpisodeCurrent,
+  EpisodeRevision,
+  Notification
+} from "@aigc/domain";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
-import { deliveryPackageEpisodes, deliveryPackages } from "../../../db/schema";
+import {
+  deliveryPackageEpisodes,
+  deliveryPackages,
+  episodeCurrents,
+  episodeRevisions,
+  episodes as episodeRows,
+  notifications
+} from "../../../db/schema";
+import {
+  mapEpisodeCurrentToDbInsertRow,
+  mapEpisodeRevisionToDbInsertRow,
+  mapNotificationToDbInsertRow
+} from "../publish-read-model/db-repository";
 
 export type DeliveryPackageDbRow = typeof deliveryPackages.$inferSelect;
 export type DeliveryPackageEpisodeDbRow = typeof deliveryPackageEpisodes.$inferSelect;
@@ -12,6 +31,14 @@ type DeliveryPackageDbUpdate = Omit<DeliveryPackageDbInsert, "id">;
 export interface DeliveryPackageDbSnapshot {
   deliveryPackages: DeliveryPackage[];
   deliveryPackageEpisodes: DeliveryPackageEpisode[];
+}
+
+export interface PublishDbDeliveryPackageDelta {
+  deliveryPackage: DeliveryPackage;
+  episodeRevisions: EpisodeRevision[];
+  episodeCurrents: EpisodeCurrent[];
+  notifications: Notification[];
+  episodes: Pick<Episode, "id" | "productionStatus" | "hasUnreadKeyChange">[];
 }
 
 export async function readDbDeliveryPackageSnapshot(): Promise<DeliveryPackageDbSnapshot> {
@@ -98,6 +125,62 @@ export async function updateDbDeliveryPackageEpisodeConfirmations(
   });
 
   return readDbDeliveryPackageSnapshot();
+}
+
+export async function publishDbDeliveryPackage(delta: PublishDbDeliveryPackageDelta): Promise<void> {
+  const { db } = getAssetLockDbRuntime();
+
+  await db.transaction(async (tx) => {
+    const updatedPackageRows = await tx
+      .update(deliveryPackages)
+      .set(mapDeliveryPackageToDbUpdateRow(delta.deliveryPackage))
+      .where(and(eq(deliveryPackages.id, delta.deliveryPackage.id), eq(deliveryPackages.status, "pending_review")))
+      .returning({ id: deliveryPackages.id });
+
+    if (updatedPackageRows.length === 0) {
+      throw new Error("delivery_package_publish_conflict");
+    }
+
+    if (delta.episodeRevisions.length === 0) {
+      throw new Error("delivery_package_publish_delta_empty");
+    }
+
+    await tx.insert(episodeRevisions).values(delta.episodeRevisions.map(mapEpisodeRevisionToDbInsertRow));
+
+    if (delta.episodeCurrents.length > 0) {
+      await tx
+        .insert(episodeCurrents)
+        .values(delta.episodeCurrents.map(mapEpisodeCurrentToDbInsertRow))
+        .onConflictDoUpdate({
+          target: episodeCurrents.episodeId,
+          set: {
+            id: sql`excluded.id`,
+            projectId: sql`excluded.project_id`,
+            currentRevisionId: sql`excluded.current_revision_id`,
+            updatedAt: sql`excluded.updated_at`
+          }
+        });
+    }
+
+    for (const episode of delta.episodes) {
+      const updatedEpisodeRows = await tx
+        .update(episodeRows)
+        .set({
+          productionStatus: episode.productionStatus,
+          hasUnreadKeyChange: episode.hasUnreadKeyChange
+        })
+        .where(eq(episodeRows.id, episode.id))
+        .returning({ id: episodeRows.id });
+
+      if (updatedEpisodeRows.length === 0) {
+        throw new Error("episode_not_found");
+      }
+    }
+
+    if (delta.notifications.length > 0) {
+      await tx.insert(notifications).values(delta.notifications.map(mapNotificationToDbInsertRow));
+    }
+  });
 }
 
 export function mapDeliveryPackageRows(

@@ -286,26 +286,67 @@ describe("delivery package service", () => {
     expect((await getLocalDeliveryImportWorkspace()).state.deliveryPackageEpisodes).toEqual([]);
   });
 
-  it("keeps DB publish unsupported and does not write DB or local state", async () => {
+  it("publishes DB packages through the publish transaction and returns the DB overlay", async () => {
     const deliveryPackageId = await createDraft();
-    await prepareDbDeliveryPackageSnapshot(deliveryPackageId);
-    const updatePackage = vi.spyOn(deliveryPackageDbRepository, "updateDbDeliveryPackage");
-    const updateConfirmations = vi.spyOn(deliveryPackageDbRepository, "updateDbDeliveryPackageEpisodeConfirmations");
-    const readDbPackages = vi.mocked(deliveryPackageDbRepository.readDbDeliveryPackageSnapshot);
+    const db = await prepareDbDeliveryPackageSnapshot(deliveryPackageId);
+    const updatePackage = mockDbPackageUpdate(db);
+    const publishPackage = mockDbPackagePublish(db);
     const beforeLocal = await getLocalDeliveryImportWorkspace();
 
-    await expect(
-      mutateDeliveryPackage({
-        action: "publish",
-        deliveryPackageId,
-        actorUserId: "user-owner"
-      })
-    ).rejects.toThrow("delivery_package_db_mutation_not_supported:publish");
+    await mutateDeliveryPackage({
+      action: "submit",
+      deliveryPackageId,
+      actorUserId: "user-head-writer"
+    });
+    const snapshot = await mutateDeliveryPackage({
+      action: "publish",
+      deliveryPackageId,
+      actorUserId: "user-owner"
+    });
+    const deliveryPackage = snapshot.state.deliveryPackages.find((item) => item.id === deliveryPackageId);
+    const revisions = snapshot.state.episodeRevisions.filter((item) => item.deliveryPackageId === deliveryPackageId);
+    const currentRevisionIds = new Set(snapshot.state.episodeCurrents.map((item) => item.currentRevisionId));
+    const afterLocal = await getLocalDeliveryImportWorkspace();
 
-    expect(readDbPackages).not.toHaveBeenCalled();
-    expect(updatePackage).not.toHaveBeenCalled();
-    expect(updateConfirmations).not.toHaveBeenCalled();
-    await expect(getLocalDeliveryImportWorkspace()).resolves.toEqual(beforeLocal);
+    expect(updatePackage).toHaveBeenCalledTimes(1);
+    expect(publishPackage).toHaveBeenCalledTimes(1);
+    expect(publishPackage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryPackage: expect.objectContaining({
+          id: deliveryPackageId,
+          status: "published",
+          reviewedByUserId: "user-owner"
+        }),
+        episodeRevisions: expect.arrayContaining([
+          expect.objectContaining({ deliveryPackageId, episodeNo: 1 }),
+          expect.objectContaining({ deliveryPackageId, episodeNo: 2 })
+        ]),
+        episodeCurrents: expect.any(Array),
+        notifications: expect.any(Array),
+        episodes: expect.arrayContaining([
+          expect.objectContaining({
+            id: "episode-jc-1",
+            productionStatus: "key_update",
+            hasUnreadKeyChange: true
+          })
+        ])
+      })
+    );
+    expect(deliveryPackage).toMatchObject({
+      status: "published",
+      reviewedByUserId: "user-owner"
+    });
+    expect(revisions).toHaveLength(2);
+    expect(revisions.every((revision) => currentRevisionIds.has(revision.id))).toBe(true);
+    expect(snapshot.state.episodes.find((item) => item.id === "episode-jc-1")).toMatchObject({
+      productionStatus: "key_update",
+      hasUnreadKeyChange: true
+    });
+    expect(afterLocal.state.deliveryPackages).toEqual(beforeLocal.state.deliveryPackages);
+    expect(afterLocal.state.deliveryPackageEpisodes).toEqual(beforeLocal.state.deliveryPackageEpisodes);
+    expect(afterLocal.state.episodeRevisions).toEqual(beforeLocal.state.episodeRevisions);
+    expect(afterLocal.state.episodeCurrents).toEqual(beforeLocal.state.episodeCurrents);
+    expect(afterLocal.state.notifications).toEqual(beforeLocal.state.notifications);
   });
 
   it("does not write DB when DB mode permission or status validation fails", async () => {
@@ -313,6 +354,7 @@ describe("delivery package service", () => {
     const db = await prepareDbDeliveryPackageSnapshot(deliveryPackageId);
     const updatePackage = mockDbPackageUpdate(db);
     const updateConfirmations = vi.spyOn(deliveryPackageDbRepository, "updateDbDeliveryPackageEpisodeConfirmations");
+    const publishPackage = vi.spyOn(deliveryPackageDbRepository, "publishDbDeliveryPackage");
 
     await expect(
       mutateDeliveryPackage({
@@ -341,8 +383,44 @@ describe("delivery package service", () => {
 
     expect(updatePackage).toHaveBeenCalledTimes(writesAfterSubmit);
     expect(updateConfirmations).not.toHaveBeenCalled();
+    expect(publishPackage).not.toHaveBeenCalled();
     expect((await getLocalDeliveryImportWorkspace()).state.deliveryPackages).toEqual([]);
     expect((await getLocalDeliveryImportWorkspace()).state.deliveryPackageEpisodes).toEqual([]);
+  });
+
+  it("does not write DB or local state when DB publish has no confirmed changes", async () => {
+    const deliveryPackageId = await createDraft();
+    const db = await prepareDbDeliveryPackageSnapshot(deliveryPackageId);
+    db.snapshot = {
+      ...db.snapshot,
+      deliveryPackages: db.snapshot.deliveryPackages.map((item) =>
+        item.id === deliveryPackageId
+          ? {
+              ...item,
+              status: "pending_review",
+              submittedByUserId: "user-head-writer",
+              submittedAt: "2026-05-29T01:00:00.000Z"
+            }
+          : item
+      ),
+      deliveryPackageEpisodes: db.snapshot.deliveryPackageEpisodes.map((episode) => ({
+        ...episode,
+        isConfirmedChange: false
+      }))
+    };
+    const publishPackage = vi.spyOn(deliveryPackageDbRepository, "publishDbDeliveryPackage");
+    const beforeLocal = await getLocalDeliveryImportWorkspace();
+
+    await expect(
+      mutateDeliveryPackage({
+        action: "publish",
+        deliveryPackageId,
+        actorUserId: "user-owner"
+      })
+    ).rejects.toThrow();
+
+    expect(publishPackage).not.toHaveBeenCalled();
+    await expect(getLocalDeliveryImportWorkspace()).resolves.toEqual(beforeLocal);
   });
 });
 
@@ -385,6 +463,19 @@ async function prepareDbDeliveryPackageSnapshot(deliveryPackageId: string) {
       deliveryPackageEpisodes: workspace.state.deliveryPackageEpisodes.filter(
         (item) => item.deliveryPackageId === deliveryPackageId
       )
+    },
+    publishReadModelSnapshot: {
+      episodeRevisions: workspace.state.episodeRevisions,
+      episodeCurrents: workspace.state.episodeCurrents,
+      notifications: workspace.state.notifications
+    },
+    authScopeSnapshot: {
+      users: workspace.state.users,
+      projects: workspace.state.projects,
+      members: workspace.state.members,
+      memberPermissions: workspace.state.memberPermissions,
+      episodes: workspace.state.episodes,
+      assignments: workspace.state.assignments
     }
   };
 
@@ -396,6 +487,10 @@ async function prepareDbDeliveryPackageSnapshot(deliveryPackageId: string) {
   process.env.ASSET_LOCK_RECORDS_REPOSITORY = "db";
   process.env.DATABASE_URL = "postgres://example.invalid/aigc";
   vi.spyOn(deliveryPackageDbRepository, "readDbDeliveryPackageSnapshot").mockImplementation(async () => dbState.snapshot);
+  vi.spyOn(publishReadModelDbRepository, "readDbPublishReadModelSnapshot").mockImplementation(
+    async () => dbState.publishReadModelSnapshot
+  );
+  vi.spyOn(authScopeDbRepository, "readDbAuthScopeSnapshot").mockImplementation(async () => dbState.authScopeSnapshot);
 
   return dbState;
 }
@@ -408,6 +503,41 @@ function mockDbPackageUpdate(db: { snapshot: deliveryPackageDbRepository.Deliver
     };
 
     return deliveryPackage;
+  });
+}
+
+function mockDbPackagePublish(db: Awaited<ReturnType<typeof prepareDbDeliveryPackageSnapshot>>) {
+  return vi.spyOn(deliveryPackageDbRepository, "publishDbDeliveryPackage").mockImplementation(async (delta) => {
+    db.snapshot = {
+      ...db.snapshot,
+      deliveryPackages: db.snapshot.deliveryPackages.map((item) =>
+        item.id === delta.deliveryPackage.id ? delta.deliveryPackage : item
+      )
+    };
+    db.publishReadModelSnapshot = {
+      episodeRevisions: [...db.publishReadModelSnapshot.episodeRevisions, ...delta.episodeRevisions],
+      episodeCurrents: [
+        ...db.publishReadModelSnapshot.episodeCurrents.filter(
+          (current) => !delta.episodeCurrents.some((item) => item.episodeId === current.episodeId)
+        ),
+        ...delta.episodeCurrents
+      ],
+      notifications: [...db.publishReadModelSnapshot.notifications, ...delta.notifications]
+    };
+    db.authScopeSnapshot = {
+      ...db.authScopeSnapshot,
+      episodes: db.authScopeSnapshot.episodes.map((episode) => {
+        const updated = delta.episodes.find((item) => item.id === episode.id);
+
+        return updated
+          ? {
+              ...episode,
+              productionStatus: updated.productionStatus,
+              hasUnreadKeyChange: updated.hasUnreadKeyChange
+            }
+          : episode;
+      })
+    };
   });
 }
 

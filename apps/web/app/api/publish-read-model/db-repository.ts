@@ -6,6 +6,9 @@ import { episodeCurrents, episodeRevisions, notifications } from "../../../db/sc
 export type EpisodeRevisionDbRow = typeof episodeRevisions.$inferSelect;
 export type EpisodeCurrentDbRow = typeof episodeCurrents.$inferSelect;
 export type NotificationDbRow = typeof notifications.$inferSelect;
+export type EpisodeRevisionDbInsertRow = typeof episodeRevisions.$inferInsert;
+export type EpisodeCurrentDbInsertRow = typeof episodeCurrents.$inferInsert;
+export type NotificationDbInsertRow = typeof notifications.$inferInsert;
 
 export interface PublishReadModelDbRows {
   episodeRevisionRows: EpisodeRevisionDbRow[];
@@ -53,6 +56,46 @@ export function mapPublishReadModelRows(rows: PublishReadModelDbRows): PublishRe
     episodeRevisions: rows.episodeRevisionRows.map(mapEpisodeRevisionRow),
     episodeCurrents: rows.episodeCurrentRows.map(mapEpisodeCurrentRow),
     notifications: rows.notificationRows.map(mapNotificationRow)
+  };
+}
+
+export function mapEpisodeRevisionToDbInsertRow(revision: EpisodeRevision): EpisodeRevisionDbInsertRow {
+  return {
+    id: revision.id,
+    projectId: revision.projectId,
+    episodeId: revision.episodeId,
+    episodeNo: revision.episodeNo,
+    deliveryPackageId: revision.deliveryPackageId,
+    revisionNo: revision.revisionNo,
+    title: revision.title,
+    content: revision.content,
+    previousRevisionId: revision.previousRevisionId ?? null,
+    changeSummary: revision.changeSummary,
+    createdAt: revision.createdAt
+  };
+}
+
+export function mapEpisodeCurrentToDbInsertRow(current: EpisodeCurrent): EpisodeCurrentDbInsertRow {
+  return {
+    id: current.id,
+    projectId: current.projectId,
+    episodeId: current.episodeId,
+    currentRevisionId: current.currentRevisionId,
+    updatedAt: current.updatedAt
+  };
+}
+
+export function mapNotificationToDbInsertRow(notification: Notification): NotificationDbInsertRow {
+  return {
+    id: notification.id,
+    projectId: notification.projectId,
+    episodeId: notification.episodeId ?? null,
+    recipientId: notification.recipientId,
+    type: notification.type,
+    title: notification.title,
+    body: notification.body,
+    readAt: notification.readAt ?? null,
+    createdAt: notification.createdAt
   };
 }
 

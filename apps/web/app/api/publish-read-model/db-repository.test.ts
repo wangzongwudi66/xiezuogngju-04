@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
 import { episodeCurrents, episodeRevisions, notifications } from "../../../db/schema";
 import {
+  mapEpisodeCurrentToDbInsertRow,
+  mapEpisodeRevisionToDbInsertRow,
+  mapNotificationToDbInsertRow,
   mapPublishReadModelRows,
   readDbPublishReadModelSnapshot,
   type EpisodeCurrentDbRow,
@@ -82,6 +85,27 @@ describe("publish read-model DB repository mappers", () => {
       episodeId: undefined,
       readAt: undefined
     });
+  });
+
+  it("maps domain records into DB insert rows", () => {
+    const rows = mapPublishReadModelRows(buildRows());
+
+    expect(mapEpisodeRevisionToDbInsertRow(rows.episodeRevisions[0])).toEqual(buildEpisodeRevisionRow());
+    expect(mapEpisodeCurrentToDbInsertRow(rows.episodeCurrents[0])).toEqual(buildEpisodeCurrentRow());
+    expect(mapNotificationToDbInsertRow(rows.notifications[0])).toEqual(buildNotificationRow());
+    expect(
+      mapEpisodeRevisionToDbInsertRow({
+        ...rows.episodeRevisions[0],
+        previousRevisionId: undefined
+      })
+    ).toMatchObject({ previousRevisionId: null });
+    expect(
+      mapNotificationToDbInsertRow({
+        ...rows.notifications[0],
+        episodeId: undefined,
+        readAt: undefined
+      })
+    ).toMatchObject({ episodeId: null, readAt: null });
   });
 });
 

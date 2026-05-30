@@ -1,12 +1,31 @@
-import type { DeliveryPackage, DeliveryPackageEpisode } from "@aigc/domain";
+import type {
+  DeliveryPackage,
+  DeliveryPackageEpisode,
+  EpisodeCurrent,
+  EpisodeRevision,
+  Notification
+} from "@aigc/domain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAssetLockDbRuntime } from "../../../db/runtime";
-import { deliveryPackageEpisodes, deliveryPackages } from "../../../db/schema";
+import {
+  deliveryPackageEpisodes,
+  deliveryPackages,
+  episodeCurrents,
+  episodeRevisions,
+  episodes,
+  notifications
+} from "../../../db/schema";
+import {
+  mapEpisodeCurrentToDbInsertRow,
+  mapEpisodeRevisionToDbInsertRow,
+  mapNotificationToDbInsertRow
+} from "../publish-read-model/db-repository";
 import {
   createDbDeliveryPackageWithEpisodes,
   mapDeliveryPackageEpisodeToDbInsertRow,
   mapDeliveryPackageRows,
   mapDeliveryPackageToDbInsertRow,
+  publishDbDeliveryPackage,
   readDbDeliveryPackageSnapshot,
   updateDbDeliveryPackageEpisodeConfirmations,
   updateDbDeliveryPackage,
@@ -388,6 +407,97 @@ describe("delivery package DB repository writes", () => {
     await expect(createDbDeliveryPackageWithEpisodes(buildDeliveryPackage(), [])).rejects.toBe(uniqueConflict);
     expect(select).not.toHaveBeenCalled();
   });
+
+  it("publishes a package by writing the full delta inside one transaction", async () => {
+    const delta = buildPublishDelta();
+    const mockTx = createMockPublishTx({
+      packageRows: [{ id: delta.deliveryPackage.id }],
+      episodeRowsByCall: delta.episodes.map((episode) => [{ id: episode.id }])
+    });
+    const transaction = vi.fn(async (callback: (tx: typeof mockTx.tx) => Promise<void>) => callback(mockTx.tx));
+    mockRuntime({ transaction });
+
+    await publishDbDeliveryPackage(delta);
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(mockTx.update).toHaveBeenNthCalledWith(1, deliveryPackages);
+    expect(mockTx.update).toHaveBeenNthCalledWith(2, episodes);
+    expect(mockTx.set).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        status: "published",
+        reviewedByUserId: "user-owner",
+        publishedAt: "2026-05-29T02:00:00.000Z"
+      })
+    );
+    expect(mockTx.set).toHaveBeenNthCalledWith(2, {
+      productionStatus: "key_update",
+      hasUnreadKeyChange: true
+    });
+    expect(mockTx.insert).toHaveBeenNthCalledWith(1, episodeRevisions);
+    expect(mockTx.insert).toHaveBeenNthCalledWith(2, episodeCurrents);
+    expect(mockTx.insert).toHaveBeenNthCalledWith(3, notifications);
+    expect(mockTx.values).toHaveBeenNthCalledWith(1, delta.episodeRevisions.map(mapEpisodeRevisionToDbInsertRow));
+    expect(mockTx.values).toHaveBeenNthCalledWith(2, delta.episodeCurrents.map(mapEpisodeCurrentToDbInsertRow));
+    expect(mockTx.values).toHaveBeenNthCalledWith(3, delta.notifications.map(mapNotificationToDbInsertRow));
+    expect(mockTx.onConflictDoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: episodeCurrents.episodeId
+      })
+    );
+  });
+
+  it("throws a stable error when the publish delta has no revisions", async () => {
+    const delta = buildPublishDelta({ episodeRevisions: [], episodeCurrents: [] });
+    const mockTx = createMockPublishTx({ packageRows: [{ id: delta.deliveryPackage.id }] });
+    const transaction = vi.fn(async (callback: (tx: typeof mockTx.tx) => Promise<void>) => callback(mockTx.tx));
+    mockRuntime({ transaction });
+
+    await expect(publishDbDeliveryPackage(delta)).rejects.toThrow("delivery_package_publish_delta_empty");
+    expect(mockTx.update).toHaveBeenCalledTimes(1);
+    expect(mockTx.insert).not.toHaveBeenCalled();
+  });
+
+  it("throws a stable error when the package publish update touches no rows", async () => {
+    const delta = buildPublishDelta();
+    const mockTx = createMockPublishTx({ packageRows: [] });
+    const transaction = vi.fn(async (callback: (tx: typeof mockTx.tx) => Promise<void>) => callback(mockTx.tx));
+    mockRuntime({ transaction });
+
+    await expect(publishDbDeliveryPackage(delta)).rejects.toThrow("delivery_package_publish_conflict");
+    expect(mockTx.insert).not.toHaveBeenCalled();
+  });
+
+  it("throws a stable error when an episode status update touches no rows", async () => {
+    const delta = buildPublishDelta();
+    const mockTx = createMockPublishTx({
+      packageRows: [{ id: delta.deliveryPackage.id }],
+      episodeRowsByCall: [[]]
+    });
+    const transaction = vi.fn(async (callback: (tx: typeof mockTx.tx) => Promise<void>) => callback(mockTx.tx));
+    mockRuntime({ transaction });
+
+    await expect(publishDbDeliveryPackage(delta)).rejects.toThrow("episode_not_found");
+    expect(mockTx.insert).toHaveBeenCalledWith(episodeRevisions);
+    expect(mockTx.insert).toHaveBeenCalledWith(episodeCurrents);
+  });
+
+  it("does not swallow DB constraint errors during publish", async () => {
+    const delta = buildPublishDelta();
+    const uniqueConflict = Object.assign(new Error("duplicate revision"), {
+      code: "23505",
+      constraint: "episode_revisions_pkey"
+    });
+    const mockTx = createMockPublishTx({
+      packageRows: [{ id: delta.deliveryPackage.id }],
+      insertErrorByTable: new Map([[episodeRevisions, uniqueConflict]])
+    });
+    const transaction = vi.fn(async (callback: (tx: typeof mockTx.tx) => Promise<void>) => callback(mockTx.tx));
+    mockRuntime({ transaction });
+
+    await expect(publishDbDeliveryPackage(delta)).rejects.toBe(uniqueConflict);
+    expect(mockTx.insert).toHaveBeenCalledWith(episodeRevisions);
+  });
 });
 
 function mockRuntime(db: unknown) {
@@ -461,6 +571,53 @@ function createMockEpisodeConfirmationUpdateTx(updatedRowsByCall: unknown[][]) {
   };
 }
 
+function createMockPublishTx(input: {
+  packageRows?: unknown[];
+  episodeRowsByCall?: unknown[][];
+  insertErrorByTable?: Map<unknown, unknown>;
+} = {}) {
+  const remainingEpisodeRows = [...(input.episodeRowsByCall ?? [])];
+  const returning = vi.fn(async () => {
+    const table = update.mock.calls.at(-1)?.[0];
+
+    if (table === deliveryPackages) {
+      return input.packageRows ?? [];
+    }
+
+    return remainingEpisodeRows.shift() ?? [];
+  });
+  const where = vi.fn(() => ({ returning }));
+  const set = vi.fn((_row: unknown) => ({ where }));
+  const update = vi.fn((_table: unknown) => ({ set }));
+  const onConflictDoUpdate = vi.fn();
+  const values = vi.fn((rows: unknown[]) => {
+    const table = insert.mock.calls.at(-1)?.[0];
+    const error = input.insertErrorByTable?.get(table);
+
+    if (error) {
+      throw error;
+    }
+
+    return {
+      rows,
+      onConflictDoUpdate
+    };
+  });
+  const insert = vi.fn((_table: unknown) => ({ values }));
+  const tx = { update, insert };
+
+  return {
+    tx,
+    update,
+    set,
+    where,
+    returning,
+    insert,
+    values,
+    onConflictDoUpdate
+  };
+}
+
 function buildDeliveryPackage(overrides: Partial<DeliveryPackage> = {}): DeliveryPackage {
   return {
     id: "delivery-1",
@@ -476,6 +633,35 @@ function buildDeliveryPackage(overrides: Partial<DeliveryPackage> = {}): Deliver
   };
 }
 
+function buildPublishDelta(
+  overrides: Partial<Parameters<typeof publishDbDeliveryPackage>[0]> = {}
+): Parameters<typeof publishDbDeliveryPackage>[0] {
+  const deliveryPackage = buildDeliveryPackage({
+    id: "delivery-publish-1",
+    status: "published",
+    submittedByUserId: "user-head-writer",
+    reviewedByUserId: "user-owner",
+    submittedAt: "2026-05-29T01:00:00.000Z",
+    publishedAt: "2026-05-29T02:00:00.000Z"
+  });
+  const revision = buildEpisodeRevision({ deliveryPackageId: deliveryPackage.id });
+
+  return {
+    deliveryPackage,
+    episodeRevisions: [revision],
+    episodeCurrents: [buildEpisodeCurrent({ currentRevisionId: revision.id })],
+    notifications: [buildNotification({ episodeId: revision.episodeId })],
+    episodes: [
+      {
+        id: revision.episodeId,
+        productionStatus: "key_update",
+        hasUnreadKeyChange: true
+      }
+    ],
+    ...overrides
+  };
+}
+
 function buildDeliveryPackageEpisode(overrides: Partial<DeliveryPackageEpisode> = {}): DeliveryPackageEpisode {
   return {
     id: "delivery-1-episode-1",
@@ -484,6 +670,47 @@ function buildDeliveryPackageEpisode(overrides: Partial<DeliveryPackageEpisode> 
     title: "Episode 1",
     content: "Episode 1 content",
     isConfirmedChange: false,
+    ...overrides
+  };
+}
+
+function buildEpisodeRevision(overrides: Partial<EpisodeRevision> = {}): EpisodeRevision {
+  return {
+    id: "revision-episode-1-1",
+    projectId: "project-jincheng",
+    episodeId: "episode-jc-1",
+    episodeNo: 1,
+    deliveryPackageId: "delivery-publish-1",
+    revisionNo: 1,
+    title: "Episode 1",
+    content: "Episode 1 content",
+    changeSummary: "First publish",
+    createdAt: "2026-05-29T02:00:00.000Z",
+    ...overrides
+  };
+}
+
+function buildEpisodeCurrent(overrides: Partial<EpisodeCurrent> = {}): EpisodeCurrent {
+  return {
+    id: "current-episode-jc-1",
+    projectId: "project-jincheng",
+    episodeId: "episode-jc-1",
+    currentRevisionId: "revision-episode-1-1",
+    updatedAt: "2026-05-29T02:00:00.000Z",
+    ...overrides
+  };
+}
+
+function buildNotification(overrides: Partial<Notification> = {}): Notification {
+  return {
+    id: "notification-episode-1-writer",
+    projectId: "project-jincheng",
+    episodeId: "episode-jc-1",
+    recipientId: "user-writer",
+    type: "key_change",
+    title: "Episode 1 updated",
+    body: "Episode 1 changed",
+    createdAt: "2026-05-29T02:00:00.000Z",
     ...overrides
   };
 }

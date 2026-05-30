@@ -20,6 +20,7 @@ import {
 import * as assetLockRecordDbParts from "../asset-lock-records/db-parts";
 import * as authScopeDbRepository from "../auth-scope/db-repository";
 import * as deliveryPackageDbRepository from "../delivery-packages/db-repository";
+import * as publishReadModelDbRepository from "../publish-read-model/db-repository";
 
 describe("delivery import job service", () => {
   let storeDir: string;
@@ -40,6 +41,11 @@ describe("delivery import job service", () => {
     vi.spyOn(assetLockRecordDbParts, "readDbAssetLockRecordParts").mockResolvedValue({
       assetLockRecords: [],
       scriptSourceBindings: []
+    });
+    vi.spyOn(publishReadModelDbRepository, "readDbPublishReadModelSnapshot").mockResolvedValue({
+      episodeRevisions: [],
+      episodeCurrents: [],
+      notifications: []
     });
   });
 
