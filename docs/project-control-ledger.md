@@ -5,12 +5,12 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-31 00:39:05 +08:00`.
+Timestamp: `2026-05-31 01:01:29 +08:00`.
 
 - Active branch: `main`.
-- Latest merged checkpoint covered by this ledger update: `564d648 Add auth scope seed contract`.
-- Latest product/test code commit on `main`: `564d648 Add auth scope seed contract`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-auth-scope-seed-contract`.
+- Latest merged checkpoint covered by this ledger update: `ff0a1b4 Add auth scope DB write contract`.
+- Latest product/test code commit on `main`: `ff0a1b4 Add auth scope DB write contract`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-auth-scope-db-write-contract`.
 - Remote sync target for this checkpoint: push local `main` to `xiezuogongju-04/main` after recording this ledger update.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
@@ -35,9 +35,24 @@ Timestamp: `2026-05-31 00:39:05 +08:00`.
 - Child 52 reviewed the amended object storage provider at `f0108ca` and found no P0/P1/P2/P3; the P2 is fixed.
 - Child 53 reviewed `codex/m3-auth-scope-seed-contract` at `7cf5a87` and found no blocking issue, but the branch was reviewed before the object storage provider moved `main`.
 - Child 54 reviewed the rebased `codex/m3-auth-scope-seed-contract` at `564d648` and found no P0/P1/P2/P3; it confirmed the branch is suitable for fast-forward merge.
+- Child 55 confirmed the GitHub Actions `db-smoke` run for `77104f8342e3e6c14c5a9b84f3a2c7bca4a03a1e` passed with no connection string leakage observed.
+- Child 56 reviewed the first auth/scope DB write contract and found a P1 owner-escalation issue in `createUser(defaultRole: "owner")`, plus P2 missing assignment guard tests.
+- Child 57 reviewed amended `codex/m3-auth-scope-db-write-contract` at `ff0a1b4` and found no P0/P1/P2/P3; it confirmed the branch is suitable for fast-forward merge.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `ff0a1b4 Add auth scope DB write contract`
+  - Adds `apps/web/app/api/auth-scope/write-service.ts` and `apps/web/app/api/auth-scope/db-write-repository.ts` with focused tests.
+  - Introduces a narrow auth/scope DB write service for user creation, project creation/update/archive, member role replacement, custom permission replacement, and episode assignment replacement.
+  - Keeps route/UI/admin HTTP wiring out of scope; this slice exposes no new route and adds no DB schema/migration.
+  - Enforces a permission matrix for write actions and stable error codes for denied actors, missing users/projects, invalid roles/permissions, invalid episode ranges, non-member permission/assignment attempts, and last-owner removal.
+  - Fixes the child 56 P1 by requiring global owner actor status before creating `defaultRole: "owner"` users; project-level `canManageMembers` can still create non-owner users.
+  - Keeps the DB repository narrow: project plus episode skeleton creation is transactional; roles, permissions, and assignments are replace operations for explicit resources; no generic mutate function is exposed.
+  - Child review 56 found the P1/P2; child review 57 confirmed the amended fix and found no P0/P1/P2/P3. Real local `db:smoke` was not run.
+  - Validation before merge:
+    - `npm.cmd run test -w apps/web -- app/api/auth-scope`: passed, 4 files / 33 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check main..codex/m3-auth-scope-db-write-contract`: passed.
 - `564d648 Add auth scope seed contract`
   - Adds `apps/web/app/api/auth-scope/seed-contract.ts` and `apps/web/app/api/auth-scope/seed-contract.test.ts`.
   - Defines a deterministic DB seed contract for the six auth/scope arrays only: `users`, `projects`, `project_members`, `project_member_permissions`, `episodes`, and `episode_assignments`.
