@@ -5,18 +5,30 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-30 20:53:08 +08:00`.
+Timestamp: `2026-05-30 21:09:11 +08:00`.
 
 - Active branch: `main`.
-- Latest recorded `main` checkpoint: `2b30983 Implement DB delivery package publish transaction`.
-- Latest product/test code commit on `main`: `2b30983 Implement DB delivery package publish transaction`.
-- Worktree at last check: clean after fast-forward merging `codex/m3-delivery-package-db-publish-transaction` and running post-merge validation.
-- Remote sync note: `main@de6e5e1` was the last pushed checkpoint before this delivery package DB publish transaction merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
+- Latest recorded `main` checkpoint: `4d54543 test: cover postgres smoke publish flow`.
+- Latest product/test code commit on `main`: `4d54543 test: cover postgres smoke publish flow`.
+- Worktree at last check: clean after fast-forward merging `codex/m3-postgres-smoke-publish` and running post-merge validation.
+- Remote sync note: `main@3ed220a` was the last pushed checkpoint before this Postgres smoke publish coverage merge; push the ledger commit to `xiezuogongju-04/main` before handoff.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `4d54543 test: cover postgres smoke publish flow`
+  - Extends `apps/web/db/postgres-smoke.ts` so the smoke harness covers the DB mode publish happy path through the real `mutateDeliveryPackage({ action: "publish" })` service runtime.
+  - Verifies the DB workspace overlay sees the published package, new `episodeRevisions`, `episodeCurrents` pointing to the new revision, touched episode production status/unread flags, and new notifications.
+  - Keeps `generate_from_package` using the service-published package after publish.
+  - Extends cleanup/count coverage for `episode_revisions`, `episode_currents`, and `notifications`.
+  - Keeps the slice scoped to smoke harness coverage: no schema/migration, business service/repository, UI/browser QA, object storage, or runtime behavior changes.
+  - Child review 16 found no P0/P1/P2/P3 and approved fast-forward merge. Real `db:smoke` was not run because no `TEST_DATABASE_URL` is available.
+  - Validation after merge:
+    - `npm.cmd run db:check -w apps/web`: passed.
+    - `npm.cmd run test -w apps/web -- app/api/delivery-packages/service.test.ts app/api/delivery-import-jobs/service.test.ts app/api/asset-lock-records/service.test.ts`: passed, 3 files / 66 tests.
+    - `npm.cmd run typecheck -w apps/web`: passed.
+    - `git diff --check`: passed.
 - `2b30983 Implement DB delivery package publish transaction`
   - DB mode `/api/delivery-packages` now supports `publish` by running the domain publish mutation against the DB-overlaid workspace, calculating a publish delta, and persisting it through one DB transaction.
   - Adds `publishDbDeliveryPackage` to update `delivery_packages`, insert `episode_revisions`, upsert `episode_currents`, update touched `episodes`, and insert `notifications`.
