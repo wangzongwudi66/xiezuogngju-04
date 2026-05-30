@@ -23,7 +23,6 @@ const statusByAttachmentError = {
   asset_attachment_record_mismatch: 409,
   asset_attachment_record_not_found: 404,
   asset_attachment_request_failed: 400,
-  asset_attachment_storage_bucket_required: 400,
   asset_attachment_unauthenticated: 401,
   asset_attachment_version_conflict: 400
 } as const;

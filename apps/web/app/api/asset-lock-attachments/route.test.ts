@@ -203,6 +203,49 @@ describe("asset lock attachment route", () => {
     expect(serialized).not.toContain("objects.example");
   });
 
+  it("does not expose storage bucket configuration errors on upload", async () => {
+    const recordId = (await createAssetRecord()).record.id;
+    vi.spyOn(assetAttachmentService, "uploadAssetAttachment").mockRejectedValue(
+      new Error(
+        "asset_attachment_storage_bucket_required bucket asset-bucket key asset-lock-attachments/asset-att-123e4567-e89b-12d3-a456-426614174000.png endpoint https://objects.example"
+      )
+    );
+
+    const response = await POST(formRequest(buildUploadForm(recordId)));
+    const payload = await response.json();
+    const serialized = JSON.stringify(payload);
+
+    expect(response.status).toBe(400);
+    expect(payload).toEqual({
+      error: "asset_attachment_request_failed",
+      message: "asset_attachment_request_failed"
+    });
+    expect(serialized).not.toContain("asset_attachment_storage_bucket_required");
+    expect(serialized).not.toContain("asset-bucket");
+    expect(serialized).not.toContain("asset-lock-attachments");
+    expect(serialized).not.toContain("objects.example");
+  });
+
+  it("does not expose storage bucket configuration errors on list", async () => {
+    const recordId = (await createAssetRecord()).record.id;
+    vi.spyOn(assetAttachmentService, "listAssetAttachments").mockRejectedValue(
+      new Error(
+        "asset_attachment_storage_bucket_required bucket asset-bucket key asset-lock-attachments/asset-att-123e4567-e89b-12d3-a456-426614174000.png endpoint https://objects.example"
+      )
+    );
+
+    const response = await GET(listRequest(recordId));
+    const payload = await response.json();
+    const serialized = JSON.stringify(payload);
+
+    expect(response.status).toBe(400);
+    expect(payload).toEqual({ error: "asset_attachment_request_failed" });
+    expect(serialized).not.toContain("asset_attachment_storage_bucket_required");
+    expect(serialized).not.toContain("asset-bucket");
+    expect(serialized).not.toContain("asset-lock-attachments");
+    expect(serialized).not.toContain("objects.example");
+  });
+
   it("does not echo unknown asset attachment prefixed errors", async () => {
     const recordId = (await createAssetRecord()).record.id;
     vi.spyOn(assetAttachmentService, "uploadAssetAttachment").mockRejectedValue(
