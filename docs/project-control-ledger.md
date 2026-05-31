@@ -5,13 +5,13 @@ Read it first before making scheduling, branch, or merge decisions.
 
 ## Current Main Snapshot
 
-Timestamp: `2026-05-31 12:45:46 +08:00`.
+Timestamp: `2026-05-31 13:13:36 +08:00`.
 
 - Main baseline branch: `main`.
-- Latest merged checkpoint covered by this ledger update: `1873ae7da3f5ad27c0ec600ea989fe652627da55 Record attachment storage verification merge`.
-- Latest product/test code commit on `main`: `be707b0 Verify asset attachment storage puts`.
-- Latest main record commit before this ledger refresh: `1873ae7 Record attachment storage verification merge`.
-- Worktree at last check: clean before creating `codex/m3-readiness-ledger-storage-verification-refresh` from current `main`.
+- Latest merged checkpoint covered by this ledger update: `7d2acc2883ce65da4cdc9166370d0203fffd4aef Record attachment orphan audit merge`.
+- Latest product/test code commit on `main`: `0cb1dcd Add asset attachment orphan audit`.
+- Latest main record commit before this ledger refresh: `7d2acc2 Record attachment orphan audit merge`.
+- Worktree at last check: clean before creating `codex/asset-attachment-storage-runbook-refresh` from current `main`.
 - Remote sync target for this checkpoint: not changed by this documentation-only branch.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
@@ -19,8 +19,10 @@ Timestamp: `2026-05-31 12:45:46 +08:00`.
 - Attachment storage metadata contract is merged on `main`: `3589433` records the merge of `7304e54 Add attachment storage metadata contract`.
 - Attachment storage metadata schema plus read-path is merged on `main`: `b4297a70cf4982db4ca5b19dc09316d121d8f2fe` records the merge of `2e64994 Persist asset attachment storage metadata` and `cf6ae80 Wire asset attachment persisted storage reads`.
 - Route error allowlist plus upload storage verification is merged on `main`: `1873ae7da3f5ad27c0ec600ea989fe652627da55` records the merge of `d67f1a5 Harden asset attachment route errors`, `ca32ec0 fix asset attachment storage error fallback`, and `be707b0 Verify asset attachment storage puts`.
-- Completed storage work now includes nullable `storage_key` / `checksum_sha256`, repository sidecar persistence without domain/API response exposure, download through persisted key with legacy fallback, size/checksum integrity checks, route allowlist error mapping for unknown provider/S3/raw error fallback, upload put verification via local stat size and S3 `PutObject` checksum metadata plus `HeadObject` `ContentLength`/checksum metadata verification, and stable `502` mapping for storage verification failure.
-- Do not claim formal backend-ready yet. Remaining risks: historical object backfill and schema tightening to not-null/check/unique, production object-store integration and opt-in S3/MinIO integration tests, orphan object audit/cleanup, browser/manual failure-mode coverage, and broader auth/session/account lifecycle still prototype-bound.
+- Orphan audit-only first phase is merged on `main`: `7d2acc2883ce65da4cdc9166370d0203fffd4aef` records the merge of `0cb1dcd Add asset attachment orphan audit`.
+- Completed storage work now includes nullable `storage_key` / `checksum_sha256`, repository sidecar persistence without domain/API response exposure, download through persisted key with legacy fallback, size/checksum integrity checks, route allowlist error mapping for unknown provider/S3/raw error fallback, upload put verification via local stat size and S3 `PutObject` checksum metadata plus `HeadObject` `ContentLength`/checksum metadata verification, stable `502` mapping for storage verification failure, and orphan audit-only local/S3 object listing with DB referenced-key comparison.
+- Orphan audit-only behavior: referenced keys prefer `storage_key` and fall back to `fileId + extname(fileName)`, active and deleted metadata rows count as referenced, default grace is 24h, unreferenced objects are classified as `orphan_candidate`, `young`, or `unknown_age`, and reports expose only `keyHash`/counts/size/reason/age metadata rather than raw object keys, buckets, or endpoints.
+- Do not claim formal backend-ready yet. Remaining risks: historical object backfill and schema tightening to not-null/check/unique, production object-store integration and opt-in S3/MinIO integration tests, orphan object cleanup/delete plus production scheduler or CLI/API entrypoints, browser/manual failure-mode coverage, and broader auth/session/account lifecycle still prototype-bound.
 - Child 35 rechecked the gate and remained blocked: `TEST_DATABASE_URL` is missing, so `db:check` and `db:smoke` were not run.
 - Child 36 recommends the fastest unblock path: obtain an external disposable Postgres `TEST_DATABASE_URL`; Docker Desktop or local Postgres are secondary options because this shell currently lacks both `docker` and `psql`.
 - Child 37 refreshed the post-smoke priority order: first session/cookie-backed actor, then asset attachment object storage provider, then auth/scope seed/admin write contract. That sequence has now landed on `main`; the next phase is hardening and browser-flow coverage rather than broad new backend expansion.
@@ -59,13 +61,20 @@ Timestamp: `2026-05-31 12:45:46 +08:00`.
 
 Recently completed after the xiezuogongju-04 handoff:
 
+- `7d2acc2883ce65da4cdc9166370d0203fffd4aef Record attachment orphan audit merge`
+  - Records the orphan audit-only merge: `0cb1dcd Add asset attachment orphan audit`.
+  - Adds local and S3-compatible object list audit adapters plus DB referenced-key comparison.
+  - Referenced keys prefer persisted `storage_key`, fall back to `fileId + extname(fileName)`, and count both `active` and `deleted` attachment metadata rows as referenced.
+  - Uses a default 24h grace period and classifies unreferenced objects as `orphan_candidate`, `young`, or `unknown_age`.
+  - Reports expose `keyHash`, counts, size, reason, and age metadata only; raw object keys, buckets, endpoints, credentials, and database connection strings must not be printed.
+  - This is audit-only. Orphan cleanup/delete, production scheduling, and CLI/API entrypoints remain incomplete, and this still is not a formal backend-ready sign-off.
 - `1873ae7da3f5ad27c0ec600ea989fe652627da55 Record attachment storage verification merge`
   - Records the route error allowlist and upload storage verification sequence: `d67f1a5 Harden asset attachment route errors`, `ca32ec0 fix asset attachment storage error fallback`, and `be707b0 Verify asset attachment storage puts`.
   - Attachment route errors now pass through a storage-error allowlist mapper, with stable fallback behavior for unknown provider, S3, and raw storage errors instead of returning storage internals.
   - Storage verification failures now map to a stable `502`.
   - Upload put verification is in place: local storage verifies the written file stat size; S3-compatible storage sends checksum metadata on `PutObject` and verifies `HeadObject` `ContentLength` plus checksum metadata.
   - Remote GitHub Actions `db-smoke` run `26703449487` completed successfully for this merge. Local `db:smoke` was not run.
-  - This still is not a formal backend-ready sign-off; historical object backfill/schema tightening, production object-store integration plus opt-in S3/MinIO integration tests, orphan object audit/cleanup, browser/manual failure-mode coverage, and broader auth/session/account lifecycle remain open.
+  - This still is not a formal backend-ready sign-off; historical object backfill/schema tightening, production object-store integration plus opt-in S3/MinIO integration tests, orphan object audit-only support was not yet included at this checkpoint, browser/manual failure-mode coverage, and broader auth/session/account lifecycle remained open.
 - `b4297a70cf4982db4ca5b19dc09316d121d8f2fe Record attachment storage metadata read path merge`
   - Records the storage metadata schema and read-path merge: `2e64994 Persist asset attachment storage metadata` and `cf6ae80 Wire asset attachment persisted storage reads`.
   - Adds the nullable `storage_key` / `checksum_sha256` schema slice and repository sidecar persistence for attachment storage metadata.
