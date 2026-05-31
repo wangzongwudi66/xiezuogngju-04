@@ -9,6 +9,7 @@
     "db:check": "drizzle-kit check",
     "db:generate": "drizzle-kit generate",
     "db:smoke": "vitest run --config db/postgres-smoke.vitest.config.ts",
+    "test:asset-attachment-object-storage": "vitest run --config asset-attachment-object-storage.integration.vitest.config.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -116,6 +116,14 @@ Before enabling `ASSET_LOCK_ATTACHMENT_STORAGE_PROVIDER=s3` in production:
 
 Add S3/MinIO integration coverage behind an explicit opt-in flag rather than default CI. The test should use a disposable bucket or isolated prefix and should never print credentials, bucket secrets, raw object keys, endpoints, or database connection strings.
 
+The repository includes this opt-in suite in `apps/web`. It is not part of `npm test`, `npm run verify`, PR CI, or any GitHub Actions workflow. Run it only when an isolated S3-compatible bucket/prefix is configured:
+
+```sh
+npm run test:asset-attachment-object-storage -w apps/web
+```
+
+The suite has a second gate and skips unless `ASSET_ATTACHMENT_OBJECT_STORAGE_INTEGRATION=1` is present. Each run writes only below `<ASSET_LOCK_ATTACHMENT_S3_PREFIX>/integration/<yyyyMMdd>/<randomUUID>` and cleanup is scoped to that run prefix.
+
 Recommended coverage:
 
 - Provider resolution fails closed when `ASSET_LOCK_ATTACHMENT_STORAGE_PROVIDER=s3` is set without `ASSET_LOCK_ATTACHMENT_S3_BUCKET`.
