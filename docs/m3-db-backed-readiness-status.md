@@ -16,6 +16,10 @@ The current `main` baseline includes DB-backed prototype coverage for these area
 - Delivery routes using a server-derived workspace actor instead of client-controlled actor fields.
 - Request-scoped actor derivation through a signed HttpOnly workspace session cookie, with user existence revalidated against the overlaid workspace snapshot on each protected request.
 - Asset attachment metadata stored in DB, with attachment bytes behind a local or explicit S3-compatible storage provider abstraction.
+- Asset attachment storage metadata is persisted as nullable `storage_key` / `checksum_sha256` sidecar data in the repository layer, without exposing those storage internals through the domain model or API response.
+- Attachment download reads use the persisted storage key when present, preserve a legacy derived-key fallback, and verify byte size/checksum integrity.
+- Attachment routes now use a storage-error allowlist mapper with stable fallback behavior for unknown provider, S3, and raw storage errors; storage verification failures map to a stable `502`.
+- Attachment uploads verify storage writes: local storage checks stat size, and S3-compatible storage sends checksum metadata on `PutObject` and verifies `HeadObject` `ContentLength` plus checksum metadata.
 - `postgres-smoke` harness coverage for the DB-backed happy path, including migration application, auth/scope seed rows, auth/scope admin route writes, delivery package mutation flow, asset-lock generation and mutations, source binding add/remove, attachment metadata/file upload and soft delete, timeline projection read, and smoke cleanup assertions.
 - GitHub Actions `db-smoke` coverage on disposable Postgres, with `db:check` followed by `db:smoke`.
 
@@ -25,14 +29,14 @@ The project must not claim a formal backend-ready state yet. Current blockers:
 
 - `workspace-session` now has request-scoped signed cookie actor derivation, but remains a prototype user selector. It is not a formal auth implementation with passwords, OAuth, account lifecycle, CSRF policy, revocation, or admin controls.
 - Auth/scope admin writes are narrow and DB-backed, but still do not constitute a formal product account-management system. Self-registration remains prototype-only and is not wired to the admin API.
-- Attachment bytes can use an S3-compatible provider, but the first slice intentionally does not persist `storageKey`, `checksum`, or `contentLength`; prefix/bucket migration and application-level integrity auditing remain future work.
-- Smoke coverage is still mostly happy path and does not substitute for broader runtime, permission, failure-mode, object-storage, CSRF, audit, or browser-flow coverage.
+- Attachment bytes can use an S3-compatible provider and now persist nullable storage key/checksum metadata with read-path and upload verification checks, but historical object backfill, schema tightening, production object-store integration, and operational audit/cleanup remain future work.
+- Smoke coverage is still mostly happy path and does not substitute for broader runtime, permission, failure-mode, object-storage, CSRF, audit, or browser/manual coverage.
 
 ## Current gate line
 
-The real disposable-Postgres `db:smoke` gate has passed in GitHub Actions. Additional DB schema or DB runtime extensions may proceed only with narrow implementation scope, focused tests, and the CI `db-smoke` gate kept active.
+The real disposable-Postgres `db:smoke` gate has passed in GitHub Actions for the attachment storage metadata/read-path/route allowlist/storage verification sequence. Remote run `26703449487` completed successfully for `1873ae7da3f5ad27c0ec600ea989fe652627da55`.
 
-Local `db:smoke` still requires an explicit disposable `TEST_DATABASE_URL`; do not run it against shared, staging, production, or durable local data.
+Local `db:smoke` was not run for this readiness refresh. It still requires an explicit disposable `TEST_DATABASE_URL`; do not run it against shared, staging, production, or durable local data.
 
 ## Next gates
 
@@ -52,5 +56,8 @@ The next DB-backed work should focus on hardening the production-facing contract
 
 - Add browser-level/manual or automated coverage for the DB/server-owned dashboard admin flows: create/update/archive project, save member roles, save permissions, and assign episodes.
 - Define the next auth/session hardening contract: CSRF posture, session revocation/rotation, audit fields, and the boundary between prototype user selection and formal account lifecycle.
-- Decide whether object storage needs persisted `storageKey` and checksum/content-length metadata before any production bucket migration.
+- Plan historical object backfill plus schema tightening for attachment storage metadata, including when to move `storage_key` / `checksum_sha256` from nullable sidecar fields toward not-null/check/unique constraints.
+- Complete production object-store integration and opt-in S3/MinIO integration tests before relying on object storage in production.
+- Add orphan object audit/cleanup coverage for failed and abandoned attachment writes.
+- Add browser/manual failure-mode coverage for attachment upload, download, storage-provider errors, integrity failures, and verification failures.
 - Continue split-brain hardening so DB-owned arrays are read and written only through DB repositories in DB mode.
