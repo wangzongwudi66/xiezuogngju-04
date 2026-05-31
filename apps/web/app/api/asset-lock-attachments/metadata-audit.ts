@@ -76,14 +76,14 @@ export interface AssetAttachmentMetadataAuditReport {
   omittedItemCount: number;
 }
 
-interface AuditCandidate {
+export interface AssetAttachmentMetadataAuditCandidate {
   key: string;
   keyHash: string;
   source: AssetAttachmentMetadataAuditCandidateSource;
 }
 
 interface CandidateVerificationResult {
-  candidate: AuditCandidate;
+  candidate: AssetAttachmentMetadataAuditCandidate;
   bytes?: Uint8Array;
   checksumSha256?: string;
   actualSizeBytes?: number;
@@ -135,7 +135,7 @@ export function createAssetAttachmentMetadataAuditCandidates(input: {
   adapter: Pick<AssetAttachmentMetadataAuditReadAdapter, "makeKey">;
   row: AssetAttachmentMetadataAuditRow;
   legacyPrefixes?: string[];
-}): AuditCandidate[] {
+}): AssetAttachmentMetadataAuditCandidate[] {
   const persistedStorageKey = input.row.storageKey?.trim();
 
   if (persistedStorageKey) {
@@ -158,7 +158,10 @@ export function createAssetAttachmentMetadataAuditCandidates(input: {
   return uniqueCandidatesByKey(candidates);
 }
 
-function createCandidate(key: string, source: AssetAttachmentMetadataAuditCandidateSource): AuditCandidate {
+function createCandidate(
+  key: string,
+  source: AssetAttachmentMetadataAuditCandidateSource
+): AssetAttachmentMetadataAuditCandidate {
   return {
     key,
     keyHash: hashAssetAttachmentMetadataAuditValue(key),
@@ -166,9 +169,9 @@ function createCandidate(key: string, source: AssetAttachmentMetadataAuditCandid
   };
 }
 
-function uniqueCandidatesByKey(candidates: AuditCandidate[]) {
+function uniqueCandidatesByKey(candidates: AssetAttachmentMetadataAuditCandidate[]) {
   const seenKeys = new Set<string>();
-  const uniqueCandidates: AuditCandidate[] = [];
+  const uniqueCandidates: AssetAttachmentMetadataAuditCandidate[] = [];
 
   for (const candidate of candidates) {
     if (seenKeys.has(candidate.key)) {
@@ -303,7 +306,7 @@ async function auditReferencedRow(
 async function verifyCandidates(
   adapter: AssetAttachmentMetadataAuditReadAdapter,
   input: {
-    candidates: AuditCandidate[];
+    candidates: AssetAttachmentMetadataAuditCandidate[];
     expectedSizeBytes: number;
     checksumSha256?: string;
   }
@@ -311,7 +314,7 @@ async function verifyCandidates(
   const results: CandidateVerificationResult[] = [];
 
   for (const candidate of input.candidates) {
-    if (!isSafeStorageReadKey(candidate.key)) {
+    if (!isSafeAssetAttachmentStorageReadKey(candidate.key)) {
       results.push(createCandidateResult(candidate, { safe: false }));
       continue;
     }
@@ -350,7 +353,7 @@ async function verifyCandidates(
 }
 
 function createCandidateResult(
-  candidate: AuditCandidate,
+  candidate: AssetAttachmentMetadataAuditCandidate,
   input: Partial<Omit<CandidateVerificationResult, "candidate">>
 ): CandidateVerificationResult {
   return {
@@ -476,14 +479,14 @@ function resolveChecksumState(checksumSha256: string | undefined): "missing" | "
     return "missing";
   }
 
-  return /^[a-f0-9]{64}$/.test(checksumSha256) ? "valid" : "invalid";
+  return isValidAssetAttachmentChecksumSha256(checksumSha256) ? "valid" : "invalid";
 }
 
 function isReferencedMetadataStatus(status: string) {
   return status === "active" || status === "deleted";
 }
 
-function isSafeStorageReadKey(key: string) {
+export function isSafeAssetAttachmentStorageReadKey(key: string) {
   try {
     const normalizedKey = normalizeStorageReadKey(key);
     const segments = normalizedKey.split("/");
@@ -547,6 +550,10 @@ function normalizeAuditKey(key: string) {
 
 function sha256Hex(bytes: Uint8Array) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+export function isValidAssetAttachmentChecksumSha256(checksumSha256: string) {
+  return /^[a-f0-9]{64}$/.test(checksumSha256);
 }
 
 function createEmptyReport(now: Date): AssetAttachmentMetadataAuditReport {
