@@ -35,7 +35,7 @@ The project must not claim a formal backend-ready state yet. Current blockers:
 
 ## Current gate line
 
-The real disposable-Postgres `db:smoke` gate has passed in GitHub Actions for the attachment storage metadata/read-path/route allowlist/storage verification sequence. Remote run `26703449487` completed successfully for `1873ae7da3f5ad27c0ec600ea989fe652627da55`.
+The real disposable-Postgres `db:smoke` gate has passed in GitHub Actions after the orphan audit-only merge. Remote run `26704014543` completed successfully for `7d2acc2883ce65da4cdc9166370d0203fffd4aef`.
 
 The orphan audit-only implementation is merged on `main`: `0cb1dcd` (`0cb1dcd6ebbdcf525d7424cd9a2caef2e3be1d74`) with merge record `7d2acc2883ce65da4cdc9166370d0203fffd4aef`. This does not complete cleanup/delete automation or make the project formally backend-ready.
 

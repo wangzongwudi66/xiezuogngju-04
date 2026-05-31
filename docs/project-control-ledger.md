@@ -15,7 +15,7 @@ Timestamp: `2026-05-31 13:13:36 +08:00`.
 - Remote sync target for this checkpoint: not changed by this documentation-only branch.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
-- Current gate: real `db:smoke` has passed in GitHub Actions on disposable Postgres for `1873ae7da3f5ad27c0ec600ea989fe652627da55`; run `26703449487` completed successfully. Local `db:smoke` was not run for this documentation refresh; do not run local `db:smoke` unless a disposable `TEST_DATABASE_URL` is explicitly provided.
+- Current gate: real `db:smoke` has passed in GitHub Actions on disposable Postgres for `7d2acc2883ce65da4cdc9166370d0203fffd4aef`; run `26704014543` completed successfully. Local `db:smoke` was not run for this documentation refresh; do not run local `db:smoke` unless a disposable `TEST_DATABASE_URL` is explicitly provided.
 - Attachment storage metadata contract is merged on `main`: `3589433` records the merge of `7304e54 Add attachment storage metadata contract`.
 - Attachment storage metadata schema plus read-path is merged on `main`: `b4297a70cf4982db4ca5b19dc09316d121d8f2fe` records the merge of `2e64994 Persist asset attachment storage metadata` and `cf6ae80 Wire asset attachment persisted storage reads`.
 - Route error allowlist plus upload storage verification is merged on `main`: `1873ae7da3f5ad27c0ec600ea989fe652627da55` records the merge of `d67f1a5 Harden asset attachment route errors`, `ca32ec0 fix asset attachment storage error fallback`, and `be707b0 Verify asset attachment storage puts`.
