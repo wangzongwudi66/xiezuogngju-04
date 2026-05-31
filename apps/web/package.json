@@ -9,6 +9,7 @@
     "db:check": "drizzle-kit check",
     "db:generate": "drizzle-kit generate",
     "db:smoke": "vitest run --config db/postgres-smoke.vitest.config.ts",
+    "metadata-audit:asset-attachments": "tsx db/asset-attachment-metadata-audit.ts",
     "test:asset-attachment-object-storage": "vitest run --config asset-attachment-object-storage.integration.vitest.config.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -29,6 +30,7 @@
     "@types/react": "^19.2.6",
     "@types/react-dom": "^19.2.3",
     "drizzle-kit": "^0.31.8",
+    "tsx": "^4.22.3",
     "typescript": "^5.9.3",
     "vitest": "^4.0.13"
   }
