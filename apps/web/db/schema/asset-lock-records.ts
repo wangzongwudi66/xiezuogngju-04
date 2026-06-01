@@ -139,8 +139,17 @@ export const assetAttachments = pgTable(
   (table) => [
     unique("asset_attachments_file_id_unique").on(table.fileId),
     unique("asset_attachments_record_version_unique").on(table.assetLockRecordId, table.version),
+    unique("asset_attachments_storage_key_unique").on(table.storageKey),
     check("asset_attachments_size_bytes_positive", sql`${table.sizeBytes} > 0`),
     check("asset_attachments_version_positive", sql`${table.version} > 0`),
+    check(
+      "asset_attachments_checksum_sha256_format",
+      sql`${table.checksumSha256} is null or ${table.checksumSha256} ~ '^[a-f0-9]{64}$'`
+    ),
+    check(
+      "asset_attachments_storage_key_not_blank",
+      sql`${table.storageKey} is null or trim(${table.storageKey}) <> ''`
+    ),
     check("asset_attachments_type_check", textEnumCheck(table.attachmentType, assetAttachmentTypeValues)),
     check("asset_attachments_mime_check", textEnumCheck(table.mime, assetAttachmentMimeValues)),
     check("asset_attachments_status_check", textEnumCheck(table.status, assetAttachmentStatusValues)),
