@@ -15,7 +15,7 @@ Timestamp: `2026-06-01 20:09:30 +08:00`.
 - Remote sync target for this checkpoint: not changed by this documentation-only branch.
 - Fresh-build timeline browser QA is still blocked by the in-app browser policy; no browser QA is required for this backend-only slice.
 - Pending branch `codex/timeline-mobile-crop-hardening` remains untouched and unmerged.
-- Current gate: real `db:smoke` has passed in GitHub Actions on disposable Postgres for `7d2acc2883ce65da4cdc9166370d0203fffd4aef`; run `26704014543` completed successfully. Local `db:smoke` was not run for this documentation refresh; do not run local `db:smoke` unless a disposable `TEST_DATABASE_URL` is explicitly provided.
+- Current gate: real `db:smoke` has passed in GitHub Actions on disposable Postgres for `477f8432792726b4c05145cfa07815270195056b`; run `26753866686` completed successfully. Local `db:smoke` was not run for this documentation refresh; do not run local `db:smoke` unless a disposable `TEST_DATABASE_URL` is explicitly provided.
 - Attachment storage metadata contract is merged on `main`: `3589433` records the merge of `7304e54 Add attachment storage metadata contract`.
 - Attachment storage metadata schema plus read-path is merged on `main`: `b4297a70cf4982db4ca5b19dc09316d121d8f2fe` records the merge of `2e64994 Persist asset attachment storage metadata` and `cf6ae80 Wire asset attachment persisted storage reads`.
 - Route error allowlist plus upload storage verification is merged on `main`: `1873ae7da3f5ad27c0ec600ea989fe652627da55` records the merge of `d67f1a5 Harden asset attachment route errors`, `ca32ec0 fix asset attachment storage error fallback`, and `be707b0 Verify asset attachment storage puts`.
@@ -68,6 +68,7 @@ Recently completed after the xiezuogongju-04 handoff:
   - Adds a lowercase 64-character hex check for non-NULL `checksum_sha256` values while continuing to allow NULL.
   - Adds a trim-nonblank check for non-NULL `storage_key` values while continuing to allow NULL.
   - Adds raw `storage_key` uniqueness: multiple NULL values are allowed, and duplicate non-NULL raw keys are rejected.
+  - Remote GitHub Actions `db-smoke` run `26753866686` completed successfully for this merge. Local `db:smoke` was not run.
   - This does not complete production backfill or NOT NULL tightening. Legacy nullable rows and the derived-key fallback remain, so this still is not a formal backend-ready sign-off.
 - `7d2acc2883ce65da4cdc9166370d0203fffd4aef Record attachment orphan audit merge`
   - Records the orphan audit-only merge: `0cb1dcd Add asset attachment orphan audit`.
@@ -75,6 +76,7 @@ Recently completed after the xiezuogongju-04 handoff:
   - Referenced keys prefer persisted `storage_key`, fall back to `fileId + extname(fileName)`, and count both `active` and `deleted` attachment metadata rows as referenced.
   - Uses a default 24h grace period and classifies unreferenced objects as `orphan_candidate`, `young`, or `unknown_age`.
   - Reports expose `keyHash`, counts, size, reason, and age metadata only; raw object keys, buckets, endpoints, credentials, and database connection strings must not be printed.
+  - Remote GitHub Actions `db-smoke` run `26704014543` completed successfully for this merge. Local `db:smoke` was not run.
   - This is audit-only. Orphan cleanup/delete, production scheduling, and CLI/API entrypoints remain incomplete, and this still is not a formal backend-ready sign-off.
 - `1873ae7da3f5ad27c0ec600ea989fe652627da55 Record attachment storage verification merge`
   - Records the route error allowlist and upload storage verification sequence: `d67f1a5 Harden asset attachment route errors`, `ca32ec0 fix asset attachment storage error fallback`, and `be707b0 Verify asset attachment storage puts`.
