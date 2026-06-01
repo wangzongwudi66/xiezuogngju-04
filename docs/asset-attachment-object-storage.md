@@ -68,6 +68,20 @@ Download verification:
 - Size or checksum mismatch returns the stable `asset_attachment_file_integrity_failed` error, mapped to HTTP `409`.
 - Missing storage objects return `asset_attachment_file_not_found`, mapped to HTTP `404`.
 
+## Storage metadata constraints
+
+The nullable-safe storage metadata constraints are merged on `main`: `d95cbd7` (`d95cbd7ed3750343f86d3fdcfc305bd1d20e4d30`) with merge record `477f8432792726b4c05145cfa07815270195056b`.
+
+Current DB constraints:
+
+- `checksum_sha256` must be lowercase 64-character hex when present.
+- `checksum_sha256` still allows NULL.
+- `storage_key` must be nonblank after trim when present.
+- `storage_key` still allows NULL.
+- Raw `storage_key` values are unique when present; the constraint allows multiple NULL rows and rejects duplicate non-NULL raw keys.
+
+This is a nullable-safe constraints step only. It does not complete production backfill, does not make `storage_key` or `checksum_sha256` NOT NULL, and does not remove the legacy derived-key fallback.
+
 ## Orphan audit status
 
 The first audit-only orphan object phase is merged on `main`: `0cb1dcd` (`0cb1dcd6ebbdcf525d7424cd9a2caef2e3be1d74`) with the merge record `7d2acc2883ce65da4cdc9166370d0203fffd4aef`.
@@ -107,7 +121,8 @@ Before enabling `ASSET_LOCK_ATTACHMENT_STORAGE_PROVIDER=s3` in production:
 
 ## Known operational risks
 
-- Existing or legacy `asset_attachments` rows can have nullable `storage_key` and `checksum_sha256`. Backfill and schema tightening are still future work before these fields can be made not-null or constrained more aggressively.
+- Existing or legacy `asset_attachments` rows can have nullable `storage_key` and `checksum_sha256`. Nullable-safe check constraints and raw `storage_key` uniqueness are merged, so check/unique tightening is not wholly pending, but NOT NULL tightening remains future work.
+- Production backfill has not actually been executed. Legacy nullable rows can still exist until a production backfill is planned, run, and verified.
 - Legacy derived-key fallback is intentional while nullable historical rows exist. Removing it requires a completed backfill and a migration plan.
 - Orphan object audit-only support exists, but orphan cleanup/delete is not complete. Failed metadata writes attempt compensating storage delete, and failed S3 verification attempts best-effort cleanup, but periodic object-store reconciliation still needs a scheduler or explicit operational entrypoint.
 - Production S3/MinIO integration testing is not part of the default CI path yet. It should remain opt-in because it requires external object-store configuration and credentials.

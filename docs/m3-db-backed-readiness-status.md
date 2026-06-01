@@ -17,6 +17,7 @@ The current `main` baseline includes DB-backed prototype coverage for these area
 - Request-scoped actor derivation through a signed HttpOnly workspace session cookie, with user existence revalidated against the overlaid workspace snapshot on each protected request.
 - Asset attachment metadata stored in DB, with attachment bytes behind a local or explicit S3-compatible storage provider abstraction.
 - Asset attachment storage metadata is persisted as nullable `storage_key` / `checksum_sha256` sidecar data in the repository layer, without exposing those storage internals through the domain model or API response.
+- Asset attachment storage metadata nullable-safe constraints are merged on `main`: `477f8432792726b4c05145cfa07815270195056b` records `d95cbd7 Add asset attachment storage metadata constraints`, including the lowercase 64-character hex check for non-NULL `checksum_sha256`, trim-nonblank check for non-NULL `storage_key`, and raw `storage_key` uniqueness that allows multiple NULL rows while rejecting duplicate non-NULL keys.
 - Attachment download reads use the persisted storage key when present, preserve a legacy derived-key fallback, and verify byte size/checksum integrity.
 - Attachment routes now use a storage-error allowlist mapper with stable fallback behavior for unknown provider, S3, and raw storage errors; storage verification failures map to a stable `502`.
 - Attachment uploads verify storage writes: local storage checks stat size, and S3-compatible storage sends checksum metadata on `PutObject` and verifies `HeadObject` `ContentLength` plus checksum metadata.
@@ -30,14 +31,14 @@ The project must not claim a formal backend-ready state yet. Current blockers:
 
 - `workspace-session` now has request-scoped signed cookie actor derivation, but remains a prototype user selector. It is not a formal auth implementation with passwords, OAuth, account lifecycle, CSRF policy, revocation, or admin controls.
 - Auth/scope admin writes are narrow and DB-backed, but still do not constitute a formal product account-management system. Self-registration remains prototype-only and is not wired to the admin API.
-- Attachment bytes can use an S3-compatible provider and now persist nullable storage key/checksum metadata with read-path and upload verification checks. Orphan audit-only support exists, but historical object backfill, schema tightening, production object-store integration, orphan cleanup/delete, and production scheduler/CLI/API entrypoints remain future work.
+- Attachment bytes can use an S3-compatible provider and now persist nullable storage key/checksum metadata with read-path, upload verification, and nullable-safe check/unique constraints. This no longer means all check/unique tightening is pending, but `storage_key` / `checksum_sha256` remain nullable, NOT NULL tightening is not complete, production backfill has not actually been executed, legacy nullable rows and derived-key fallback remain, and production object-store integration, orphan cleanup/delete, and production scheduler/CLI/API entrypoints remain future work.
 - Smoke coverage is still mostly happy path and does not substitute for broader runtime, permission, failure-mode, object-storage, CSRF, audit, or browser/manual coverage.
 
 ## Current gate line
 
 The real disposable-Postgres `db:smoke` gate has passed in GitHub Actions after the orphan audit-only merge. Remote run `26704014543` completed successfully for `7d2acc2883ce65da4cdc9166370d0203fffd4aef`.
 
-The orphan audit-only implementation is merged on `main`: `0cb1dcd` (`0cb1dcd6ebbdcf525d7424cd9a2caef2e3be1d74`) with merge record `7d2acc2883ce65da4cdc9166370d0203fffd4aef`. This does not complete cleanup/delete automation or make the project formally backend-ready.
+The orphan audit-only implementation is merged on `main`: `0cb1dcd` (`0cb1dcd6ebbdcf525d7424cd9a2caef2e3be1d74`) with merge record `7d2acc2883ce65da4cdc9166370d0203fffd4aef`. The nullable-safe storage metadata constraints implementation is also merged on `main`: `d95cbd7` (`d95cbd7ed3750343f86d3fdcfc305bd1d20e4d30`) with merge record `477f8432792726b4c05145cfa07815270195056b`. These do not complete production backfill, NOT NULL tightening, cleanup/delete automation, or make the project formally backend-ready.
 
 Local `db:smoke` was not run for this readiness refresh. It still requires an explicit disposable `TEST_DATABASE_URL`; do not run it against shared, staging, production, or durable local data.
 
@@ -59,7 +60,7 @@ The next DB-backed work should focus on hardening the production-facing contract
 
 - Add browser-level/manual or automated coverage for the DB/server-owned dashboard admin flows: create/update/archive project, save member roles, save permissions, and assign episodes.
 - Define the next auth/session hardening contract: CSRF posture, session revocation/rotation, audit fields, and the boundary between prototype user selection and formal account lifecycle.
-- Plan historical object backfill plus schema tightening for attachment storage metadata, including when to move `storage_key` / `checksum_sha256` from nullable sidecar fields toward not-null/check/unique constraints.
+- Plan and execute production backfill for attachment storage metadata, then separately plan NOT NULL tightening for `storage_key` / `checksum_sha256`. Nullable-safe check constraints and raw `storage_key` uniqueness are already merged, but the fields remain nullable and legacy derived-key fallback still exists.
 - Complete production object-store integration and opt-in S3/MinIO integration tests before relying on object storage in production.
 - Complete orphan object cleanup/delete plus production scheduler or explicit CLI/API entrypoints; audit-only support is already present, cleanup is not.
 - Add browser/manual failure-mode coverage for attachment upload, download, storage-provider errors, integrity failures, and verification failures.
